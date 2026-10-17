@@ -76,6 +76,19 @@ target_include_directories(SKRAuth PUBLIC
 )
 target_link_libraries(SKRAuth PRIVATE SKRShared)
 
+# --- Ops Library (health, keys, audit, incident response) ---
+add_library(SKROps STATIC
+  services/ops/health.cpp
+  services/ops/key_manager.cpp
+  services/ops/audit_log.cpp
+  services/ops/incident_response.cpp
+)
+target_include_directories(SKROps PUBLIC
+  ${CMAKE_SOURCE_DIR}/services
+  ${CMAKE_SOURCE_DIR}/shared
+)
+target_link_libraries(SKROps PRIVATE SKRShared)
+
 # --- Unit Tests ---
 add_executable(SKRTests
   tests/unit/test_main.cpp
@@ -83,8 +96,18 @@ add_executable(SKRTests
 target_include_directories(SKRTests PRIVATE ${CMAKE_SOURCE_DIR}/shared)
 target_link_libraries(SKRTests PRIVATE SKRShared bcrypt)
 
+# --- Ops Unit Tests ---
+add_executable(SKROpsTests
+  tests/unit/test_ops.cpp
+)
+target_include_directories(SKROpsTests PRIVATE
+  ${CMAKE_SOURCE_DIR}/services
+  ${CMAKE_SOURCE_DIR}/shared
+)
+target_link_libraries(SKROpsTests PRIVATE SKROps SKRShared)
+
 if(MSVC)
-  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKRTests)
+  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests)
     target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT)
