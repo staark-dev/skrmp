@@ -10,6 +10,7 @@ const char* LaunchResultToString(LaunchResult r) {
         case LaunchResult::Success:             return "Success";
         case LaunchResult::GtaNotFound:         return "gta_sa.exe not found";
         case LaunchResult::DllNotFound:         return "SKR.Client.dll not found";
+        case LaunchResult::SampNotFound:       return "samp.dll not found";
         case LaunchResult::ProcessCreateFailed: return "CreateProcessW failed";
         case LaunchResult::InjectionFailed:     return "DLL injection failed";
         case LaunchResult::PipeFailed:          return "Named pipe IPC failed";
@@ -78,6 +79,8 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
         return LaunchResult::GtaNotFound;
     if (GetFileAttributesW(config.clientDllPath.c_str()) == INVALID_FILE_ATTRIBUTES)
         return LaunchResult::DllNotFound;
+    if (GetFileAttributesW(config.sampDllPath.c_str()) == INVALID_FILE_ATTRIBUTES)
+        return LaunchResult::SampNotFound;
 
     // Extract working directory from gta_sa.exe path
     std::wstring workDir = config.gtaSaPath;
@@ -85,10 +88,16 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
     if (pos != std::wstring::npos)
         workDir.resize(pos);
 
-    // Build command line — gta_sa.exe with server connection params
-    // The client DLL reads these from the process environment or named pipe,
-    // but we pass the server address as a command line hint for open.mp compatibility.
-    std::wstring cmdLine = L"\"" + config.gtaSaPath + L"\"";
+    // SA-MP's samp.dll reads these command line args for auto-connect:
+    //   -c         = connect mode
+    //   -h <IP>    = server address
+    //   -p <PORT>  = server port
+    //   -n <NAME>  = player name
+    //   -z         = close on disconnect
+    std::wstring cmdLine = L"\"" + config.gtaSaPath + L"\""
+        + L" -c -h " + config.serverAddress
+        + L" -p " + std::to_wstring(config.serverPort)
+        + L" -n " + config.playerName;
 
     // Create process in SUSPENDED state
     STARTUPINFOW si{};
@@ -111,7 +120,16 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
 
     pidOut = pi.dwProcessId;
 
-    // Inject SKR.Client.dll while process is suspended
+    // Inject samp.dll first — it provides RakNet networking to the open.mp server
+    HMODULE remoteSamp = InjectDll(pi.hProcess, config.sampDllPath.c_str());
+    if (!remoteSamp) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return LaunchResult::SampNotFound;
+    }
+
+    // Inject SKR.Client.dll — our intro, AC, CEF overlay
     HMODULE remoteModule = InjectDll(pi.hProcess, config.clientDllPath.c_str());
     if (!remoteModule) {
         TerminateProcess(pi.hProcess, 1);

@@ -77,6 +77,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     skr::launcher::LaunchConfig config;
     config.gtaSaPath = gtaPath;
     config.clientDllPath = clientDll;
+    config.sampDllPath = baseDir + L"\\samp.dll";
     config.serverAddress = L"127.0.0.1";
     config.serverPort = 7777;
     config.playerName = L"SKR_Player";
