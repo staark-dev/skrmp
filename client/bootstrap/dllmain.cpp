@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <atomic>
 #include "render-d3d9/d3d9_hook.h"
+#include "samp-hooks/samp_hooks.h"
 #include "skrac/mock_adapter.h"
 #include "skrac/ac_policy.h"
 #include "ipc/launch_params.h"
@@ -25,6 +26,8 @@ extern "C" __declspec(dllexport) BOOL __cdecl SkrInitialize() noexcept {
         started.store(false);
         return FALSE;
     }
+
+    skr::samp_hooks::InstallSampHooks();
 
     static skr::ac::PolicyConfig config{};
     config.mode = skr::ac::AcEnforcement::Development;
@@ -57,6 +60,7 @@ extern "C" __declspec(dllexport) void __cdecl SkrShutdown() noexcept {
         g_acPolicy->Shutdown();
         g_acPolicy = nullptr;
     }
+    skr::samp_hooks::RemoveSampHooks();
     skr::render::RemoveD3D9Hooks();
     started.store(false);
 }

@@ -59,6 +59,7 @@ add_library(SKRClient SHARED
   client/cef-bridge/cef_plugin_exports.cpp
   client/compatibility/compat_profile.cpp
   client/transport/auth_client.cpp
+  client/samp-hooks/samp_hooks.cpp
 )
 set_target_properties(SKRClient PROPERTIES
   OUTPUT_NAME "SKR.Client" PREFIX ""
