@@ -12,14 +12,27 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# --- libsodium (pre-built, x86 static) ---
+set(SODIUM_ROOT "${CMAKE_SOURCE_DIR}/deps/libsodium")
+add_library(sodium STATIC IMPORTED)
+set_target_properties(sodium PROPERTIES
+  IMPORTED_LOCATION_DEBUG            "${SODIUM_ROOT}/Win32/Debug/v143/static/libsodium.lib"
+  IMPORTED_LOCATION_RELEASE          "${SODIUM_ROOT}/Win32/Release/v143/static/libsodium.lib"
+  IMPORTED_LOCATION_RELWITHDEBINFO   "${SODIUM_ROOT}/Win32/Release/v143/static/libsodium.lib"
+  IMPORTED_LOCATION_MINSIZEREL       "${SODIUM_ROOT}/Win32/Release/v143/static/libsodium.lib"
+  INTERFACE_INCLUDE_DIRECTORIES      "${SODIUM_ROOT}/include"
+  INTERFACE_COMPILE_DEFINITIONS      "SODIUM_STATIC"
+)
+
 # --- Shared library (protocol, crypto, updater) ---
 add_library(SKRShared STATIC
   shared/crypto/crypto.cpp
+  shared/crypto/ed25519_provider.cpp
   shared/updater/manifest.cpp
   shared/updater/release_gate.cpp
 )
 target_include_directories(SKRShared PUBLIC ${CMAKE_SOURCE_DIR}/shared)
-target_link_libraries(SKRShared PRIVATE bcrypt)
+target_link_libraries(SKRShared PRIVATE bcrypt sodium)
 
 # --- Launcher (with updater + inventory) ---
 add_executable(SKRLauncher WIN32
@@ -94,7 +107,7 @@ add_executable(SKRTests
   tests/unit/test_main.cpp
 )
 target_include_directories(SKRTests PRIVATE ${CMAKE_SOURCE_DIR}/shared)
-target_link_libraries(SKRTests PRIVATE SKRShared bcrypt)
+target_link_libraries(SKRTests PRIVATE SKRShared bcrypt sodium)
 
 # --- Ops Unit Tests ---
 add_executable(SKROpsTests

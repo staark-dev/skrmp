@@ -27,6 +27,7 @@ desktop.ini
 # Dependencies (cloned separately)
 third_party/
 deps/
+server-build/
 
 # Secrets
 *.key

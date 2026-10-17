@@ -38,4 +38,17 @@ public:
     bool RandomBytes(uint8_t* out, size_t len) override;
 };
 
+// Production Ed25519 provider backed by libsodium.
+class Ed25519Provider final : public ISigningProvider {
+public:
+    bool GenerateKeyPair(KeyPair& out) override;
+    bool Sign(const uint8_t privateKey[kKeySize],
+              const uint8_t* message, size_t messageLen,
+              uint8_t signature[kSignatureSize]) override;
+    bool Verify(const uint8_t publicKey[kKeySize],
+                const uint8_t* message, size_t messageLen,
+                const uint8_t signature[kSignatureSize]) override;
+    bool RandomBytes(uint8_t* out, size_t len) override;
+};
+
 } // namespace skr::crypto

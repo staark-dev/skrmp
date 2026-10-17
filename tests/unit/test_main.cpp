@@ -261,6 +261,80 @@ static bool test_channel_parsing() {
 }
 
 // ==========================================================
+// Ed25519 tests (production crypto)
+// ==========================================================
+
+static bool test_ed25519_sign_verify_roundtrip() {
+    crypto::Ed25519Provider ed;
+    crypto::KeyPair kp{};
+    if (!ed.GenerateKeyPair(kp)) return false;
+
+    uint8_t msg[] = "ed25519 test message";
+    uint8_t sig[crypto::kSignatureSize]{};
+    if (!ed.Sign(kp.privateKey, msg, sizeof(msg) - 1, sig)) return false;
+    return ed.Verify(kp.publicKey, msg, sizeof(msg) - 1, sig);
+}
+
+static bool test_ed25519_rejects_tampered() {
+    crypto::Ed25519Provider ed;
+    crypto::KeyPair kp{};
+    if (!ed.GenerateKeyPair(kp)) return false;
+
+    uint8_t msg[] = "original message";
+    uint8_t sig[crypto::kSignatureSize]{};
+    if (!ed.Sign(kp.privateKey, msg, sizeof(msg) - 1, sig)) return false;
+
+    uint8_t tampered[] = "tampered message";
+    return !ed.Verify(kp.publicKey, tampered, sizeof(tampered) - 1, sig);
+}
+
+static bool test_ed25519_rejects_wrong_key() {
+    crypto::Ed25519Provider ed;
+    crypto::KeyPair kp1{}, kp2{};
+    if (!ed.GenerateKeyPair(kp1)) return false;
+    if (!ed.GenerateKeyPair(kp2)) return false;
+
+    uint8_t msg[] = "cross-key test";
+    uint8_t sig[crypto::kSignatureSize]{};
+    if (!ed.Sign(kp1.privateKey, msg, sizeof(msg) - 1, sig)) return false;
+    return !ed.Verify(kp2.publicKey, msg, sizeof(msg) - 1, sig);
+}
+
+static bool test_ed25519_rejects_tampered_signature() {
+    crypto::Ed25519Provider ed;
+    crypto::KeyPair kp{};
+    if (!ed.GenerateKeyPair(kp)) return false;
+
+    uint8_t msg[] = "sig tamper test";
+    uint8_t sig[crypto::kSignatureSize]{};
+    if (!ed.Sign(kp.privateKey, msg, sizeof(msg) - 1, sig)) return false;
+
+    sig[0] ^= 0x01;
+    return !ed.Verify(kp.publicKey, msg, sizeof(msg) - 1, sig);
+}
+
+static bool test_ed25519_random_bytes() {
+    crypto::Ed25519Provider ed;
+    uint8_t buf[32]{};
+    if (!ed.RandomBytes(buf, 32)) return false;
+    for (int i = 0; i < 32; ++i)
+        if (buf[i] != 0) return true;
+    return false;
+}
+
+static bool test_ed25519_deterministic_signatures() {
+    crypto::Ed25519Provider ed;
+    crypto::KeyPair kp{};
+    if (!ed.GenerateKeyPair(kp)) return false;
+
+    uint8_t msg[] = "determinism check";
+    uint8_t sig1[crypto::kSignatureSize]{}, sig2[crypto::kSignatureSize]{};
+    if (!ed.Sign(kp.privateKey, msg, sizeof(msg) - 1, sig1)) return false;
+    if (!ed.Sign(kp.privateKey, msg, sizeof(msg) - 1, sig2)) return false;
+    return memcmp(sig1, sig2, crypto::kSignatureSize) == 0;
+}
+
+// ==========================================================
 
 int main() {
     printf("=== SKR Client Unit Tests ===\n\n");
@@ -269,7 +343,7 @@ int main() {
     RUN_TEST(test_transcript_deterministic);
     RUN_TEST(test_transcript_changes_with_nonce);
 
-    printf("\n[Crypto]\n");
+    printf("\n[Crypto - Mock]\n");
     RUN_TEST(test_sign_verify_roundtrip);
     RUN_TEST(test_rejects_tampered_message);
     RUN_TEST(test_rejects_wrong_key);
@@ -283,6 +357,14 @@ int main() {
     RUN_TEST(test_manifest_roundtrip);
     RUN_TEST(test_manifest_rejects_truncated);
     RUN_TEST(test_manifest_rejects_zero_hash);
+
+    printf("\n[Crypto - Ed25519]\n");
+    RUN_TEST(test_ed25519_sign_verify_roundtrip);
+    RUN_TEST(test_ed25519_rejects_tampered);
+    RUN_TEST(test_ed25519_rejects_wrong_key);
+    RUN_TEST(test_ed25519_rejects_tampered_signature);
+    RUN_TEST(test_ed25519_random_bytes);
+    RUN_TEST(test_ed25519_deterministic_signatures);
 
     printf("\n[Release Gate]\n");
     RUN_TEST(test_version_parse_valid);
