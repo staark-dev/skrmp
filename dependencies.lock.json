@@ -1,0 +1,71 @@
+{
+  "$schema": "SKR dependency lockfile — all fields required for release; UNKNOWN values are blocking.",
+  "locked_at": "2026-10-17T00:00:00Z",
+  "dependencies": [
+    {
+      "name": "open.mp-server",
+      "repository": "https://github.com/openmultiplayer/open.mp",
+      "commit": "UNKNOWN — select and pin before M1 exit",
+      "version": "UNKNOWN",
+      "archive_url": "UNKNOWN",
+      "archive_sha256": "UNKNOWN",
+      "architecture": "UNKNOWN — verify server arch",
+      "toolchain": "UNKNOWN",
+      "license": "MPL-2.0"
+    },
+    {
+      "name": "open.mp-sdk",
+      "repository": "https://github.com/openmultiplayer/open.mp-sdk",
+      "commit": "UNKNOWN — select and pin before M1 exit",
+      "version": "UNKNOWN",
+      "archive_url": "UNKNOWN",
+      "archive_sha256": "UNKNOWN",
+      "architecture": "N/A (headers)",
+      "toolchain": "CMake",
+      "license": "MIT"
+    },
+    {
+      "name": "samp-cef",
+      "repository": "https://github.com/zottce/samp-cef",
+      "commit": "UNKNOWN — inspect Cargo.lock and build scripts at chosen commit",
+      "version": "UNKNOWN",
+      "archive_url": "UNKNOWN",
+      "archive_sha256": "UNKNOWN",
+      "architecture": "x86 (client plugin)",
+      "toolchain": "Rust + CEF — verify versions at chosen commit",
+      "license": "GPL-3.0"
+    },
+    {
+      "name": "cef-binary",
+      "source": "https://cef-builds.spotifycdn.com/index.html",
+      "version": "UNKNOWN — determined by samp-cef commit",
+      "archive_url": "UNKNOWN",
+      "archive_sha256": "UNKNOWN",
+      "architecture": "UNKNOWN — verify x86 availability",
+      "toolchain": "N/A (prebuilt)",
+      "license": "BSD + dependency notices"
+    },
+    {
+      "name": "plugin-sdk",
+      "repository": "https://github.com/DK22Pac/plugin-sdk",
+      "commit": "UNKNOWN — select and pin",
+      "version": "UNKNOWN",
+      "archive_url": "UNKNOWN",
+      "archive_sha256": "UNKNOWN",
+      "architecture": "x86",
+      "toolchain": "MSVC",
+      "license": "UNKNOWN — verify before linking"
+    },
+    {
+      "name": "ultimate-asi-loader",
+      "repository": "https://github.com/ThirteenAG/Ultimate-ASI-Loader",
+      "commit": "UNKNOWN",
+      "version": "UNKNOWN",
+      "archive_url": "UNKNOWN",
+      "archive_sha256": "UNKNOWN",
+      "architecture": "x86",
+      "toolchain": "N/A (prebuilt)",
+      "license": "UNKNOWN — verify before redistribution"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+# Build
+out/
+build/
+cmake-build-*/
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.asi
+
+# IDE
+.vs/
+.vscode/
+*.vcxproj.user
+CMakeSettings.json
+CMakeUserPresets.json
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Dependencies (cloned separately)
+third_party/
+
+# Secrets
+*.key
+*.pem
+*.pfx
+.env
+.env.*
