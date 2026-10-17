@@ -22,7 +22,7 @@ add_library(SKRClient SHARED
   client/skrac/mock_adapter.cpp
 )
 set_target_properties(SKRClient PROPERTIES
-  OUTPUT_NAME "SKR.Client" PREFIX "" SUFFIX ".asi"
+  OUTPUT_NAME "SKR.Client" PREFIX ""
 )
 target_include_directories(SKRClient PRIVATE
   ${CMAKE_SOURCE_DIR}/client
