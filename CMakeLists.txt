@@ -24,6 +24,7 @@ add_library(SKRClient SHARED
   client/render-d3d9/d3d9_hook.cpp
   client/cef-bridge/cef_bridge.cpp
   client/cef-bridge/cef_plugin_exports.cpp
+  client/compatibility/r2_adapter.cpp
 )
 set_target_properties(SKRClient PROPERTIES
   OUTPUT_NAME "SKR.Client" PREFIX ""
