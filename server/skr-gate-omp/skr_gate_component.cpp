@@ -169,6 +169,14 @@ void SkrGateComponent::RejectPlayer(int playerId, const char* reason) {
     if (core_) {
         core_->printLn("SKR Gate: player %d rejected (%s)", playerId,
                        reason ? reason : "unknown");
+
+        // Send reject message and kick
+        auto* player = core_->getPlayers().get(playerId);
+        if (player) {
+            player->sendClientMessage(Colour::FromRGBA(0xFF0000FF),
+                "This server requires SKR Client.");
+            player->kick();
+        }
     }
 }
 

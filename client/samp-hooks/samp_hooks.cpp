@@ -41,6 +41,16 @@ static constexpr StringPatch kPatches[] = {
     {"\\screens\\sa-mp-%03i.png",        "\\screens\\skr-%03i.png"},
     {"Screenshot Taken - sa-mp-%03i.png", "Screenshot Taken - skr-%03i.png"},
 
+    // Connection rejected messages
+    {"CONNECTION REJECTED: Unable to allocate a player slot.",
+     "Connection rejected: server full."},
+    {"CONNECTION REJECTED: Bad mod version.",
+     "Connection rejected: version mismatch."},
+    {"CONNECTION REJECTED: Unacceptable NickName",
+     "Connection rejected: invalid nickname."},
+    {"CONNECTION REJECTED: Incorrect Version.",
+     "Connection rejected: version mismatch."},
+
     // Window title
     {"GTA:SA:MP",              "GTA:SKR"},
 };
