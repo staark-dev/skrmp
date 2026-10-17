@@ -20,12 +20,24 @@ struct PlayerSession {
     uint32_t accountId = 0;       // set after authorization
     bool gameplayAllowed = false;
 
+    // AC heartbeat tracking
+    uint32_t lastAcBeatSeq = 0;
+    uint64_t lastAcBeatMs = 0;
+    uint32_t missedAcBeats = 0;
+    uint8_t  lastAcState = 0;     // AcState from client
+    uint8_t  lastAcVerdict = 0;   // AcVerdict from client
+
     void Reset() {
         state = protocol::GateState::Connected;
         generation = 0;
         expiresAt = 0;
         accountId = 0;
         gameplayAllowed = false;
+        lastAcBeatSeq = 0;
+        lastAcBeatMs = 0;
+        missedAcBeats = 0;
+        lastAcState = 0;
+        lastAcVerdict = 0;
         memset(nonce, 0, protocol::kNonceSize);
     }
 };
@@ -54,6 +66,12 @@ public:
     // Query state
     const PlayerSession* GetSession(uint16_t playerId) const;
     bool IsAuthorized(uint16_t playerId) const;
+
+    // Process AC heartbeat from authorized client.
+    // Returns action: 0 = continue, 1 = warn, 2 = disconnect.
+    uint8_t OnAcHeartbeat(uint16_t playerId,
+                          const protocol::AcHeartbeatMessage& beat,
+                          uint64_t nowMs);
 
     // Called on disconnect.
     void OnPlayerDisconnect(uint16_t playerId);

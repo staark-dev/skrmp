@@ -110,13 +110,60 @@ void SkrGate::OnRedeemResult(uint16_t playerId, bool valid, uint32_t accountId) 
     }
 }
 
+uint8_t SkrGate::OnAcHeartbeat(uint16_t playerId,
+                                const protocol::AcHeartbeatMessage& beat,
+                                uint64_t nowMs) {
+    if (playerId >= kMaxPlayers) return 2;
+    auto& session = sessions_[playerId];
+
+    if (session.state != protocol::GateState::Authorized) return 2;
+
+    if (beat.version != protocol::kProtocolVersion) return 1;
+
+    // Sequence must advance
+    if (beat.sequence <= session.lastAcBeatSeq && session.lastAcBeatSeq > 0)
+        return 1;
+
+    session.lastAcBeatSeq = beat.sequence;
+    session.lastAcBeatMs = nowMs;
+    session.missedAcBeats = 0;
+    session.lastAcState = beat.acState;
+    session.lastAcVerdict = beat.acVerdict;
+
+    // AC reported failure → disconnect
+    if (beat.acState == 4) { // AcState::Failed
+        Reject(playerId, protocol::AuthError::AcRequired);
+        return 2;
+    }
+
+    // AC detected something → warn (server decides separately on ban)
+    if (beat.acVerdict == 2) // AcVerdict::Detected
+        return 1;
+
+    return 0; // continue
+}
+
 void SkrGate::Tick(uint64_t nowUnix) {
+    uint64_t nowMs = nowUnix * 1000;
+
     for (uint16_t i = 0; i < kMaxPlayers; ++i) {
         auto& s = sessions_[i];
+
+        // Expire pending auth
         if (s.state == protocol::GateState::Challenged ||
             s.state == protocol::GateState::Verifying) {
             if (nowUnix > s.expiresAt + protocol::kVerifyTimeoutSec) {
                 Reject(i, protocol::AuthError::TicketExpired);
+            }
+        }
+
+        // Check AC heartbeat timeout for authorized players
+        if (s.state == protocol::GateState::Authorized && s.lastAcBeatMs > 0) {
+            if (nowMs - s.lastAcBeatMs > protocol::kAcHeartbeatTimeoutMs) {
+                ++s.missedAcBeats;
+                if (s.missedAcBeats >= protocol::kAcMaxMissedBeats) {
+                    Reject(i, protocol::AuthError::AcRequired);
+                }
             }
         }
     }

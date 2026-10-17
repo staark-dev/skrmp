@@ -66,7 +66,27 @@ struct ResultMessage {
     uint8_t error_code;   // AuthError
 };
 
+// AC heartbeat sent periodically by authorized clients
+struct AcHeartbeatMessage {
+    uint16_t version;
+    uint32_t sequence;
+    uint64_t timestampMs;
+    uint8_t  acState;     // AcState enum value
+    uint8_t  acVerdict;   // AcVerdict enum value (from latest check)
+};
+
+// Server response to AC heartbeat
+struct AcHeartbeatAck {
+    uint16_t version;
+    uint32_t sequence;
+    uint8_t  action;      // 0 = continue, 1 = warn, 2 = disconnect
+};
+
 #pragma pack(pop)
+
+constexpr uint32_t kAcHeartbeatIntervalMs = 5000;
+constexpr uint32_t kAcHeartbeatTimeoutMs  = 15000;
+constexpr uint32_t kAcMaxMissedBeats      = 3;
 
 // Canonical transcript for signing (matches master plan section 9.3)
 // "SKR-JOIN-v1" || protocol_u16_be ||

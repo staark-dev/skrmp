@@ -27,6 +27,8 @@ target_link_libraries(SKRLauncher PRIVATE user32)
 add_library(SKRClient SHARED
   client/bootstrap/dllmain.cpp
   client/skrac/mock_adapter.cpp
+  client/skrac/external_adapter.cpp
+  client/skrac/ac_policy.cpp
   client/render-d3d9/intro_renderer.cpp
   client/render-d3d9/d3d9_hook.cpp
   client/cef-bridge/cef_bridge.cpp
@@ -65,6 +67,7 @@ target_link_libraries(SKRAuth PRIVATE SKRShared)
 
 if(MSVC)
   foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth)
+    target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT)
   endforeach()
