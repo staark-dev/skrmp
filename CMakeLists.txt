@@ -12,10 +12,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# --- Shared library (protocol, crypto, updater manifest) ---
+# --- Shared library (protocol, crypto, updater) ---
 add_library(SKRShared STATIC
   shared/crypto/crypto.cpp
   shared/updater/manifest.cpp
+  shared/updater/release_gate.cpp
 )
 target_include_directories(SKRShared PUBLIC ${CMAKE_SOURCE_DIR}/shared)
 target_link_libraries(SKRShared PRIVATE bcrypt)
@@ -43,6 +44,7 @@ add_library(SKRClient SHARED
   client/cef-bridge/cef_bridge.cpp
   client/cef-bridge/cef_plugin_exports.cpp
   client/compatibility/r2_adapter.cpp
+  client/compatibility/compat_profile.cpp
   client/transport/auth_client.cpp
 )
 set_target_properties(SKRClient PROPERTIES
@@ -74,8 +76,15 @@ target_include_directories(SKRAuth PUBLIC
 )
 target_link_libraries(SKRAuth PRIVATE SKRShared)
 
+# --- Unit Tests ---
+add_executable(SKRTests
+  tests/unit/test_main.cpp
+)
+target_include_directories(SKRTests PRIVATE ${CMAKE_SOURCE_DIR}/shared)
+target_link_libraries(SKRTests PRIVATE SKRShared bcrypt)
+
 if(MSVC)
-  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth)
+  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKRTests)
     target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT)
