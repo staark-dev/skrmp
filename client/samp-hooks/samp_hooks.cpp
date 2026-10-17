@@ -25,19 +25,19 @@ struct StringPatch {
 };
 
 static constexpr StringPatch kPatches[] = {
-    // "SA-MP 0.3.7-R5 Started" — the version string is formatted with
-    // sprintf("SA-MP %s Started", version). We patch the format string.
-    {"SA-MP %s Started",       "SKR Client Started"},
+    // The actual "Started" string includes SA-MP color codes:
+    // {FFFFFF}SA-MP {B9C9BF}0.3.7-R5 {FFFFFF}Started
+    {"{FFFFFF}SA-MP {B9C9BF}0.3.7-R5 {FFFFFF}Started",
+     "{FFFFFF}SKR {B9C9BF}Client R1 {FFFFFF}Started"},
 
-    // Connection messages (format strings in samp.dll .rdata)
+    // Connection messages
     {"Connecting to %s:%d...", "SKR: Connecting..."},
     {"Connected. Joining the game...", "SKR: Joining server..."},
 
-    // The session name initialised in CNetGame constructor
-    // (CNetGame+0x131 = "SA-MP", 5 bytes)
-    // This shows in server browser / title areas
+    // SA-MP 0.3.7-R5 (plain, used in various places)
+    {"SA-MP 0.3.7-R5",         "SKR Client"},
 
-    // Window title set by GTA_SubclassMainWindow
+    // Window title
     {"GTA:SA:MP",              "GTA:SKR"},
 };
 
