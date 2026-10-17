@@ -12,6 +12,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# --- Shared library (protocol, crypto) ---
+add_library(SKRShared STATIC
+  shared/crypto/crypto.cpp
+)
+target_include_directories(SKRShared PUBLIC ${CMAKE_SOURCE_DIR}/shared)
+target_link_libraries(SKRShared PRIVATE bcrypt)
+
 # --- Launcher ---
 add_executable(SKRLauncher WIN32 apps/launcher/main.cpp)
 target_link_libraries(SKRLauncher PRIVATE user32)
@@ -25,6 +32,7 @@ add_library(SKRClient SHARED
   client/cef-bridge/cef_bridge.cpp
   client/cef-bridge/cef_plugin_exports.cpp
   client/compatibility/r2_adapter.cpp
+  client/transport/auth_client.cpp
 )
 set_target_properties(SKRClient PROPERTIES
   OUTPUT_NAME "SKR.Client" PREFIX ""
@@ -33,10 +41,30 @@ target_include_directories(SKRClient PRIVATE
   ${CMAKE_SOURCE_DIR}/client
   ${CMAKE_SOURCE_DIR}/shared
 )
-target_link_libraries(SKRClient PRIVATE d3d9)
+target_link_libraries(SKRClient PRIVATE d3d9 SKRShared)
+
+# --- SKR Gate (server component library) ---
+add_library(SKRGate STATIC
+  server/skr-gate/gate.cpp
+)
+target_include_directories(SKRGate PUBLIC
+  ${CMAKE_SOURCE_DIR}/server/skr-gate
+  ${CMAKE_SOURCE_DIR}/shared
+)
+target_link_libraries(SKRGate PRIVATE SKRShared)
+
+# --- Auth Service (development stub) ---
+add_library(SKRAuth STATIC
+  services/auth/auth_service.cpp
+)
+target_include_directories(SKRAuth PUBLIC
+  ${CMAKE_SOURCE_DIR}/services/auth
+  ${CMAKE_SOURCE_DIR}/shared
+)
+target_link_libraries(SKRAuth PRIVATE SKRShared)
 
 if(MSVC)
-  foreach(target SKRLauncher SKRClient)
+  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth)
     target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT)
   endforeach()
