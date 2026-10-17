@@ -106,8 +106,30 @@ target_include_directories(SKROpsTests PRIVATE
 )
 target_link_libraries(SKROpsTests PRIVATE SKROps SKRShared)
 
+# --- Localhost Test Server ---
+add_executable(SKRTestServer
+  tools/test_server/main.cpp
+  tools/test_server/test_server.cpp
+)
+target_include_directories(SKRTestServer PRIVATE
+  ${CMAKE_SOURCE_DIR}/tools/test_server
+  ${CMAKE_SOURCE_DIR}/shared
+  ${CMAKE_SOURCE_DIR}/services/auth
+  ${CMAKE_SOURCE_DIR}/server/skr-gate
+)
+target_link_libraries(SKRTestServer PRIVATE SKRShared SKRGate SKRAuth ws2_32)
+
+# --- Smoke Test Client ---
+add_executable(SKRSmokeClient
+  tools/smoke_client/smoke_client.cpp
+)
+target_include_directories(SKRSmokeClient PRIVATE
+  ${CMAKE_SOURCE_DIR}/shared
+)
+target_link_libraries(SKRSmokeClient PRIVATE SKRShared ws2_32)
+
 if(MSVC)
-  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests)
+  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests SKRTestServer SKRSmokeClient)
     target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT)
