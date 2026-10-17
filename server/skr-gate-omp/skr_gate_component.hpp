@@ -1,0 +1,100 @@
+#pragma once
+
+#include <sdk.hpp>
+#include "protocol/messages.h"
+#include "crypto/crypto.h"
+
+#include <cstdint>
+#include <cstring>
+#include <ctime>
+#include <unordered_map>
+#include <mutex>
+
+namespace skr::gate_omp {
+
+enum class SkrPlayerState : uint8_t {
+    Connected,
+    Challenged,
+    Authorized,
+    Rejected
+};
+
+struct SkrPlayerData {
+    SkrPlayerState state = SkrPlayerState::Connected;
+    uint8_t connectionId[protocol::kConnectionIdSize]{};
+    uint8_t nonce[protocol::kNonceSize]{};
+    uint64_t generation = 0;
+    uint64_t challengeExpiresAt = 0;
+    uint32_t accountId = 0;
+
+    // AC tracking
+    uint32_t lastAcBeatSeq = 0;
+    uint64_t lastAcBeatMs = 0;
+    uint32_t missedAcBeats = 0;
+
+    void Reset() {
+        state = SkrPlayerState::Connected;
+        generation = 0;
+        challengeExpiresAt = 0;
+        accountId = 0;
+        lastAcBeatSeq = 0;
+        lastAcBeatMs = 0;
+        missedAcBeats = 0;
+        memset(connectionId, 0, protocol::kConnectionIdSize);
+        memset(nonce, 0, protocol::kNonceSize);
+    }
+};
+
+class SkrGateComponent final
+    : public IComponent
+    , public PlayerConnectEventHandler
+{
+public:
+    // Visit https://open.mp/uid to generate a new unique ID.
+    // Using a placeholder UID — replace with a real one from open.mp/uid before production.
+    PROVIDE_UID(0x534B5247); // "SKRG" in hex
+
+    ~SkrGateComponent() override;
+
+    // IComponent
+    StringView componentName() const override { return "SKR Gate"; }
+    SemanticVersion componentVersion() const override { return SemanticVersion(0, 1, 0, 0); }
+
+    void onLoad(ICore* c) override;
+    void onInit(IComponentList* components) override;
+    void onReady() override;
+    void onFree(IComponent* component) override;
+    void free() override;
+    void reset() override;
+
+    // PlayerConnectEventHandler
+    void onIncomingConnection(IPlayer& player, StringView ipAddress, unsigned short port) override;
+    void onPlayerConnect(IPlayer& player) override;
+    void onPlayerDisconnect(IPlayer& player, PeerDisconnectReason reason) override;
+    void onPlayerClientInit(IPlayer& player) override;
+
+    // SKR gate logic
+    bool IssueChallenge(int playerId, protocol::ChallengeMessage& challengeOut);
+    bool VerifyProof(int playerId, const protocol::ProofMessage& proof,
+                     const uint8_t publicKey[crypto::kKeySize]);
+    void AuthorizePlayer(int playerId, uint32_t accountId);
+    void RejectPlayer(int playerId, const char* reason);
+    uint8_t ProcessAcHeartbeat(int playerId, const protocol::AcHeartbeatMessage& beat,
+                                uint64_t nowMs);
+
+    const SkrPlayerData* GetPlayerData(int playerId) const;
+    bool IsAuthorized(int playerId) const;
+
+private:
+    ICore* core_ = nullptr;
+    crypto::MockSigningProvider crypto_;
+
+    mutable std::mutex mutex_;
+    std::unordered_map<int, SkrPlayerData> players_;
+    uint64_t generationCounter_ = 0;
+
+    static constexpr char kServerId[] = "skr-main";
+    static constexpr uint8_t kServerIdLen = 8;
+};
+
+} // namespace skr::gate_omp

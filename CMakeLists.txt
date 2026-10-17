@@ -26,6 +26,7 @@ add_executable(SKRLauncher WIN32
   apps/launcher/main.cpp
   apps/launcher/updater.cpp
   apps/launcher/inventory.cpp
+  apps/launcher/game_launcher.cpp
 )
 target_include_directories(SKRLauncher PRIVATE
   ${CMAKE_SOURCE_DIR}/apps/launcher

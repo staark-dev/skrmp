@@ -1,6 +1,7 @@
 # Build
 out/
 build/
+build-*/
 cmake-build-*/
 *.obj
 *.lib
@@ -25,6 +26,7 @@ desktop.ini
 
 # Dependencies (cloned separately)
 third_party/
+deps/
 
 # Secrets
 *.key
