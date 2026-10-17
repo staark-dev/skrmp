@@ -15,6 +15,7 @@
 
 #include "protocol/messages.h"
 #include "crypto/crypto.h"
+#include "ipc/launch_params.h"
 
 #include <cstdio>
 #include <cstring>
@@ -24,6 +25,7 @@
 // Function pointer types for DLL exports
 typedef BOOL (__cdecl *SkrInitFn)();
 typedef void (__cdecl *SkrShutdownFn)();
+typedef BOOL (__cdecl *SkrGetLaunchParamsFn)(skr::ipc::LaunchParams*);
 
 // Framing (matches test_server)
 enum class MsgType : uint8_t {
@@ -58,13 +60,48 @@ static void Step(const char* name, bool ok) {
 
 // ── Phase 1: DLL load test ───────────────────────────────
 
+// Pipe writer thread — simulates the launcher writing params before DLL init reads them.
+// Runs on a background thread because WriteLaunchParams blocks until the reader connects.
+struct PipeThreadCtx {
+    DWORD pid;
+    skr::ipc::LaunchParams params;
+    bool success;
+};
+
+static DWORD WINAPI PipeWriterThread(LPVOID arg) {
+    auto* ctx = static_cast<PipeThreadCtx*>(arg);
+    ctx->success = skr::ipc::WriteLaunchParams(ctx->pid, ctx->params, 5000);
+    return 0;
+}
+
 static bool TestDllLoad(const wchar_t* dllPath) {
-    printf("\n--- Phase 1: DLL Load ---\n");
+    printf("\n--- Phase 1: DLL Load + IPC ---\n");
+
+    // Prepare pipe params before loading the DLL, so the pipe is ready
+    // when SkrInitialize calls ReadLaunchParams.
+    PipeThreadCtx pipeCtx{};
+    pipeCtx.pid = GetCurrentProcessId();
+    pipeCtx.params.magic   = skr::ipc::kLaunchParamsMagic;
+    pipeCtx.params.version = skr::ipc::kLaunchParamsVersion;
+    strncpy_s(pipeCtx.params.serverAddress, "127.0.0.1", _TRUNCATE);
+    pipeCtx.params.serverPort = 7710;
+    strncpy_s(pipeCtx.params.playerName, "FakePlayer", _TRUNCATE);
+    memset(pipeCtx.params.joinTicket, 0xAB, skr::ipc::kJoinTicketSize);
+    pipeCtx.params.hasJoinTicket = 1;
+    pipeCtx.success = false;
+
+    // Start pipe writer thread (blocks until DLL connects)
+    HANDLE hPipeThread = CreateThread(nullptr, 0, PipeWriterThread, &pipeCtx, 0, nullptr);
+    Step("Pipe writer thread started", hPipeThread != nullptr);
+
+    // Small delay so CreateNamedPipe completes before LoadLibrary triggers init
+    Sleep(50);
 
     HMODULE hMod = LoadLibraryW(dllPath);
     Step("LoadLibraryW(SKR.Client.dll)", hMod != nullptr);
     if (!hMod) {
         printf("    LoadLibrary error: %lu\n", GetLastError());
+        if (hPipeThread) { WaitForSingleObject(hPipeThread, 2000); CloseHandle(hPipeThread); }
         return false;
     }
 
@@ -74,13 +111,41 @@ static bool TestDllLoad(const wchar_t* dllPath) {
     auto shutdownFn = (SkrShutdownFn)GetProcAddress(hMod, "SkrShutdown");
     Step("GetProcAddress(SkrShutdown)", shutdownFn != nullptr);
 
-    // SkrInitialize will fail because there's no D3D9 device — that's expected.
-    // The important thing is the DLL loaded and exports are resolvable.
+    auto getParamsFn = (SkrGetLaunchParamsFn)GetProcAddress(hMod, "SkrGetLaunchParams");
+    Step("GetProcAddress(SkrGetLaunchParams)", getParamsFn != nullptr);
+
+    // SkrInitialize reads pipe → then tries D3D9 (which fails in fake_game)
     if (initFn) {
         BOOL initOk = initFn();
-        // D3D9 hook failure is expected in fake_game (no GPU context)
         printf("    SkrInitialize returned: %s (D3D9 failure expected)\n",
                initOk ? "TRUE" : "FALSE");
+    }
+
+    // Wait for pipe writer to finish
+    if (hPipeThread) {
+        WaitForSingleObject(hPipeThread, 3000);
+        CloseHandle(hPipeThread);
+    }
+    Step("Pipe write completed", pipeCtx.success);
+
+    // Verify launch params were received by the DLL
+    if (getParamsFn) {
+        skr::ipc::LaunchParams received{};
+        BOOL got = getParamsFn(&received);
+        Step("SkrGetLaunchParams() returned data", got == TRUE);
+        if (got) {
+            bool addrOk = strcmp(received.serverAddress, "127.0.0.1") == 0;
+            bool portOk = received.serverPort == 7710;
+            bool nameOk = strcmp(received.playerName, "FakePlayer") == 0;
+            bool ticketOk = received.hasJoinTicket == 1 && received.joinTicket[0] == 0xAB;
+            Step("Server address matches", addrOk);
+            Step("Server port matches", portOk);
+            Step("Player name matches", nameOk);
+            Step("Join ticket matches", ticketOk);
+            if (!addrOk) printf("    got: '%s'\n", received.serverAddress);
+            if (!portOk) printf("    got: %u\n", received.serverPort);
+            if (!nameOk) printf("    got: '%s'\n", received.playerName);
+        }
     }
 
     if (shutdownFn) {

@@ -4,15 +4,22 @@
 #include "render-d3d9/d3d9_hook.h"
 #include "skrac/mock_adapter.h"
 #include "skrac/ac_policy.h"
+#include "ipc/launch_params.h"
 
 namespace {
     std::atomic<bool> started{false};
     skr::ac::MockAcAdapter g_acAdapter;
     skr::ac::AcPolicyEnforcer* g_acPolicy = nullptr;
+    skr::ipc::LaunchParams g_launchParams{};
+    bool g_hasLaunchParams = false;
 }
 
 extern "C" __declspec(dllexport) BOOL __cdecl SkrInitialize() noexcept {
     if (started.exchange(true)) return TRUE;
+
+    // Read launch params from launcher via named pipe.
+    // In fake_game / dev mode this may fail — we continue with defaults.
+    g_hasLaunchParams = skr::ipc::ReadLaunchParams(g_launchParams, 3000);
 
     if (!skr::render::InstallD3D9Hooks()) {
         started.store(false);
@@ -30,6 +37,13 @@ extern "C" __declspec(dllexport) BOOL __cdecl SkrInitialize() noexcept {
         return FALSE;
     }
 
+    return TRUE;
+}
+
+extern "C" __declspec(dllexport) BOOL __cdecl SkrGetLaunchParams(
+    skr::ipc::LaunchParams* out) noexcept {
+    if (!g_hasLaunchParams || !out) return FALSE;
+    *out = g_launchParams;
     return TRUE;
 }
 

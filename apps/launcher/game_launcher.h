@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace skr::launcher {
 
@@ -15,6 +16,7 @@ struct LaunchConfig {
     std::wstring serverAddress;  // e.g. "127.0.0.1"
     uint16_t serverPort = 7777;
     std::wstring playerName;
+    std::vector<uint8_t> joinTicket; // 32 bytes join ticket from backend (empty = no ticket yet)
 };
 
 enum class LaunchResult : uint8_t {
@@ -23,6 +25,7 @@ enum class LaunchResult : uint8_t {
     DllNotFound,
     ProcessCreateFailed,
     InjectionFailed,
+    PipeFailed,
     ResumeThreadFailed
 };
 

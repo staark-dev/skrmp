@@ -1,4 +1,5 @@
 #include "game_launcher.h"
+#include "ipc/launch_params.h"
 #include <cstdio>
 
 namespace skr::launcher {
@@ -10,6 +11,7 @@ const char* LaunchResultToString(LaunchResult r) {
         case LaunchResult::DllNotFound:         return "SKR.Client.dll not found";
         case LaunchResult::ProcessCreateFailed: return "CreateProcessW failed";
         case LaunchResult::InjectionFailed:     return "DLL injection failed";
+        case LaunchResult::PipeFailed:          return "Named pipe IPC failed";
         case LaunchResult::ResumeThreadFailed:  return "ResumeThread failed";
     }
     return "Unknown";
@@ -100,6 +102,33 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
         return LaunchResult::InjectionFailed;
+    }
+
+    // Send launch params to the injected DLL via named pipe.
+    // The DLL's LoadLibrary entry spawns a thread that calls SkrInitialize,
+    // which reads from this pipe before doing anything else.
+    // WriteLaunchParams blocks until the DLL connects and reads.
+    ipc::LaunchParams params{};
+    params.magic   = ipc::kLaunchParamsMagic;
+    params.version = ipc::kLaunchParamsVersion;
+    params.serverPort = config.serverPort;
+
+    // Convert wide strings to UTF-8 for the pipe struct
+    WideCharToMultiByte(CP_UTF8, 0, config.serverAddress.c_str(), -1,
+                        params.serverAddress, sizeof(params.serverAddress), nullptr, nullptr);
+    WideCharToMultiByte(CP_UTF8, 0, config.playerName.c_str(), -1,
+                        params.playerName, sizeof(params.playerName), nullptr, nullptr);
+
+    if (config.joinTicket.size() == ipc::kJoinTicketSize) {
+        memcpy(params.joinTicket, config.joinTicket.data(), ipc::kJoinTicketSize);
+        params.hasJoinTicket = 1;
+    }
+
+    if (!ipc::WriteLaunchParams(pi.dwProcessId, params)) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return LaunchResult::PipeFailed;
     }
 
     // Resume main thread
