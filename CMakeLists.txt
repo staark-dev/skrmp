@@ -12,16 +12,25 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# --- Shared library (protocol, crypto) ---
+# --- Shared library (protocol, crypto, updater manifest) ---
 add_library(SKRShared STATIC
   shared/crypto/crypto.cpp
+  shared/updater/manifest.cpp
 )
 target_include_directories(SKRShared PUBLIC ${CMAKE_SOURCE_DIR}/shared)
 target_link_libraries(SKRShared PRIVATE bcrypt)
 
-# --- Launcher ---
-add_executable(SKRLauncher WIN32 apps/launcher/main.cpp)
-target_link_libraries(SKRLauncher PRIVATE user32)
+# --- Launcher (with updater + inventory) ---
+add_executable(SKRLauncher WIN32
+  apps/launcher/main.cpp
+  apps/launcher/updater.cpp
+  apps/launcher/inventory.cpp
+)
+target_include_directories(SKRLauncher PRIVATE
+  ${CMAKE_SOURCE_DIR}/apps/launcher
+  ${CMAKE_SOURCE_DIR}/shared
+)
+target_link_libraries(SKRLauncher PRIVATE user32 bcrypt SKRShared)
 
 # --- Client DLL (injected by launcher) ---
 add_library(SKRClient SHARED
