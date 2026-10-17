@@ -43,7 +43,6 @@ add_library(SKRClient SHARED
   client/render-d3d9/d3d9_hook.cpp
   client/cef-bridge/cef_bridge.cpp
   client/cef-bridge/cef_plugin_exports.cpp
-  client/compatibility/r2_adapter.cpp
   client/compatibility/compat_profile.cpp
   client/transport/auth_client.cpp
 )
@@ -54,7 +53,7 @@ target_include_directories(SKRClient PRIVATE
   ${CMAKE_SOURCE_DIR}/client
   ${CMAKE_SOURCE_DIR}/shared
 )
-target_link_libraries(SKRClient PRIVATE d3d9 SKRShared)
+target_link_libraries(SKRClient PRIVATE d3d9 version bcrypt SKRShared)
 
 # --- SKR Gate (server component library) ---
 add_library(SKRGate STATIC

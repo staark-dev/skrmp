@@ -46,7 +46,7 @@ struct TestEntry {
 
 struct CompatibilityProfile {
     uint32_t version = 1;
-    char targetConfig[64]{};         // e.g. "samp-037-r2"
+    char targetConfig[64]{};         // e.g. "openmp-native"
     char clientBuild[kMaxVersionStr]{};
     ProfileStatus status = ProfileStatus::Unchecked;
 

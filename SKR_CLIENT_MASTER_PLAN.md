@@ -50,7 +50,7 @@ Verificarea a fost documentară, prin pagini publice ale proiectelor și produc�
 |---|---|
 | [open.mp server](https://github.com/openmultiplayer/open.mp) | Se prezintă ca fiind compatibil cu SA-MP; README separă SDK-ul de headerele interne de rețea, instabile între versiuni. |
 | [open.mp SDK](https://github.com/openmultiplayer/open.mp-sdk) | SDK server; README arată submodule recursive și targetul CMake `OMP-SDK`. Nu este SDK pentru clientul GTA. |
-| [open.mp launcher](https://github.com/openmultiplayer/launcher), [releases](https://github.com/openmultiplayer/launcher/releases) | Referință de lansare și integrare client. Notele de release nu certifică SKR sau samp-cef pe R2. |
+| [open.mp launcher](https://github.com/openmultiplayer/launcher), [releases](https://github.com/openmultiplayer/launcher/releases) | Referință de lansare și integrare client. SKR folosește launcher propriu cu conectare nativă open.mp. |
 | [RakNet open.mp](https://github.com/openmultiplayer/RakNet) | Fork bazat pe RakNet 2.52, modificat pentru interoperabilitatea SA-MP. |
 | [RakNet upstream arhivat](https://github.com/facebookarchive/RakNet) | Referință istorică. Nu presupuneți că o versiune RakNet 4.x înlocuiește protocolul folosit de open.mp. |
 | [samp-cef](https://github.com/zottce/samp-cef), [README](https://github.com/zottce/samp-cef/blob/master/readme.md) | Proiect comunitar client/server, cu Rust și CEF; nu este componentă oficială open.mp. |
@@ -155,23 +155,20 @@ skr-client/
 
 Buildurile client și server sunt independente. Lockfile-ul conține URL, commit complet, versiune, hash arhivă, arhitectură, toolchain și licență pentru fiecare dependență. Valorile necunoscute rămân blocante pentru release, fără hashuri inventate.
 
-## 4. Compatibilitate 0.3.7-R2
+## 4. Compatibilitate și target
 
-Ținta trebuie definită ca **client SA-MP 0.3.7-R2**, separat de orice server numit „R2”. Numele fișierului și textul de versiune pot fi imitate. Înregistrați SHA-256, dimensiune, arhitectură și proveniență pentru `gta_sa.exe`, `samp.dll`, modulele open.mp dacă există, loader și componentele SKR.
+Ținta este **GTA SA clasic x86 cu conectare nativă open.mp** prin launcher propriu SKR. Nu se folosește clientul SA-MP (niciun R1/R2/DL). Launcher-ul SKR controlează lansarea jocului, injectarea DLL-ului și conexiunea la server.
 
-Compatibilitatea protocolului nu implică aceleași adrese, structuri de memorie, convenții de apel sau lanțuri grafice. Nu reutilizați offseturi R1 pe R2 fără verificare.
+Înregistrați SHA-256, dimensiune, arhitectură și proveniență pentru `gta_sa.exe`, modulele open.mp și componentele SKR.
 
 | Configurație | Statut în plan |
 |---|---|
-| GTA SA clasic x86 + client exact 0.3.7-R2 | țintă MVP, necertificată |
-| Client 0.3.7-R1 | test și adaptor separat; în afara MVP |
-| Alte revizii R / DL | nesuportate implicit |
-| Lanț de lansare open.mp oficial selectat | candidat separat; validare de module și ordine |
+| GTA SA clasic x86 + launcher SKR + open.mp nativ | țintă MVP |
 | Definitive Edition / executabil necunoscut | în afara scopului; fără hookuri speculative |
 
-Profilul de compatibilitate include builduri exacte, hashuri aprobate, adaptor, convenții de apel, simboluri/patternuri documentate și raport de teste. Un build necunoscut produce oprirea integrării SKR cu diagnostic, nu patchuri presupuse în memorie.
+Profilul de compatibilitate include builduri exacte, hashuri aprobate, convenții de apel, simboluri/patternuri documentate și raport de teste. Un build necunoscut produce oprirea integrării SKR cu diagnostic, nu patchuri presupuse în memorie.
 
-Criterii SKR propuse pentru certificarea R2: 50 cicluri launch/connect/quit, 100 alt-tab/reset, sesiune de două ore, input CEF, reconnect, compatibilitate SKRAC reală, respingerea ticketelor invalide și zero acces la gameplay înainte de grant. Acestea sunt obiective, nu rezultate obținute.
+Criterii SKR propuse pentru certificare: 50 cicluri launch/connect/quit, 100 alt-tab/reset, sesiune de două ore, input CEF, reconnect, compatibilitate SKRAC reală, respingerea ticketelor invalide și zero acces la gameplay înainte de grant. Acestea sunt obiective, nu rezultate obținute.
 
 ## 5. Launcher Windows
 
@@ -291,7 +288,7 @@ Consultați [Microsoft D3D9 lost devices](https://learn.microsoft.com/en-us/wind
 
 ### 8.1 Alegere explicită
 
-**A — samp-cef:** fixați commitul, buildul Rust/CEF și ABI-ul real. Demonstrați compatibilitatea pluginului server cu open.mp și a clientului cu R2. Legătura din C++ se face numai prin interfața efectiv expusă de acel commit. Nu este bibliotecă pur C++ și nu se presupune că lucrează cu orice versiune CEF.
+**A — samp-cef:** fixați commitul, buildul Rust/CEF și ABI-ul real. Demonstrați compatibilitatea pluginului server cu open.mp. Legătura din C++ se face numai prin interfața efectiv expusă de acel commit. Nu este bibliotecă pur C++ și nu se presupune că lucrează cu orice versiune CEF.
 
 **B — CEF propriu:** host/helper separat, OSR, IPC și adaptor D3D9. Un host x64 poate comunica cu GTA x86 prin protocol explicit, însă nu puteți încărca `libcef.dll` x64 în procesul jocului x86. Această variantă este alternativă de arhitectură, fără compatibilitate demonstrată cu samp-cef.
 
@@ -354,7 +351,7 @@ Cerere ilustrativă:
   "protocol": 1,
   "server_id": "skr-main",
   "client_build": "0.1.0",
-  "compat_profile": "samp-037-r2-pending-validation",
+  "compat_profile": "openmp-native-pending-validation",
   "session_public_key": "BASE64URL_PUBLIC_KEY"
 }
 ```
@@ -588,17 +585,17 @@ Runbook incident: revocare chei/tokenuri, suspendare emitere ticket dacă este n
 
 | Etapă | Livrabil | Gate de ieșire |
 |---|---|---|
-| M0 | lockfile, profil R2, licențe, contract SKRAC | builduri și interfețe reale identificate |
-| M1 | launcher și ASI inert, lifecycle | inițializare sigură în afara loader lock |
+| M0 | lockfile, profil compatibilitate, licențe, contract SKRAC | builduri și interfețe reale identificate |
+| M1 | launcher și DLL inert, lifecycle | inițializare sigură în afara loader lock |
 | M2 | logo/fade D3D9 | reset și restaurare stare trecute |
-| M3 | spike samp-cef sau CEF propriu | versiune sigură și compatibilitate R2 demonstrate |
+| M3 | spike samp-cef sau CEF propriu | versiune sigură și compatibilitate open.mp demonstrate |
 | M4 | backend, ticket, challenge, gate | replay/concurență și blocare gameplay verificate |
 | M5 | adaptor SKRAC real | SDK, erori și false positives testate |
 | M6 | updater/manifest/installer | întrerupere și rollback testate |
 | M7 | beta și raport compatibilitate | criterii secțiunea 13 îndeplinite |
 | M8 | stable și suport | proprietar operațional și recuperare verificate |
 
-Handshake-ul poate fi dezvoltat fără UI completă. Prioritizați demonstrarea gate-ului și a compatibilității înaintea animațiilor complexe. Termenele se estimează după M0, când necunoscutele CEF/R2/SKRAC sunt măsurate.
+Handshake-ul poate fi dezvoltat fără UI completă. Prioritizați demonstrarea gate-ului și a compatibilității înaintea animațiilor complexe. Termenele se estimează după M0, când necunoscutele CEF/SKRAC sunt măsurate.
 
 ## 16. Instrucțiuni agent AI
 
