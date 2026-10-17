@@ -1,10 +1,99 @@
 #include "skr_gate_component.hpp"
 #include <cstdio>
+#include <vector>
 
 namespace skr::gate_omp {
 
+// ── RPC 25 filter: block non-SKR clients at join ────────
+
+bool SkrJoinFilter::onReceive(IPlayer& peer, NetworkBitStream& bs) {
+    int savedOffset = bs.GetReadOffset();
+    int totalBits = bs.GetNumberOfBitsUsed();
+
+    if (core_)
+        core_->printLn("SKR Gate RPC25: totalBits=%d readOffset=%d", totalBits, savedOffset);
+
+    // CLIENT_JOIN structure: version(int32), mod(uint8),
+    // nickname(uint8 len + chars), challenge(uint32),
+    // authKey(uint8 len + chars), clientVer(uint8 len + chars)
+    int32_t version = 0;
+    uint8_t mod = 0, nickLen = 0;
+    if (!bs.readINT32(version) || !bs.readUINT8(mod) || !bs.readUINT8(nickLen)) {
+        if (core_) core_->printLn("SKR Gate RPC25: failed reading header");
+        bs.SetReadOffset(savedOffset);
+        return true;
+    }
+
+    if (core_)
+        core_->printLn("SKR Gate RPC25: ver=%d mod=%d nickLen=%d", version, mod, nickLen);
+
+    // Skip nickname bytes
+    bs.SetReadOffset(bs.GetReadOffset() + nickLen * 8);
+
+    uint32_t challenge = 0;
+    if (!bs.readUINT32(challenge)) {
+        if (core_) core_->printLn("SKR Gate RPC25: failed reading challenge");
+        bs.SetReadOffset(savedOffset); return true;
+    }
+
+    // Skip auth key (uint8 len + chars)
+    uint8_t authLen = 0;
+    if (!bs.readUINT8(authLen)) {
+        if (core_) core_->printLn("SKR Gate RPC25: failed reading authLen");
+        bs.SetReadOffset(savedOffset); return true;
+    }
+
+    if (core_)
+        core_->printLn("SKR Gate RPC25: challenge=0x%X authLen=%d", challenge, authLen);
+
+    bs.SetReadOffset(bs.GetReadOffset() + authLen * 8);
+
+    // Read client version string
+    uint8_t verLen = 0;
+    if (!bs.readUINT8(verLen)) {
+        if (core_) core_->printLn("SKR Gate RPC25: failed reading verLen");
+        bs.SetReadOffset(savedOffset); return true;
+    }
+
+    if (core_)
+        core_->printLn("SKR Gate RPC25: verLen=%d bitsLeft=%d",
+                       verLen, totalBits - bs.GetReadOffset());
+
+    char verStr[65] = {};
+    if (verLen > 0 && verLen <= 64) {
+        if (!bs.Read(verStr, verLen)) {
+            if (core_) core_->printLn("SKR Gate RPC25: failed reading verStr");
+            bs.SetReadOffset(savedOffset); return true;
+        }
+    }
+    verStr[verLen] = '\0';
+
+    bs.SetReadOffset(savedOffset);
+
+    bool isSKR = (verLen >= 3 && verStr[0] == 'S' && verStr[1] == 'K' && verStr[2] == 'R');
+
+    if (core_)
+        core_->printLn("SKR Gate RPC25: clientVer='%s' (len=%d) %s",
+                       verStr, verLen, isSKR ? "[ALLOWED]" : "[BLOCKED]");
+
+    if (!isSKR) {
+        peer.sendClientMessage(Colour::FromRGBA(0xA9C4E4FF),
+            "Checking client compatibility...");
+        peer.sendClientMessage(Colour::FromRGBA(0xAA3333FF),
+            "Connection rejected: SKR RC1 Client required.");
+        peer.sendClientMessage(Colour::FromRGBA(0xA9C4E4FF),
+            "Please download from skr-server.com to join.");
+        peer.kick();
+        return false;
+    }
+
+    return true;
+}
+
 SkrGateComponent::~SkrGateComponent() {
     if (core_) {
+        core_->removePerRPCInEventHandler<kRPC_ClientJoin>(&joinFilter_);
+        core_->getEventDispatcher().removeEventHandler(this);
         core_->getPlayers().getPlayerConnectDispatcher().removeEventHandler(this);
     }
 }
@@ -18,7 +107,12 @@ void SkrGateComponent::onLoad(ICore* c) {
 
 void SkrGateComponent::onInit(IComponentList* /*components*/) {
     core_->getPlayers().getPlayerConnectDispatcher().addEventHandler(this);
-    core_->printLn("SKR Gate: registered player event handlers");
+    core_->getEventDispatcher().addEventHandler(this);
+
+    // Register per-RPC handler for CLIENT_JOIN (RPC 25) — high priority to run first
+    joinFilter_.setCore(core_);
+    core_->addPerRPCInEventHandler<kRPC_ClientJoin>(&joinFilter_, EventPriority_FairlyHigh);
+    core_->printLn("SKR Gate: registered player event handlers + RPC filter");
 }
 
 void SkrGateComponent::onReady() {
@@ -46,13 +140,14 @@ void SkrGateComponent::onIncomingConnection(IPlayer& player, StringView ipAddres
     core_->printLn("SKR Gate: incoming connection from %.*s:%u (id %d)",
                    static_cast<int>(ipAddress.length()), ipAddress.data(), port, id);
 
-    // Issue challenge immediately
+    player.sendClientMessage(Colour::FromRGBA(0xA9C4E4FF),
+        "Checking client compatibility...");
+
+    // Issue challenge
     protocol::ChallengeMessage challenge{};
     if (IssueChallenge(id, challenge)) {
         core_->printLn("SKR Gate: challenge issued to player %d (gen %llu)",
                        id, challenge.generation);
-        // TODO: send challenge via RPC to client
-        // player.sendRPC(...) — requires custom RPC ID registration
     }
 }
 
@@ -60,11 +155,13 @@ void SkrGateComponent::onPlayerConnect(IPlayer& player) {
     int id = player.getID();
     core_->printLn("SKR Gate: player %d fully connected", id);
 
-    // If not yet authorized, send a message and start a timeout
-    if (!IsAuthorized(id)) {
-        player.sendClientMessage(Colour::Yellow(),
-            "Authenticating... Please wait.");
-    }
+    // If player got past the RPC filter, they're SKR — authorize
+    player.sendClientMessage(Colour::FromRGBA(0xA9C4E4FF),
+        "SKR Client verified.");
+    player.sendClientMessage(Colour::FromRGBA(0xD4A017FF),
+        "Authenticating... Please wait.");
+    // TODO: verify launcher token here before calling AuthorizePlayer
+    AuthorizePlayer(id, 0);
 }
 
 void SkrGateComponent::onPlayerDisconnect(IPlayer& player, PeerDisconnectReason reason) {
@@ -80,6 +177,39 @@ void SkrGateComponent::onPlayerDisconnect(IPlayer& player, PeerDisconnectReason 
 void SkrGateComponent::onPlayerClientInit(IPlayer& player) {
     int id = player.getID();
     core_->printLn("SKR Gate: player %d client initialized", id);
+}
+
+// ── Tick: enforce auth timeout ───────────────────────────
+
+void SkrGateComponent::onTick(Microseconds elapsed, TimePoint /*now*/) {
+    tickAccumulatorMs_ += static_cast<uint64_t>(elapsed.count() / 1000);
+    if (tickAccumulatorMs_ < 2000) return; // check every ~2 seconds
+    tickAccumulatorMs_ = 0;
+
+    uint64_t nowEpoch = static_cast<uint64_t>(std::time(nullptr));
+
+    std::vector<int> toKick;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& [id, data] : players_) {
+            if (data.state == SkrPlayerState::Challenged &&
+                data.challengeExpiresAt > 0 &&
+                nowEpoch > data.challengeExpiresAt) {
+                data.state = SkrPlayerState::Rejected;
+                toKick.push_back(id);
+            }
+        }
+    }
+
+    for (int id : toKick) {
+        auto* player = core_->getPlayers().get(id);
+        if (player) {
+            core_->printLn("SKR Gate: kicking player %d (auth timeout)", id);
+            player->sendClientMessage(Colour::FromRGBA(0xFF4444FF),
+                "Connection rejected: SKR Client required.");
+            player->kick();
+        }
+    }
 }
 
 // ── SKR gate logic ───────────────────────────────────────

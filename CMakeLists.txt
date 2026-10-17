@@ -53,13 +53,17 @@ add_library(SKRClient SHARED
   client/skrac/mock_adapter.cpp
   client/skrac/external_adapter.cpp
   client/skrac/ac_policy.cpp
-  client/render-d3d9/intro_renderer.cpp
+  client/intro/urban_intro.cpp
+  client/intro/intro_audio.cpp
+  client/intro/miniaudio_impl.cpp
   client/render-d3d9/d3d9_hook.cpp
+  client/render-d3d9/chat_box.cpp
   client/cef-bridge/cef_bridge.cpp
   client/cef-bridge/cef_plugin_exports.cpp
   client/compatibility/compat_profile.cpp
   client/transport/auth_client.cpp
   client/samp-hooks/samp_hooks.cpp
+  client/game-state/game_state.cpp
 )
 set_target_properties(SKRClient PROPERTIES
   OUTPUT_NAME "SKR.Client" PREFIX ""
@@ -67,8 +71,17 @@ set_target_properties(SKRClient PROPERTIES
 target_include_directories(SKRClient PRIVATE
   ${CMAKE_SOURCE_DIR}/client
   ${CMAKE_SOURCE_DIR}/shared
+  ${CMAKE_SOURCE_DIR}/deps/miniaudio-0.11.23
 )
-target_link_libraries(SKRClient PRIVATE d3d9 version bcrypt SKRShared)
+target_link_libraries(SKRClient PRIVATE d3d9 version bcrypt windowscodecs ole32 SKRShared)
+# Third-party single-header implementation; keep its warnings out of the /W4 build.
+set_source_files_properties(client/intro/miniaudio_impl.cpp PROPERTIES COMPILE_OPTIONS "/W0")
+
+# --- Intro timeline/transport tests (no GTA, no device) ---
+add_executable(SKRIntroTests
+  tests/unit/test_intro_timeline.cpp
+)
+target_include_directories(SKRIntroTests PRIVATE ${CMAKE_SOURCE_DIR}/client)
 
 # --- SKR Gate (server component library) ---
 add_library(SKRGate STATIC
@@ -152,7 +165,7 @@ target_include_directories(SKRFakeGame PRIVATE
 target_link_libraries(SKRFakeGame PRIVATE SKRShared ws2_32)
 
 if(MSVC)
-  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests SKRTestServer SKRSmokeClient SKRFakeGame)
+  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests SKRIntroTests SKRTestServer SKRSmokeClient SKRFakeGame)
     target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT)

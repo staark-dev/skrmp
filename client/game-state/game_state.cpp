@@ -1,0 +1,275 @@
+#include "game-state/game_state.h"
+#include <windows.h>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+
+// Provenance:
+//  GTA SA 1.0 US addresses: DK22Pac/plugin-sdk (plugin_sa/game_sa) —
+//    CWorld::Players 0xB7CD98 (CPlayerInfo::m_pPed @0x0), CPlaceable::m_matrix @0x14,
+//    CMatrix::pos @0x30, CTheZones::ZoneInfoArray 0xBA3798, TotalNumberOfInfoZones 0xBA3794,
+//    CTheZones::PointLiesWithinZone 0x572270 (cdecl), CZone size 0x20,
+//    CZone::m_szTextKey @0x8, m_fX1..m_fZ2 shorts @0x10, TheText 0xC1B340, CText::Get 0x6A0050 (thiscall).
+//  samp.dll 0.3.7-R5 (sha256 b72b5dbe...2553a2): RVA 0x69900 = command send
+//    (__thiscall, 1 stack arg const char*, ecx unused; sends RPC 50), disassembled locally.
+//    RVA 0x26EB94 = CNetGame*, state byte @+0x3CD (5 = connected, as used in d3d9_hook).
+
+namespace skr::game_state {
+
+namespace {
+
+struct CVector { float x, y, z; };
+
+constexpr uintptr_t kPlayersPed          = 0xB7CD98;
+constexpr uintptr_t kZoneInfoArray       = 0xBA3798;
+constexpr uintptr_t kTotalInfoZones      = 0xBA3794;
+constexpr uintptr_t kPointLiesWithinZone = 0x572270;
+constexpr uintptr_t kTheText             = 0xC1B340;
+constexpr uintptr_t kCTextGet            = 0x6A0050;
+constexpr size_t    kZoneSize            = 0x20;
+
+constexpr uintptr_t kSampNetGameRva  = 0x26EB94;
+constexpr uintptr_t kSampSendCmdRva  = 0x69900;
+constexpr uintptr_t kNetGameStateOff = 0x3CD;
+constexpr uint8_t   kStateConnected  = 5;
+
+// plugin-sdk CRadar.cpp: cachedCos 0xBA8308, cachedSin 0xBA830C.
+constexpr uintptr_t kRadarCachedCos = 0xBA8308;
+constexpr uintptr_t kRadarCachedSin = 0xBA830C;
+// CRadar::CalculateCachedSinCos 0x583670 (cdecl, camera only, draws nothing). gta-reversed
+// Radar.cpp: CRadar::DrawMap (0x586B00) calls it and sets the range; with the native
+// radar hidden DrawMap does not run, so we call it ourselves.
+constexpr uintptr_t kCalcCachedSinCos = 0x583670;
+// DrawMap ground/foot range: speed = |FindPlayerSpeed|; <0.3 -> 180, >0.9 -> 350,
+// else (speed - 0.3) * (850 / (0.3 * 10)) + 180. Plane and script-zoom branches omitted.
+constexpr float kRadarMinRange = 180.0f, kRadarMaxRange = 350.0f;
+constexpr float kRadarMinSpeed = 0.3f, kRadarMaxSpeed = 0.9f;
+
+// plugin-sdk common.cpp: FindPlayerSpeed 0x56E090, FindPlayerVehicle 0x56E0D0 (cdecl).
+constexpr uintptr_t kFindPlayerSpeed   = 0x56E090;
+constexpr uintptr_t kFindPlayerVehicle = 0x56E0D0;
+// plugin-sdk CVehicle.h: m_nCurrentGear @0x4B4; CPhysical m_vecMoveSpeed @0x44.
+constexpr uintptr_t kVehCurrentGear = 0x4B4;
+// plugin-sdk: CVehicle::m_pHandlingData @0x384; tHandlingData::m_transmissionData @0x2C;
+// cTransmission::m_fMaxGearVelocity @0x58 -> handling + 0x84. Assumed stored in the same
+// per-frame units as move speed (x180 = km/h); logged once to validate against handling.cfg
+// (INFERNUS fMaxVelocity = 240.0).
+constexpr uintptr_t kVehHandling        = 0x384;
+constexpr uintptr_t kHandlingMaxGearVel = 0x2C + 0x58;
+constexpr uintptr_t kPhysMoveSpeed  = 0x44;
+// plugin-sdk CTheScripts.cpp: bDisplayHud 0xA444A0 (script DISPLAY_HUD flag).
+constexpr uintptr_t kDisplayHud = 0xA444A0;
+// plugin-sdk CHud.cpp: bScriptDontDisplayRadar 0xBAA3FB (radar is not covered by bDisplayHud).
+constexpr uintptr_t kScriptDontDisplayRadar = 0xBAA3FB;
+// GTA speed units are per 1/50 s frame: km/h = |v| * 50 * 3.6.
+constexpr float kSpeedToKmh = 180.0f;
+
+constexpr DWORD kSendIntervalMs = 100;
+
+using PointLiesWithinZoneFn = bool(__cdecl*)(const CVector*, void*);
+using CTextGetFn            = const char*(__thiscall*)(void*, const char*);
+using SampSendCommandFn     = void(__thiscall*)(void*, const char*);
+using VoidFn                = void(__cdecl*)();
+using FindPlayerSpeedFn     = const CVector&(__cdecl*)(int);
+using FindPlayerVehicleFn   = uint8_t*(__cdecl*)(int, bool);
+
+DWORD g_lastSend = 0;
+
+// Diagnostic: logs each distinct stage once to <gta>\SKR\game_state.log.
+uint32_t g_loggedStages = 0;
+void LogStage(int stage, const char* msg) {
+    if (g_loggedStages & (1u << stage)) return;
+    g_loggedStages |= (1u << stage);
+    char path[MAX_PATH];
+    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (!n || n >= MAX_PATH) return;
+    char* slash = strrchr(path, '\\');
+    if (!slash) return;
+    snprintf(slash + 1, MAX_PATH - (slash + 1 - path), "SKR\\game_state.log");
+    FILE* f = fopen(path, "a");
+    if (!f) return;
+    fprintf(f, "[%lu] stage %d: %s\n", GetTickCount(), stage, msg);
+    fclose(f);
+}
+
+bool ReadPlayer(CVector& pos, float& heading) {
+    auto* ped = *reinterpret_cast<uint8_t**>(kPlayersPed);
+    if (!ped) return false;
+    auto* matrix = *reinterpret_cast<float**>(ped + 0x14);
+    if (matrix) {
+        pos = {matrix[12], matrix[13], matrix[14]};          // pos @0x30
+        float fx = matrix[4], fy = matrix[5];                // forward ("up") @0x10
+        heading = std::atan2(-fx, fy) * 57.2957795f;
+    } else {
+        auto* p = reinterpret_cast<float*>(ped + 0x4);       // CSimpleTransform pos
+        pos = {p[0], p[1], p[2]};
+        heading = p[3] * 57.2957795f;                        // CSimpleTransform heading (rad)
+    }
+    if (heading < 0.0f) heading += 360.0f;
+    return true;
+}
+
+const char* ZoneText(const uint8_t* zone) {
+    auto get = reinterpret_cast<CTextGetFn>(kCTextGet);
+    return get(reinterpret_cast<void*>(kTheText), reinterpret_cast<const char*>(zone + 0x8));
+}
+
+// Smallest containing navigation zone = area. City/county = containing zone with z2 == 900:
+// in info.zon only LA, VE, SF, RED, BONE, ROBAD, FLINTC, WHET use that height; the
+// state-wide "San Andreas" zone (not in info.zon) is excluded by this rule.
+void ResolveZones(const CVector& pos, char* city, size_t cityLen, char* area, size_t areaLen) {
+    city[0] = area[0] = '\0';
+    short count = *reinterpret_cast<short*>(kTotalInfoZones);
+    if (count <= 0 || count > 1000) return;
+
+    auto lies = reinterpret_cast<PointLiesWithinZoneFn>(kPointLiesWithinZone);
+    const uint8_t* smallest = nullptr;
+    const uint8_t* largest = nullptr;
+    long smallArea = 0, largeArea = 0;
+
+    for (short i = 0; i < count; ++i) {
+        auto* z = reinterpret_cast<uint8_t*>(kZoneInfoArray + i * kZoneSize);
+        if (!lies(&pos, z)) continue;
+        auto* c = reinterpret_cast<const short*>(z + 0x10);  // x1,y1,z1,x2,y2,z2
+        long a = static_cast<long>(c[3] - c[0]) * static_cast<long>(c[4] - c[1]);
+        if (!smallest || a < smallArea) { smallest = z; smallArea = a; }
+        if (c[5] == 900 && (!largest || a > largeArea)) { largest = z; largeArea = a; }
+    }
+    if (smallest) snprintf(area, areaLen, "%s", ZoneText(smallest));
+    if (largest)  snprintf(city, cityLen, "%s", ZoneText(largest));
+}
+
+void Sanitize(char* s) {
+    for (; *s; ++s)
+        if (*s == '|' || *s == '"' || *s == '\\' || static_cast<unsigned char>(*s) < 0x20) *s = ' ';
+}
+
+// Call sites inside CGame::Process (0x53BEE0), from plugin-sdk meta (GAME_10US_COMPACT, H_CALL).
+// Only a site still pointing at its original GTA target is patched, so we never
+// overwrite a hook another module (SA-MP / omp-cef) already owns. 0x53E981 (Idle ->
+// CGame::Process) was already hooked by another module and crashed on reuse.
+struct CallSite { uintptr_t site; uintptr_t originalTarget; const char* name; };
+constexpr CallSite kCandidates[] = {
+    {0x53BF4E, 0x6997E0, "CGame::Process -> 0x6997E0 (meta.CCover.h)"},
+    {0x53C0BC, 0x440D10, "CGame::Process -> 0x440D10 (meta.CEntryExitManager.h)"},
+};
+
+using VoidFn = void(__cdecl*)();
+VoidFn g_origTarget = nullptr;
+
+void Tick();
+
+void __cdecl HookedCall() {
+    g_origTarget();
+    Tick();
+}
+
+} // namespace
+
+bool InstallProcessHook() {
+    for (const auto& c : kCandidates) {
+        auto* site = reinterpret_cast<uint8_t*>(c.site);
+        if (site[0] != 0xE8) continue;
+        uintptr_t target = c.site + 5 + *reinterpret_cast<int32_t*>(site + 1);
+        if (target != c.originalTarget) continue;
+
+        g_origTarget = reinterpret_cast<VoidFn>(target);
+        int32_t newRel = static_cast<int32_t>(
+            reinterpret_cast<uintptr_t>(&HookedCall) - (c.site + 5));
+        DWORD old = 0;
+        if (!VirtualProtect(site + 1, 4, PAGE_EXECUTE_READWRITE, &old)) return false;
+        *reinterpret_cast<int32_t*>(site + 1) = newRel;
+        VirtualProtect(site + 1, 4, old, &old);
+        FlushInstructionCache(GetCurrentProcess(), site, 5);
+
+        LogStage(11, c.name);
+        return true;
+    }
+    LogStage(10, "no unhooked call site found, game-state tick disabled");
+    return false;
+}
+
+namespace {
+
+bool IsConnected() {
+    HMODULE samp = GetModuleHandleA("samp.dll");
+    if (!samp) return false;
+    auto* netGame = *reinterpret_cast<uint8_t**>(reinterpret_cast<uintptr_t>(samp) + kSampNetGameRva);
+    return netGame && netGame[kNetGameStateOff] == kStateConnected;
+}
+
+void Tick() {
+    // The CEF HUD replaces the native one while connected. Re-applied every frame because
+    // SA-MP restores it (e.g. on spawn/spectate). Note: this also hides the crosshair.
+    if (IsConnected()) {
+        *reinterpret_cast<bool*>(kDisplayHud) = false;
+        *reinterpret_cast<bool*>(kScriptDontDisplayRadar) = true;
+    }
+
+    DWORD now = GetTickCount();
+    if (now - g_lastSend < kSendIntervalMs) return;
+    g_lastSend = now;
+
+    LogStage(0, "tick running");
+    HMODULE samp = GetModuleHandleA("samp.dll");
+    if (!samp) { LogStage(1, "no samp.dll"); return; }
+    auto base = reinterpret_cast<uintptr_t>(samp);
+    auto* netGame = *reinterpret_cast<uint8_t**>(base + kSampNetGameRva);
+    if (!netGame) { LogStage(2, "no CNetGame"); return; }
+    if (netGame[kNetGameStateOff] != kStateConnected) {
+        char m[64];
+        snprintf(m, sizeof(m), "netgame state %u", netGame[kNetGameStateOff]);
+        LogStage(3, m);
+        return;
+    }
+
+    CVector pos{};
+    float heading = 0.0f;
+    if (!ReadPlayer(pos, heading)) { LogStage(4, "no player ped"); return; }
+
+    char city[48], area[48];
+    ResolveZones(pos, city, sizeof(city), area, sizeof(area));
+    Sanitize(city);
+    Sanitize(area);
+
+    reinterpret_cast<VoidFn>(kCalcCachedSinCos)();
+    float orient = std::atan2(*reinterpret_cast<float*>(kRadarCachedSin),
+                              *reinterpret_cast<float*>(kRadarCachedCos)) * 57.2957795f;
+
+    const CVector& v = reinterpret_cast<FindPlayerSpeedFn>(kFindPlayerSpeed)(-1);
+    float speed = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    float range = kRadarMinRange;
+    if (speed > kRadarMaxSpeed) range = kRadarMaxRange;
+    else if (speed > kRadarMinSpeed)
+        range = (speed - kRadarMinSpeed) * (850.0f / (kRadarMinSpeed * 10.0f)) + kRadarMinRange;
+
+    // Vehicle: speed from its own move vector, gear from CVehicle::m_nCurrentGear (-1 = on foot).
+    int vehSpeedKmh = 0, gear = -1, maxKmh = 0;
+    if (uint8_t* veh = reinterpret_cast<FindPlayerVehicleFn>(kFindPlayerVehicle)(-1, false)) {
+        auto* mv = reinterpret_cast<const float*>(veh + kPhysMoveSpeed);
+        vehSpeedKmh = static_cast<int>(std::sqrt(mv[0] * mv[0] + mv[1] * mv[1] + mv[2] * mv[2]) * kSpeedToKmh + 0.5f);
+        gear = veh[kVehCurrentGear];
+        if (auto* handling = *reinterpret_cast<uint8_t**>(veh + kVehHandling)) {
+            float raw = *reinterpret_cast<float*>(handling + kHandlingMaxGearVel);
+            if (raw > 0.0f && raw < 10.0f) maxKmh = static_cast<int>(raw * kSpeedToKmh + 0.5f);
+            char m[96];
+            snprintf(m, sizeof(m), "first vehicle model %d: maxGearVelocity raw %.6f -> %d km/h",
+                     *reinterpret_cast<int16_t*>(veh + 0x22), raw, maxKmh);   // CEntity::m_nModelIndex @0x22
+            LogStage(12, m);
+        }
+    }
+
+    // Stays below SA-MP's 128-char chat input limit (zone names truncate first).
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "/skrloc %.1f %.1f %.1f %.1f %.1f %.1f %d %d %d|%s|%s",
+             pos.x, pos.y, pos.z, heading, range, orient, vehSpeedKmh, gear, maxKmh, city, area);
+
+    auto send = reinterpret_cast<SampSendCommandFn>(base + kSampSendCmdRva);
+    send(nullptr, cmd);
+    LogStage(5, cmd);
+}
+
+} // namespace
+
+} // namespace skr::game_state

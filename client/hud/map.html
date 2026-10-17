@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ro"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SKR Hartă</title>
+<style>
+:root {
+  --hud-scale: 1;
+  --hud-text: #f0f4f7;
+  --hud-secondary: #a7b4c0;
+  --hud-muted: #84939f;
+  --hud-cyan: #74dce8;
+  --hud-card: rgba(18,23,30,.84);
+  --hud-card-border: rgba(210,225,233,.16);
+  --hud-gold: #d4b475;
+  --hud-pin: #e85b68;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; }
+body.is-hidden { display:none; }
+body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased; user-select:none; }
+
+.backdrop { position:fixed; inset:0; background:rgba(6,9,12,.55); }
+.panel {
+  position:absolute; left:50%; top:50%;
+  width:1100px; height:760px;
+  transform:translate(-50%,-50%) scale(var(--hud-scale));
+  display:flex; flex-direction:column;
+  background:var(--hud-card); border:1px solid var(--hud-card-border); border-radius:10px;
+}
+.panel__head { height:56px; padding:0 18px; display:flex; align-items:center; gap:14px; border-bottom:1px solid var(--hud-card-border); }
+.panel__logo { font-family:'Bahnschrift Condensed','Bahnschrift','Arial Narrow',sans-serif; font-stretch:condensed; font-weight:700; font-size:30px; letter-spacing:1px; color:var(--hud-gold); }
+.panel__sep { width:1px; height:16px; background:rgba(255,255,255,.18); }
+.panel__title { font-size:13px; font-weight:600; letter-spacing:1.5px; color:var(--hud-secondary); }
+.panel__hint { margin-left:auto; font-size:12px; color:var(--hud-muted); }
+.panel__hint b { color:var(--hud-text); font-weight:600; }
+
+.view { position:relative; flex:1; overflow:hidden; margin:10px; border:3px solid #202930; border-radius:8px; background:#0a0f13; cursor:grab; }
+.view.is-dragging { cursor:grabbing; }
+.map { position:absolute; left:0; top:0; width:1536px; height:1536px; transform-origin:0 0; }
+.map img { position:absolute; left:0; top:0; width:1536px; height:1536px; display:block; max-width:none; }
+
+.marker { position:absolute; left:0; top:0; pointer-events:none; }
+.marker--player svg { width:20px; height:20px; margin:-10px 0 0 -10px; display:block; fill:var(--hud-cyan); filter:drop-shadow(0 1px 2px rgba(0,0,0,.8)); }
+.marker--pin svg { width:26px; height:34px; margin:-34px 0 0 -13px; display:block; fill:var(--hud-pin); stroke:#fff; stroke-width:1.5; filter:drop-shadow(0 1px 2px rgba(0,0,0,.8)); }
+
+.panel__foot { height:40px; padding:0 18px; display:flex; align-items:center; gap:18px; font-size:12px; color:var(--hud-secondary); border-top:1px solid var(--hud-card-border); }
+.panel__foot span b { color:var(--hud-text); font-weight:600; }
+.panel__foot .pin { margin-left:auto; color:var(--hud-pin); }
+</style>
+</head><body class="is-hidden">
+<div class="backdrop"></div>
+<section class="panel" aria-label="Harta San Andreas">
+  <header class="panel__head">
+    <strong class="panel__logo">SKR</strong>
+    <span class="panel__sep"></span>
+    <span class="panel__title">HARTĂ · SAN ANDREAS</span>
+    <span class="panel__hint"><b>Scroll</b> zoom · <b>Trage</b> mutare · <b>Click</b> pin · <b>Click dreapta</b> șterge pin · <b>M / Esc</b> închide</span>
+  </header>
+  <div class="view" id="view">
+    <div class="map" id="map"></div>
+    <div class="marker marker--pin" id="pin" hidden>
+      <svg viewBox="0 0 26 34"><path d="M13 1C6.4 1 1 6.3 1 12.9 1 21.7 13 33 13 33s12-11.3 12-20.1C25 6.3 19.6 1 13 1Z"/><circle cx="13" cy="13" r="4.2" fill="#fff" stroke="none"/></svg>
+    </div>
+    <div class="marker marker--player" id="player">
+      <svg viewBox="0 0 14 14"><polygon points="7,0 12,12 7,9 2,12"/></svg>
+    </div>
+  </div>
+  <footer class="panel__foot">
+    <span>Cursor: <b id="cursorPos">—</b></span>
+    <span>Zoom: <b id="zoomVal">—</b></span>
+    <span class="pin" id="pinInfo"></span>
+  </footer>
+</section>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var GRID = 12, TILE_PX = 128, MAP_PX = GRID * TILE_PX;   // 1536 px for 6000 world units
+  var WORLD = 6000, HALF = 3000;
+  var MIN_ZOOM = 0.35, MAX_ZOOM = 6;
+
+  var view = $('view'), mapEl = $('map'), playerEl = $('player'), pinEl = $('pin');
+  var zoom = 1, panX = 0, panY = 0;            // screen = map * zoom + pan
+  var player = { x: 0, y: 0, heading: 0 };
+  var pin = null;
+
+  function resize() {
+    var s = Math.max(0.6, Math.min(1.5, Math.min(window.innerWidth / 1672, window.innerHeight / 941)));
+    document.documentElement.style.setProperty('--hud-scale', String(s));
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // minimap.png: the 12x12 GTA radar tiles stitched at 128 px each (1536x1536).
+  var mapImg = new Image();
+  mapImg.src = 'minimap.png';
+  mapImg.draggable = false;
+  mapEl.appendChild(mapImg);
+
+  function worldToMap(x, y) { return { x: (x + HALF) / WORLD * MAP_PX, y: (HALF - y) / WORLD * MAP_PX }; }
+  function mapToWorld(mx, my) { return { x: mx / MAP_PX * WORLD - HALF, y: HALF - my / MAP_PX * WORLD }; }
+  function viewScale() { return view.getBoundingClientRect().width / view.clientWidth || 1; }
+  function eventToView(e) {
+    var rect = view.getBoundingClientRect(), k = viewScale();
+    return { x: (e.clientX - rect.left) / k, y: (e.clientY - rect.top) / k };
+  }
+
+  function clampPan() {
+    var w = view.clientWidth, h = view.clientHeight, size = MAP_PX * zoom;
+    panX = size <= w ? (w - size) / 2 : Math.min(0, Math.max(w - size, panX));
+    panY = size <= h ? (h - size) / 2 : Math.min(0, Math.max(h - size, panY));
+  }
+
+  function render() {
+    clampPan();
+    mapEl.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+    var p = worldToMap(player.x, player.y);
+    // GTA heading is counter-clockwise from north; CSS rotate is clockwise.
+    playerEl.style.transform = 'translate(' + (p.x * zoom + panX) + 'px,' + (p.y * zoom + panY) + 'px) rotate(' + (-player.heading) + 'deg)';
+    if (pin) {
+      var q = worldToMap(pin.x, pin.y);
+      pinEl.hidden = false;
+      pinEl.style.transform = 'translate(' + (q.x * zoom + panX) + 'px,' + (q.y * zoom + panY) + 'px)';
+      $('pinInfo').textContent = 'Pin: ' + pin.x.toFixed(0) + ', ' + pin.y.toFixed(0);
+    } else {
+      pinEl.hidden = true;
+      $('pinInfo').textContent = '';
+    }
+    $('zoomVal').textContent = zoom.toFixed(2) + '×';
+  }
+
+  function zoomAt(vx, vy, factor) {
+    var nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
+    var mx = (vx - panX) / zoom, my = (vy - panY) / zoom;
+    zoom = nz;
+    panX = vx - mx * zoom;
+    panY = vy - my * zoom;
+    render();
+  }
+
+  function centerOnPlayer(z) {
+    if (z) zoom = z;
+    var p = worldToMap(player.x, player.y);
+    panX = view.clientWidth / 2 - p.x * zoom;
+    panY = view.clientHeight / 2 - p.y * zoom;
+    render();
+  }
+
+  view.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var v = eventToView(e);
+    zoomAt(v.x, v.y, e.deltaY < 0 ? 1.18 : 1 / 1.18);
+  }, { passive: false });
+
+  var drag = null;
+  view.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return;
+    var v = eventToView(e);
+    drag = { x: v.x, y: v.y, panX: panX, panY: panY, moved: false };
+  });
+  window.addEventListener('mousemove', function (e) {
+    var v = eventToView(e);
+    var w = mapToWorld((v.x - panX) / zoom, (v.y - panY) / zoom);
+    $('cursorPos').textContent = (Math.abs(w.x) <= HALF && Math.abs(w.y) <= HALF) ? w.x.toFixed(0) + ', ' + w.y.toFixed(0) : '—';
+    if (!drag) return;
+    var dx = v.x - drag.x, dy = v.y - drag.y;
+    if (!drag.moved && dx * dx + dy * dy < 16) return;
+    drag.moved = true;
+    view.classList.add('is-dragging');
+    panX = drag.panX + dx;
+    panY = drag.panY + dy;
+    render();
+  });
+  window.addEventListener('mouseup', function (e) {
+    if (!drag || e.button !== 0) return;
+    var wasClick = !drag.moved;
+    drag = null;
+    view.classList.remove('is-dragging');
+    if (!wasClick) return;
+    var v = eventToView(e);
+    var w = mapToWorld((v.x - panX) / zoom, (v.y - panY) / zoom);
+    if (Math.abs(w.x) > HALF || Math.abs(w.y) > HALF) return;
+    emit('map:pin', Math.round(w.x * 10) / 10, Math.round(w.y * 10) / 10);
+  });
+  view.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    if (pin) emit('map:unpin');
+  });
+
+  window.addEventListener('keydown', function (e) {
+    if (e.repeat) return;
+    if (e.key === 'Escape' || e.key === 'm' || e.key === 'M') { e.preventDefault(); emit('map:close'); }
+  });
+
+  function emit() {
+    if (typeof cef !== 'undefined' && cef.emit) cef.emit.apply(cef, arguments);
+  }
+  function parse(a) { try { return typeof a === 'string' ? JSON.parse(a) : a; } catch (e) { return null; } }
+
+  window.skrMap = {
+    open: function (d) {
+      document.body.classList.remove('is-hidden');
+      if (!d || !isFinite(d.x) || !isFinite(d.y)) return;
+      player = { x: d.x, y: d.y, heading: d.heading || 0 };
+      centerOnPlayer(2);
+    },
+    hide: function () { document.body.classList.add('is-hidden'); },
+    player: function (d) {
+      if (!d || !isFinite(d.x) || !isFinite(d.y)) return;
+      player = { x: d.x, y: d.y, heading: d.heading || 0 };
+      render();
+    },
+    pin: function (d) {
+      pin = d && d.set && isFinite(d.x) && isFinite(d.y) ? { x: d.x, y: d.y } : null;
+      render();
+    }
+  };
+
+  if (typeof cef !== 'undefined' && cef.on) {
+    cef.on('map:open', function () { window.skrMap.open(parse(arguments[0])); });
+    cef.on('map:hide', function () { window.skrMap.hide(); });
+    cef.on('map:player', function () { window.skrMap.player(parse(arguments[0])); });
+    cef.on('map:pinState', function () { window.skrMap.pin(parse(arguments[0])); });
+    cef.on('cef:escape_menu', function () { emit('map:close'); });
+  }
+
+  centerOnPlayer(1);
+})();
+</script>
+</body></html>

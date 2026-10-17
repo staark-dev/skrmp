@@ -3,6 +3,7 @@
 #include <sdk.hpp>
 #include "protocol/messages.h"
 #include "crypto/crypto.h"
+#include <bitstream.hpp>
 
 #include <cstdint>
 #include <cstring>
@@ -45,9 +46,18 @@ struct SkrPlayerData {
     }
 };
 
+class SkrJoinFilter final : public SingleNetworkInEventHandler {
+public:
+    bool onReceive(IPlayer& peer, NetworkBitStream& bs) override;
+    void setCore(ICore* c) { core_ = c; }
+private:
+    ICore* core_ = nullptr;
+};
+
 class SkrGateComponent final
     : public IComponent
     , public PlayerConnectEventHandler
+    , public CoreEventHandler
 {
 public:
     // Visit https://open.mp/uid to generate a new unique ID.
@@ -73,6 +83,9 @@ public:
     void onPlayerDisconnect(IPlayer& player, PeerDisconnectReason reason) override;
     void onPlayerClientInit(IPlayer& player) override;
 
+    // CoreEventHandler
+    void onTick(Microseconds elapsed, TimePoint now) override;
+
     // SKR gate logic
     bool IssueChallenge(int playerId, protocol::ChallengeMessage& challengeOut);
     bool VerifyProof(int playerId, const protocol::ProofMessage& proof,
@@ -95,6 +108,11 @@ private:
 
     static constexpr char kServerId[] = "skr-main";
     static constexpr uint8_t kServerIdLen = 8;
+    static constexpr uint64_t kAuthTimeoutSec = 10;
+    static constexpr int kRPC_ClientJoin = 25;
+
+    SkrJoinFilter joinFilter_;
+    uint64_t tickAccumulatorMs_ = 0;
 };
 
 } // namespace skr::gate_omp

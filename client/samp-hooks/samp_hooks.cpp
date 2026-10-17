@@ -1,4 +1,6 @@
 #include "samp-hooks/samp_hooks.h"
+#include "game-state/game_state.h"
+#include "render-d3d9/chat_box.h"
 #include <atomic>
 #include <cstring>
 
@@ -30,9 +32,9 @@ static constexpr StringPatch kPatches[] = {
     {"{FFFFFF}SA-MP {B9C9BF}0.3.7-R5 {FFFFFF}Started",
      "{FFFFFF}SKR {B9C9BF}Client R1 {FFFFFF}Started"},
 
-    // Connection messages
-    {"Connecting to %s:%d...", "Connecting..."},
-    {"Connected. Joining the game...", "Joining server..."},
+    // Connection messages — hide these on SKR client
+    {"Connecting to %s:%d...", ""},
+    {"Connected. Joining the game...", ""},
 
     // SA-MP 0.3.7-R5 (plain, used in various places)
     {"SA-MP 0.3.7-R5",         "SKR Client"},
@@ -53,6 +55,12 @@ static constexpr StringPatch kPatches[] = {
 
     // Window title
     {"GTA:SA:MP",              "GTA:SKR"},
+
+    // Chat timestamp "14:32" instead of "[14:32:05]"; the second literal is only used
+    // by Chat_MeasureLayoutMetrics to size the timestamp column (chat.md §6.3).
+    {"[%H:%M:%S]",             "%H:%M"},
+    {"[19:58:34]",             "19:58"},
+
 };
 
 static void PatchString(uintptr_t addr, size_t maxLen,
@@ -86,6 +94,35 @@ static void ScanAndPatchStrings(uintptr_t base, size_t imageSize) {
     }
 }
 
+// Raw byte patch: replace version bytes without requiring null terminator.
+// This catches the CLIENT_JOIN version field even if it's embedded or
+// composed at runtime from a const.
+struct RawPatch {
+    const char* find;
+    int findLen;
+    const char* replace;
+    int replaceLen;
+};
+
+static constexpr RawPatch kRawPatches[] = {
+    {"0.3.7-R5", 8, "SKR-R1\0\0", 8},
+    {"0.3.7-R4", 8, "SKR-R1\0\0", 8},
+    {"0.3.7-R3", 8, "SKR-R1\0\0", 8},
+    {"0.3.7-R2", 8, "SKR-R1\0\0", 8},
+    {"0.3.DL-R1", 9, "SKR-R1\0\0\0", 9},
+};
+
+static void ScanAndPatchRaw(uintptr_t base, size_t imageSize) {
+    for (const auto& p : kRawPatches) {
+        auto* start = reinterpret_cast<const uint8_t*>(base);
+        for (size_t off = 0; off + p.findLen <= imageSize; ++off) {
+            if (memcmp(start + off, p.find, p.findLen) == 0) {
+                PatchString(base + off, p.findLen, p.replace);
+            }
+        }
+    }
+}
+
 static size_t GetModuleImageSize(HMODULE mod) {
     auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(mod);
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
@@ -93,6 +130,21 @@ static size_t GetModuleImageSize(HMODULE mod) {
         reinterpret_cast<uintptr_t>(mod) + dos->e_lfanew);
     if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
     return nt->OptionalHeader.SizeOfImage;
+}
+
+// ── SKR client signature for server-side verification ───────────────
+// The server uses sendClientCheck(type=2) to read this address.
+// Non-SKR clients won't have this value, so they get kicked.
+constexpr uintptr_t kSkrSignatureAddr  = 0x00B7CE50;
+constexpr uint32_t  kSkrSignatureValue = 0x00524B53; // "SKR\0"
+
+static void WriteSkrSignature() {
+    DWORD oldProt = 0;
+    auto* addr = reinterpret_cast<uint32_t*>(kSkrSignatureAddr);
+    if (VirtualProtect(addr, 4, PAGE_READWRITE, &oldProt)) {
+        *addr = kSkrSignatureValue;
+        VirtualProtect(addr, 4, oldProt, &oldProt);
+    }
 }
 
 // ── Also patch the "SA-MP" init string in CNetGame ──────────────────
@@ -117,18 +169,40 @@ static void PatchNetGameSessionName() {
     }
 }
 
-// ── Auto-spawn (force state 5 when class selection state 9) ─────────
-static void ForceSkipClassSelection() {
-    if (!g_sampBase) return;
+// ── Chat line length ────────────────────────────────────────────────
+// Chat_AddEntry (RVA 0x67BE0) wraps player messages longer than 0x48 chars into two
+// entries; the text buffer is 0x90 bytes, so raising the threshold to 0x7F is safe
+// (longer text still wraps through the original 0x48 split). Text is drawn with
+// DT_NOCLIP, so Chat_Render's right margin needs no change. Disassembled from samp.dll R5.
+static bool PatchBytes(uintptr_t addr, const uint8_t* expect, size_t expectLen,
+                       size_t patchOff, const void* data, size_t len) {
+    if (memcmp(reinterpret_cast<void*>(addr), expect, expectLen) != 0) return false;
+    DWORD old = 0;
+    if (!VirtualProtect(reinterpret_cast<void*>(addr + patchOff), len, PAGE_EXECUTE_READWRITE, &old))
+        return false;
+    memcpy(reinterpret_cast<void*>(addr + patchOff), data, len);
+    VirtualProtect(reinterpret_cast<void*>(addr + patchOff), len, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(addr), expectLen);
+    return true;
+}
+
+static void PatchChatLineLength(uintptr_t base) {
+    static const uint8_t kCmpWrap[] = {0x83, 0xF8, 0x48};             // cmp eax, 0x48
+    const uint8_t wrap = 0x7F;
+    PatchBytes(base + 0x67CA9, kCmpWrap, sizeof(kCmpWrap), 2, &wrap, 1);
+}
+
+// CChat (g_Chat at RVA 0x26EB80): +0xC m_bTimeStamp, +0x63DA m_bNeedsRedraw (chat.md §2).
+constexpr DWORD kRVA_g_Chat = 0x0026EB80;
+
+static bool EnableChatTimestamps() {
+    if (!g_sampBase) return false;
     auto base = reinterpret_cast<uintptr_t>(g_sampBase);
-    auto** ppNetGame = reinterpret_cast<void**>(base + kRVA_g_NetGame);
-    if (!*ppNetGame) return;
-
-    auto* pState = reinterpret_cast<uint8_t*>(
-        reinterpret_cast<uintptr_t>(*ppNetGame) + kNetGameStateOffset);
-
-    if (*pState == 9)
-        *pState = 5;
+    auto* chat = *reinterpret_cast<uint8_t**>(base + kRVA_g_Chat);
+    if (!chat) return false;
+    chat[0xC] = 1;
+    *reinterpret_cast<uint32_t*>(chat + 0x63DA) = 1;
+    return true;
 }
 
 // ── Hook installer thread ───────────────────────────────────────────
@@ -143,8 +217,15 @@ DWORD WINAPI SampHookThread(LPVOID) {
 
     // Patch format strings immediately (before SA-MP uses them)
     size_t imageSize = GetModuleImageSize(g_sampBase);
-    if (imageSize > 0)
-        ScanAndPatchStrings(reinterpret_cast<uintptr_t>(g_sampBase), imageSize);
+    uintptr_t sampAddr = reinterpret_cast<uintptr_t>(g_sampBase);
+    if (imageSize > 0) {
+        ScanAndPatchStrings(sampAddr, imageSize);
+        ScanAndPatchRaw(sampAddr, imageSize);
+        PatchChatLineLength(sampAddr);
+    }
+
+    // Write SKR signature so the server can identify us via sendClientCheck
+    WriteSkrSignature();
 
     // Wait for SA-MP to finish installing its hooks (game state >= 8)
     auto* pGameState = reinterpret_cast<volatile DWORD*>(kGtaGameState);
@@ -159,10 +240,17 @@ DWORD WINAPI SampHookThread(LPVOID) {
     // Patch CNetGame session name once
     PatchNetGameSessionName();
 
-    // Tick loop: force-skip class selection + re-patch session name
+    // Per-frame game-thread tick (chains whatever is already at the call site)
+    skr::game_state::InstallProcessHook();
+
+    // Panel behind the native SA-MP chat (verified call site, skipped if bytes differ)
+    skr::render::InstallChatBoxHook();
+
+    // Tick loop: re-patch session name periodically
+    bool timestampsOn = false;
     while (!g_shutdown.load()) {
-        ForceSkipClassSelection();
         PatchNetGameSessionName();
+        if (!timestampsOn) timestampsOn = EnableChatTimestamps();
         Sleep(100);
     }
 

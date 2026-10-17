@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="ro"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SKR Telefon</title>
+<style>
+:root {
+  --hud-scale: 1;
+  --phone-size: 0.8;   /* phone-only factor on top of the HUD scale */
+  --hud-text: #f0f4f7;
+  --hud-secondary: #a7b4c0;
+  --hud-muted: #84939f;
+  --hud-cyan: #74dce8;
+  --hud-gold: #d4b475;
+  --hud-red: #e85b68;
+  --hud-green: #3ccf7a;
+  --screen: #0f141a;
+  --card: rgba(255,255,255,.06);
+  --card-strong: rgba(15,20,26,.62);
+  --card-border: rgba(210,225,233,.12);
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; }
+body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); -webkit-font-smoothing:antialiased; user-select:none; font-variant-numeric:tabular-nums; }
+body.is-hidden { display:none; }
+[hidden] { display:none !important; }
+button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; }
+input, textarea { font:inherit; color:var(--hud-text); }
+
+.phone {
+  position:absolute; right:calc(48px * var(--hud-scale)); bottom:calc(40px * var(--hud-scale));
+  width:300px; height:620px; padding:10px;
+  border-radius:48px; background:#06080b;
+  border:1px solid rgba(210,225,233,.18);
+  box-shadow:0 0 0 2px #1c232b inset, 0 18px 50px rgba(0,0,0,.55);
+  transform-origin:bottom right;
+  transform:scale(calc(var(--hud-scale) * var(--phone-size)));
+  animation:slideUp 220ms ease-out;
+}
+@keyframes slideUp { from { opacity:0; transform:translateY(60px) scale(calc(var(--hud-scale) * var(--phone-size))); } to { opacity:1; transform:translateY(0) scale(calc(var(--hud-scale) * var(--phone-size))); } }
+
+.screen { position:relative; width:100%; height:100%; border-radius:38px; overflow:hidden; background:var(--screen); }
+.wallpaper { position:absolute; inset:0; transition:background 300ms; }
+.wallpaper[data-wp="noapte"] { background:radial-gradient(120% 70% at 20% 0%, #253446 0%, #0f141a 60%); }
+.wallpaper[data-wp="auriu"]  { background:radial-gradient(110% 70% at 80% 0%, #4a3b1f 0%, #14120d 55%, #0d0c09 100%); }
+.wallpaper[data-wp="ocean"]  { background:linear-gradient(165deg, #12405a 0%, #0c2232 50%, #070f16 100%); }
+.wallpaper[data-wp="apus"]   { background:linear-gradient(170deg, #5a2a3a 0%, #2a1730 45%, #0e0b14 100%); }
+.island { position:absolute; top:10px; left:50%; width:96px; height:28px; margin-left:-48px; border-radius:16px; background:#000; z-index:5; }
+
+.status { position:absolute; top:0; left:0; right:0; height:48px; padding:16px 26px 0; display:flex; justify-content:space-between; font-size:13px; font-weight:600; z-index:4; }
+.status__icons { display:flex; gap:6px; align-items:center; }
+.status__icons svg { width:16px; height:12px; fill:var(--hud-text); }
+
+.home-bar { position:absolute; bottom:8px; left:50%; width:110px; height:5px; margin-left:-55px; border-radius:3px; background:rgba(240,244,247,.75); z-index:5; cursor:pointer; }
+.view { position:absolute; inset:48px 0 22px; display:flex; flex-direction:column; }
+
+/* Home */
+.home__clock { padding:14px 22px 0; }
+.home__time { font-size:56px; font-weight:300; letter-spacing:-1.5px; line-height:1; }
+.home__date { margin-top:4px; font-size:13px; color:var(--hud-secondary); text-transform:capitalize; }
+.widgets { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:14px 16px 0; }
+.widget { padding:10px 11px; border-radius:16px; background:var(--card-strong); border:1px solid var(--card-border); backdrop-filter:blur(6px); text-align:left; min-width:0; }
+.widget--wide { grid-column:1 / -1; display:flex; align-items:center; gap:10px; }
+.widget__label { font-size:10px; letter-spacing:1px; text-transform:uppercase; color:var(--hud-muted); }
+.widget__value { margin-top:3px; font-size:15px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.widget__sub { font-size:12px; color:var(--hud-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.widget__icon { width:30px; height:30px; flex:0 0 30px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:linear-gradient(160deg,#3ccf7a,#1f9a55); }
+.widget__icon svg { width:16px; height:16px; fill:none; stroke:#fff; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.widget__main { min-width:0; flex:1; }
+
+.apps { margin-top:auto; margin-bottom:14px; padding:0 18px; display:grid; grid-template-columns:repeat(4, 1fr); gap:14px 8px; }
+.app { display:flex; flex-direction:column; align-items:center; gap:5px; font-size:10.5px; color:var(--hud-secondary); position:relative; }
+.app__icon { width:50px; height:50px; border-radius:14px; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,.08); box-shadow:0 4px 10px rgba(0,0,0,.25); }
+.app__icon svg { width:24px; height:24px; fill:none; stroke:#fff; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+.app__badge { position:absolute; top:-4px; right:2px; min-width:18px; height:18px; padding:0 5px; border-radius:9px; background:var(--hud-red); color:#fff; font-size:11px; font-weight:700; line-height:18px; text-align:center; }
+.app--sms .app__icon      { background:linear-gradient(160deg,#3ccf7a,#1f9a55); }
+.app--contacts .app__icon { background:linear-gradient(160deg,#8e9aa6,#5a6672); }
+.app--gps .app__icon      { background:linear-gradient(160deg,#5cc8e6,#2b7fb8); }
+.app--map .app__icon      { background:linear-gradient(160deg,#6fcf97,#2f8f6a); }
+.app--wallet .app__icon   { background:linear-gradient(160deg,#e3c587,#b08d48); }
+.app--bank .app__icon     { background:linear-gradient(160deg,#5b7cfa,#3048b8); }
+.app--notes .app__icon    { background:linear-gradient(160deg,#f5d36a,#d39b2a); }
+.app--settings .app__icon { background:linear-gradient(160deg,#6b7480,#3c444e); }
+
+/* App pages */
+.page { background:rgba(15,20,26,.94); }
+.page__head { height:44px; padding:0 16px; display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--card-border); }
+.page__back { color:var(--hud-cyan); font-size:14px; }
+.page__title { font-size:15px; font-weight:600; margin-left:auto; margin-right:auto; transform:translateX(-22px); }
+.page__body { flex:1; overflow-y:auto; padding:12px 14px; }
+.page__body::-webkit-scrollbar { width:0; }
+.empty { margin-top:36px; text-align:center; color:var(--hud-muted); font-size:13px; }
+
+.list__item { width:100%; display:flex; align-items:center; gap:10px; padding:10px; margin-bottom:6px; border-radius:12px; background:var(--card); border:1px solid var(--card-border); text-align:left; }
+.list__item.is-selected { border-color:var(--hud-cyan); }
+.avatar { width:34px; height:34px; flex:0 0 34px; border-radius:50%; background:#2a3a4a; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; color:var(--hud-cyan); }
+.list__main { min-width:0; flex:1; }
+.list__name { font-size:14px; font-weight:600; }
+.list__sub { font-size:12px; color:var(--hud-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.unread { width:8px; height:8px; border-radius:50%; background:var(--hud-cyan); }
+.icon-btn { width:28px; height:28px; border-radius:8px; color:var(--hud-muted); display:flex; align-items:center; justify-content:center; }
+.icon-btn:hover { color:var(--hud-red); background:rgba(232,91,104,.12); }
+
+.thread { display:flex; flex-direction:column; gap:6px; }
+.bubble { max-width:78%; padding:8px 11px; border-radius:16px; font-size:13px; line-height:1.35; overflow-wrap:anywhere; }
+.bubble--in { align-self:flex-start; background:#26303a; border-bottom-left-radius:5px; }
+.bubble--out { align-self:flex-end; background:#2a8f5c; border-bottom-right-radius:5px; }
+.composer { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--card-border); }
+.composer input { flex:1; min-width:0; height:34px; padding:0 12px; border-radius:17px; border:1px solid var(--card-border); background:rgba(0,0,0,.35); outline:none; }
+.composer input:focus { border-color:var(--hud-cyan); }
+.composer button { width:34px; height:34px; flex:0 0 34px; border-radius:50%; background:var(--hud-cyan); display:flex; align-items:center; justify-content:center; }
+.composer button svg { width:16px; height:16px; fill:#0f141a; }
+.error { margin:0 12px 6px; font-size:12px; color:var(--hud-red); }
+.ok { color:var(--hud-green); }
+
+.card { padding:14px; margin-bottom:10px; border-radius:14px; background:var(--card); border:1px solid var(--card-border); }
+.card__label { font-size:11px; letter-spacing:1px; color:var(--hud-muted); text-transform:uppercase; }
+.card__value { margin-top:4px; font-size:17px; font-weight:600; }
+.card__sub { margin-top:2px; font-size:13px; color:var(--hud-secondary); }
+.card__value--big { font-size:30px; font-weight:700; }
+.btn { margin-top:10px; width:100%; height:38px; border-radius:10px; background:var(--hud-cyan); color:#0f141a; font-weight:700; font-size:13px; }
+.btn:disabled { opacity:.4; cursor:default; }
+.btn--danger { background:rgba(232,91,104,.16); color:var(--hud-red); }
+.field { width:100%; height:38px; margin-top:8px; padding:0 12px; border-radius:10px; border:1px solid var(--card-border); background:rgba(0,0,0,.35); outline:none; }
+.field:focus { border-color:var(--hud-cyan); }
+textarea.field { height:70px; padding:8px 12px; resize:none; }
+.gps-dist { margin-top:10px; font-size:24px; font-weight:700; color:var(--hud-cyan); }
+.gps-dist small { font-size:12px; font-weight:500; color:var(--hud-muted); margin-left:4px; }
+.hint { font-size:12px; color:var(--hud-muted); text-align:center; margin-top:6px; }
+.history__row { display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid var(--card-border); }
+.history__row:last-child { border-bottom:0; }
+.history__amount--in { color:var(--hud-green); font-weight:600; }
+.history__amount--out { color:var(--hud-red); font-weight:600; }
+
+.bank-card {
+  position:relative; height:150px; margin-bottom:10px; padding:14px 16px;
+  border-radius:16px; overflow:hidden; display:flex; flex-direction:column;
+  background:linear-gradient(135deg, #2b3646 0%, #18202b 55%, #0f141a 100%);
+  border:1px solid rgba(212,180,117,.35);
+  box-shadow:0 8px 22px rgba(0,0,0,.45);
+}
+.bank-card::after {
+  content:''; position:absolute; right:-40px; top:-50px; width:170px; height:170px; border-radius:50%;
+  background:radial-gradient(circle, rgba(212,180,117,.22) 0%, rgba(212,180,117,0) 70%);
+}
+.bank-card__top { display:flex; align-items:baseline; gap:6px; }
+.bank-card__brand { font-family:'Bahnschrift Condensed','Bahnschrift','Arial Narrow',sans-serif; font-stretch:condensed; font-weight:700; font-size:22px; letter-spacing:1px; color:var(--hud-gold); }
+.bank-card__bank { font-size:10px; font-weight:600; letter-spacing:2px; color:var(--hud-secondary); }
+.bank-card__chip { width:34px; height:25px; margin-top:12px; border-radius:5px; background:linear-gradient(135deg,#e3c587,#a8843f); box-shadow:inset 0 0 0 1px rgba(0,0,0,.25); }
+.bank-card__number { margin-top:10px; font-size:15px; letter-spacing:2px; font-weight:600; color:var(--hud-text); }
+.bank-card__bottom { margin-top:auto; display:flex; justify-content:space-between; align-items:flex-end; gap:10px; }
+.bank-card__label { font-size:9px; letter-spacing:1px; text-transform:uppercase; color:var(--hud-muted); }
+.bank-card__holder { font-size:12px; font-weight:600; text-transform:uppercase; max-width:130px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bank-card__balance { font-size:17px; font-weight:700; }
+
+.wp-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; margin-top:10px; }
+.wp { height:64px; border-radius:10px; border:2px solid transparent; position:relative; overflow:hidden; }
+.wp.is-active { border-color:var(--hud-cyan); }
+.wp .wallpaper { border-radius:8px; }
+
+.toast { position:absolute; top:46px; left:12px; right:12px; z-index:6; padding:10px 12px; border-radius:14px; background:rgba(30,38,46,.96); border:1px solid var(--card-border); font-size:12.5px; box-shadow:0 8px 20px rgba(0,0,0,.4); animation:toastIn 200ms ease-out; }
+.toast b { display:block; font-size:12px; color:var(--hud-cyan); margin-bottom:2px; }
+@keyframes toastIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:none; } }
+</style>
+</head><body class="is-hidden">
+<div class="phone" id="phone">
+  <div class="screen">
+    <div class="wallpaper" id="wallpaper" data-wp="noapte"></div>
+    <div class="island"></div>
+    <div class="status">
+      <span id="statusTime">--:--</span>
+      <span class="status__icons">
+        <svg viewBox="0 0 16 12"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="4.3" y="5.5" width="3" height="6.5" rx="1"/><rect x="8.6" y="3" width="3" height="9" rx="1"/><rect x="12.9" y="0" width="3" height="12" rx="1"/></svg>
+        <svg viewBox="0 0 26 12" style="width:24px"><rect x="0.5" y="0.5" width="22" height="11" rx="3" fill="none" stroke="#f0f4f7" opacity=".6"/><rect x="2" y="2" width="17" height="8" rx="1.5"/><rect x="23.5" y="4" width="2" height="4" rx="1"/></svg>
+      </span>
+    </div>
+    <div class="toast" id="toast" hidden></div>
+
+    <!-- Home -->
+    <section class="view" id="viewHome">
+      <div class="home__clock">
+        <div class="home__time" id="homeTime">--:--</div>
+        <div class="home__date" id="homeDate"></div>
+      </div>
+      <div class="widgets">
+        <button class="widget" data-open="gps">
+          <div class="widget__label">Locație</div>
+          <div class="widget__value" id="wCity">-</div>
+          <div class="widget__sub" id="wArea">-</div>
+        </button>
+        <button class="widget" data-open="wallet">
+          <div class="widget__label">Numerar</div>
+          <div class="widget__value" id="wCash">$ 0</div>
+          <div class="widget__sub" id="wPin">Fără destinație</div>
+        </button>
+        <button class="widget widget--wide" data-open="sms">
+          <span class="widget__icon"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12Z"/></svg></span>
+          <span class="widget__main">
+            <div class="widget__value" id="wMsgTitle">Niciun mesaj nou</div>
+            <div class="widget__sub" id="wMsgText">Mesajele apar aici.</div>
+          </span>
+        </button>
+      </div>
+      <div class="apps">
+        <button class="app app--sms" data-open="sms"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12Z"/></svg></span>Mesaje<span class="app__badge" id="smsBadge" hidden>0</span></button>
+        <button class="app app--contacts" data-open="contacts"><span class="app__icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.4 4.2-6.5 8-6.5s7 2.1 8 6.5"/></svg></span>Contacte</button>
+        <button class="app app--gps" data-open="gps"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/></svg></span>GPS</button>
+        <button class="app app--map" id="appMap"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2ZM9 4v14M15 6v14"/></svg></span>Hartă</button>
+        <button class="app app--wallet" data-open="wallet"><span class="app__icon"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M16 12.5h2M3 9.5h18"/></svg></span>Portofel</button>
+        <button class="app app--bank" data-open="bank"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="m3 9 9-5 9 5ZM4 20h16M6 11v6M10 11v6M14 11v6M18 11v6"/></svg></span>Bancă</button>
+        <button class="app app--notes" data-open="notes"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6Z"/><path d="M9 11h7M9 15h7M15 3v4h4"/></svg></span>Notițe</button>
+        <button class="app app--settings" data-open="settings"><span class="app__icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></span>Setări</button>
+      </div>
+    </section>
+
+    <!-- Messages list -->
+    <section class="view page" id="viewSms" hidden>
+      <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">Mesaje</span></div>
+      <div class="page__body" id="smsList"></div>
+    </section>
+
+    <!-- Thread -->
+    <section class="view page" id="viewThread" hidden>
+      <div class="page__head"><button class="page__back" data-open="sms">‹ Mesaje</button><span class="page__title" id="threadTitle"></span></div>
+      <div class="page__body"><div class="thread" id="thread"></div></div>
+      <div class="error" id="smsError" hidden></div>
+      <form class="composer" id="composer">
+        <input id="smsInput" maxlength="120" placeholder="Mesaj" autocomplete="off">
+        <button type="submit" aria-label="Trimite"><svg viewBox="0 0 16 16"><path d="M1 8 15 1l-3.5 14-3.2-5.2L1 8Z"/></svg></button>
+      </form>
+    </section>
+
+    <!-- Contacts -->
+    <section class="view page" id="viewContacts" hidden>
+      <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">Contacte</span></div>
+      <div class="page__body" id="contactList"></div>
+    </section>
+
+    <!-- GPS -->
+    <section class="view page" id="viewGps" hidden>
+      <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">GPS</span></div>
+      <div class="page__body">
+        <div class="card"><div class="card__label">Locație curentă</div><div class="card__value" id="gpsCity">-</div><div class="card__sub" id="gpsArea">-</div></div>
+        <div class="card"><div class="card__label">Destinație</div><div class="card__value" id="gpsPin">Niciun pin</div>
+          <div class="card__sub" id="gpsPinArea" hidden></div>
+          <div class="gps-dist" id="gpsPinDist" hidden></div>
+          <button class="btn btn--danger" id="gpsClear" hidden>Șterge pin</button></div>
+        <div class="hint">Pune un pin din aplicația Hartă sau cu M.</div>
+      </div>
+    </section>
+
+    <!-- Wallet -->
+    <section class="view page" id="viewWallet" hidden>
+      <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">Portofel</span></div>
+      <div class="page__body">
+        <div class="card"><div class="card__label">Numerar</div><div class="card__value card__value--big" id="walletCash">$ 0</div></div>
+        <div class="card"><div class="card__label">Titular</div><div class="card__value" id="walletName">-</div><div class="card__sub" id="walletId"></div></div>
+      </div>
+    </section>
+
+    <!-- Bank -->
+    <section class="view page" id="viewBank" hidden>
+      <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">Bancă</span></div>
+      <div class="page__body">
+        <div class="bank-card" aria-label="Card bancar">
+          <div class="bank-card__top">
+            <span class="bank-card__brand">SKR</span>
+            <span class="bank-card__bank">BANK</span>
+          </div>
+          <div class="bank-card__chip"></div>
+          <div class="bank-card__number" id="bankCardNo">•••• •••• •••• 0000</div>
+          <div class="bank-card__bottom">
+            <div><div class="bank-card__label">Titular</div><div class="bank-card__holder" id="bankHolder">-</div></div>
+            <div style="text-align:right"><div class="bank-card__label">Sold</div><div class="bank-card__balance" id="bankCash">$ 0</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card__label">Transfer către</div>
+          <div id="bankRecipients" style="margin-top:8px"></div>
+          <input class="field" id="bankAmount" inputmode="numeric" maxlength="9" placeholder="Sumă ($)" autocomplete="off">
+          <button class="btn" id="bankSend" disabled>Trimite</button>
+          <div class="hint" id="bankResult"></div>
+        </div>
+        <div class="card"><div class="card__label">Istoric (sesiunea curentă)</div><div id="bankHistory"><div class="empty" style="margin-top:10px">Niciun transfer.</div></div></div>
+      </div>
+    </section>
+
+    <!-- Notes -->
+    <section class="view page" id="viewNotes" hidden>
+      <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">Notițe</span></div>
+      <div class="page__body">
+        <textarea class="field" id="noteInput" maxlength="200" placeholder="Notiță nouă"></textarea>
+        <button class="btn" id="noteAdd">Salvează</button>
+        <div id="noteList" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="view page" id="viewSettings" hidden>
+      <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">Setări</span></div>
+      <div class="page__body">
+        <div class="card"><div class="card__label">Fundal ecran</div><div class="wp-grid" id="wpGrid"></div></div>
+        <div class="card"><div class="card__label">Despre telefon</div><div class="card__value">SKR Phone</div><div class="card__sub" id="aboutOwner">-</div></div>
+      </div>
+    </section>
+
+    <div class="home-bar" data-home title="Acasă"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var fmt = new Intl.NumberFormat('ro-RO');
+  var MAX_THREADS = 20, MAX_PER_THREAD = 50, MAX_NOTES = 30;
+  var WALLPAPERS = ['noapte', 'auriu', 'ocean', 'apus'];
+
+  var state = { id: -1, name: '', cash: 0, city: '-', area: '-', pin: false, pinX: 0, pinY: 0, pinCity: '', pinArea: '', pinDist: 0 };
+  var threads = {};
+  var currentPeer = null;
+  var lastIncoming = null;
+  var contacts = [];
+  var bankTo = null;
+  var transfers = [];
+  var views = { home: 'viewHome', sms: 'viewSms', thread: 'viewThread', contacts: 'viewContacts', gps: 'viewGps',
+                wallet: 'viewWallet', bank: 'viewBank', notes: 'viewNotes', settings: 'viewSettings' };
+  var currentView = 'home';
+  var toastTimer = null;
+
+  // Per-viewer conveniences only (wallpaper, notes); the page works without storage.
+  function load(key, fallback) { try { var v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch (e) { return fallback; } }
+  function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
+
+  function resize() {
+    var s = Math.max(0.75, Math.min(1.5, Math.min(window.innerWidth / 1672, window.innerHeight / 941)));
+    document.documentElement.style.setProperty('--hud-scale', String(s));
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function emit() { if (typeof cef !== 'undefined' && cef.emit) cef.emit.apply(cef, arguments); }
+  function parse(a) { try { return typeof a === 'string' ? JSON.parse(a) : a; } catch (e) { return null; } }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function money(n) { return '$ ' + fmt.format(Math.max(0, Number(n) || 0)); }
+
+  function tick() {
+    var d = new Date(), t = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    $('statusTime').textContent = t;
+    $('homeTime').textContent = t;
+    $('homeDate').textContent = d.toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+  setInterval(tick, 1000);
+  tick();
+
+  function toast(title, text) {
+    var t = $('toast');
+    t.textContent = '';
+    t.appendChild(el('b', null, title));
+    t.appendChild(document.createTextNode(text));
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, 3500);
+  }
+
+  function show(name) {
+    currentView = name;
+    Object.keys(views).forEach(function (k) { $(views[k]).hidden = k !== name; });
+    if (name === 'home') renderHome();
+    if (name === 'sms') renderSmsList();
+    if (name === 'contacts') { renderContacts(null); emit('phone:contacts'); }
+    if (name === 'gps') renderGps();
+    if (name === 'wallet') renderWallet();
+    if (name === 'bank') { renderBank(); emit('phone:contacts'); }
+    if (name === 'notes') renderNotes();
+    if (name === 'settings') renderSettings();
+    if (name === 'thread') { renderThread(); setTimeout(function () { $('smsInput').focus(); }, 0); }
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-open],[data-home]');
+    if (!t) return;
+    if (t.hasAttribute('data-home')) show('home'); else show(t.getAttribute('data-open'));
+  });
+  $('appMap').addEventListener('click', function () { emit('phone:openMap'); });
+
+  /* ── Home ─────────────────────────────────────────── */
+  function renderHome() {
+    $('wCity').textContent = state.city || '-';
+    $('wArea').textContent = state.area || '-';
+    $('wCash').textContent = money(state.cash);
+    $('wPin').textContent = state.pin ? (state.pinCity || 'Destinație') + ' · ' + distText(state.pinDist) : 'Fără destinație';
+    var unread = unreadCount();
+    if (lastIncoming) {
+      $('wMsgTitle').textContent = unread ? unread + (unread === 1 ? ' mesaj nou' : ' mesaje noi') : lastIncoming.name;
+      $('wMsgText').textContent = lastIncoming.text;
+    } else {
+      $('wMsgTitle').textContent = 'Niciun mesaj nou';
+      $('wMsgText').textContent = 'Mesajele apar aici.';
+    }
+  }
+  function distText(m) {
+    m = Math.max(0, Number(m) || 0);
+    return m >= 1000 ? (m / 1000).toFixed(1).replace('.', ',') + ' km' : Math.round(m) + ' m';
+  }
+
+  /* ── Messages ─────────────────────────────────────── */
+  function unreadCount() { var n = 0; Object.keys(threads).forEach(function (k) { n += threads[k].unread; }); return n; }
+  function updateBadge() {
+    var n = unreadCount();
+    $('smsBadge').hidden = n === 0;
+    $('smsBadge').textContent = String(n);
+  }
+  function openThread(peer, name) {
+    if (!threads[peer]) threads[peer] = { name: name, msgs: [], unread: 0 };
+    threads[peer].unread = 0;
+    currentPeer = peer;
+    updateBadge();
+    show('thread');
+  }
+  function renderSmsList() {
+    var list = $('smsList');
+    list.textContent = '';
+    var ids = Object.keys(threads);
+    if (!ids.length) { list.appendChild(el('div', 'empty', 'Nicio conversație. Începe una din Contacte.')); return; }
+    ids.forEach(function (id) {
+      var th = threads[id], last = th.msgs[th.msgs.length - 1];
+      var item = el('button', 'list__item');
+      item.appendChild(el('span', 'avatar', th.name.charAt(0).toUpperCase()));
+      var main = el('span', 'list__main');
+      main.appendChild(el('div', 'list__name', th.name));
+      main.appendChild(el('div', 'list__sub', last ? (last.out ? 'Tu: ' : '') + last.text : ''));
+      item.appendChild(main);
+      if (th.unread) item.appendChild(el('span', 'unread'));
+      item.addEventListener('click', function () { openThread(Number(id), th.name); });
+      list.appendChild(item);
+    });
+  }
+  function renderThread() {
+    var th = threads[currentPeer];
+    $('threadTitle').textContent = th ? th.name : '';
+    $('smsError').hidden = true;
+    var box = $('thread');
+    box.textContent = '';
+    if (!th || !th.msgs.length) { box.appendChild(el('div', 'empty', 'Scrie primul mesaj.')); return; }
+    th.msgs.forEach(function (m) { box.appendChild(el('div', 'bubble ' + (m.out ? 'bubble--out' : 'bubble--in'), m.text)); });
+    box.parentNode.scrollTop = box.parentNode.scrollHeight;
+  }
+  $('composer').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var text = $('smsInput').value.trim();
+    if (!text || currentPeer == null) return;
+    emit('phone:sms', currentPeer, text.slice(0, 120));
+    $('smsInput').value = '';
+  });
+  function addSms(d) {
+    if (!d || typeof d.text !== 'string' || !isFinite(d.peer)) return;
+    var th = threads[d.peer];
+    if (!th) {
+      if (Object.keys(threads).length >= MAX_THREADS) delete threads[Object.keys(threads)[0]];
+      th = threads[d.peer] = { name: String(d.peerName || ('ID ' + d.peer)), msgs: [], unread: 0 };
+    }
+    th.msgs.push({ out: !!d.out, text: d.text });
+    if (th.msgs.length > MAX_PER_THREAD) th.msgs.shift();
+    var viewing = currentView === 'thread' && currentPeer === d.peer;
+    if (!d.out) {
+      lastIncoming = { name: th.name, text: d.text };
+      if (!viewing) { th.unread++; toast(th.name, d.text); }
+    }
+    updateBadge();
+    if (viewing) renderThread();
+    if (currentView === 'sms') renderSmsList();
+    if (currentView === 'home') renderHome();
+  }
+
+  /* ── Contacts ─────────────────────────────────────── */
+  function renderContacts(list) {
+    var box = $('contactList');
+    box.textContent = '';
+    if (!list) { box.appendChild(el('div', 'empty', 'Se încarcă…')); return; }
+    if (!list.length) { box.appendChild(el('div', 'empty', 'Niciun alt jucător online.')); return; }
+    list.forEach(function (c) {
+      var item = el('button', 'list__item');
+      item.appendChild(el('span', 'avatar', String(c.name).charAt(0).toUpperCase()));
+      var main = el('span', 'list__main');
+      main.appendChild(el('div', 'list__name', c.name));
+      main.appendChild(el('div', 'list__sub', 'ID ' + c.id));
+      item.appendChild(main);
+      item.addEventListener('click', function () { openThread(c.id, c.name); });
+      box.appendChild(item);
+    });
+  }
+
+  /* ── GPS / Wallet ─────────────────────────────────── */
+  function renderGps() {
+    $('gpsCity').textContent = state.city || '-';
+    $('gpsArea').textContent = state.area || '-';
+    $('gpsPin').textContent = state.pin ? (state.pinCity || '-') : 'Niciun pin';
+    $('gpsPinArea').textContent = state.pin ? (state.pinArea || '-') : '';
+    $('gpsPinArea').hidden = !state.pin;
+    var distEl = $('gpsPinDist');
+    distEl.hidden = !state.pin;
+    distEl.textContent = '';
+    if (state.pin) {
+      var m = Math.max(0, Number(state.pinDist) || 0);
+      distEl.appendChild(document.createTextNode(m >= 1000 ? (m / 1000).toFixed(1).replace('.', ',') : String(Math.round(m))));
+      distEl.appendChild(el('small', null, m >= 1000 ? 'km rămași' : 'm rămași'));
+    }
+    $('gpsClear').hidden = !state.pin;
+  }
+  $('gpsClear').addEventListener('click', function () { emit('phone:unpin'); });
+  function renderWallet() {
+    $('walletCash').textContent = money(state.cash);
+    $('walletName').textContent = state.name || '-';
+    $('walletId').textContent = state.id >= 0 ? 'ID ' + state.id : '';
+  }
+
+  /* ── Bank ─────────────────────────────────────────── */
+  function renderBank() {
+    $('bankCash').textContent = money(state.cash);
+    $('bankHolder').textContent = state.name || '-';
+    // Decorative only: derived from the player ID, not a real account number.
+    $('bankCardNo').textContent = '•••• •••• •••• ' + String(Math.max(0, state.id)).padStart(4, '0');
+    var box = $('bankRecipients');
+    box.textContent = '';
+    if (!contacts.length) box.appendChild(el('div', 'list__sub', 'Niciun alt jucător online.'));
+    contacts.forEach(function (c) {
+      var item = el('button', 'list__item' + (bankTo === c.id ? ' is-selected' : ''));
+      item.appendChild(el('span', 'avatar', String(c.name).charAt(0).toUpperCase()));
+      var main = el('span', 'list__main');
+      main.appendChild(el('div', 'list__name', c.name));
+      main.appendChild(el('div', 'list__sub', 'ID ' + c.id));
+      item.appendChild(main);
+      item.addEventListener('click', function () { bankTo = c.id; renderBank(); validateBank(); });
+      box.appendChild(item);
+    });
+    var hist = $('bankHistory');
+    hist.textContent = '';
+    if (!transfers.length) { hist.appendChild(el('div', 'empty', 'Niciun transfer.')); hist.firstChild.style.marginTop = '10px'; }
+    transfers.slice().reverse().forEach(function (t) {
+      var row = el('div', 'history__row');
+      row.appendChild(el('span', null, (t.out ? 'Către ' : 'De la ') + t.name));
+      row.appendChild(el('span', t.out ? 'history__amount--out' : 'history__amount--in', (t.out ? '− ' : '+ ') + money(t.amount)));
+      hist.appendChild(row);
+    });
+    validateBank();
+  }
+  function bankAmount() { var n = parseInt(String($('bankAmount').value).replace(/\D/g, ''), 10); return isFinite(n) ? n : 0; }
+  function validateBank() {
+    var a = bankAmount();
+    $('bankSend').disabled = !(bankTo != null && a > 0 && a <= state.cash);
+  }
+  $('bankAmount').addEventListener('input', function () {
+    this.value = this.value.replace(/\D/g, '');
+    validateBank();
+  });
+  $('bankSend').addEventListener('click', function () {
+    var a = bankAmount();
+    if (bankTo == null || a <= 0) return;
+    $('bankSend').disabled = true;
+    $('bankResult').className = 'hint';
+    $('bankResult').textContent = 'Se procesează…';
+    emit('phone:transfer', bankTo, a);
+  });
+  function onTransferResult(d) {
+    if (!d) return;
+    $('bankResult').className = 'hint ' + (d.ok ? 'ok' : 'error');
+    $('bankResult').textContent = String(d.text || '');
+    if (d.ok) {
+      transfers.push({ out: true, name: String(d.name || ''), amount: Number(d.amount) || 0 });
+      $('bankAmount').value = '';
+    }
+    if (currentView === 'bank') renderBank();
+  }
+  function onTransferIn(d) {
+    if (!d) return;
+    transfers.push({ out: false, name: String(d.name || ''), amount: Number(d.amount) || 0 });
+    toast('Bancă', 'Ai primit ' + money(d.amount) + ' de la ' + d.name + '.');
+    if (currentView === 'bank') renderBank();
+  }
+
+  /* ── Notes ────────────────────────────────────────── */
+  var notes = load('skr.phone.notes', []);
+  if (!Array.isArray(notes)) notes = [];
+  function renderNotes() {
+    var list = $('noteList');
+    list.textContent = '';
+    if (!notes.length) { list.appendChild(el('div', 'empty', 'Nicio notiță.')); return; }
+    notes.forEach(function (n, i) {
+      var item = el('div', 'list__item');
+      var main = el('span', 'list__main');
+      main.appendChild(el('div', 'list__name', n.text));
+      main.appendChild(el('div', 'list__sub', new Date(n.at).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })));
+      item.appendChild(main);
+      var del = el('button', 'icon-btn', '✕');
+      del.title = 'Șterge';
+      del.addEventListener('click', function () { notes.splice(i, 1); save('skr.phone.notes', notes); renderNotes(); });
+      item.appendChild(del);
+      list.appendChild(item);
+    });
+  }
+  $('noteAdd').addEventListener('click', function () {
+    var text = $('noteInput').value.trim().slice(0, 200);
+    if (!text) return;
+    notes.unshift({ text: text, at: Date.now() });
+    if (notes.length > MAX_NOTES) notes.length = MAX_NOTES;
+    save('skr.phone.notes', notes);
+    $('noteInput').value = '';
+    renderNotes();
+  });
+
+  /* ── Settings ─────────────────────────────────────── */
+  var wallpaper = load('skr.phone.wallpaper', 'noapte');
+  if (WALLPAPERS.indexOf(wallpaper) < 0) wallpaper = 'noapte';
+  $('wallpaper').setAttribute('data-wp', wallpaper);
+  function renderSettings() {
+    var grid = $('wpGrid');
+    grid.textContent = '';
+    WALLPAPERS.forEach(function (w) {
+      var b = el('button', 'wp' + (w === wallpaper ? ' is-active' : ''));
+      var bg = el('div', 'wallpaper');
+      bg.setAttribute('data-wp', w);
+      b.appendChild(bg);
+      b.title = w;
+      b.addEventListener('click', function () {
+        wallpaper = w;
+        save('skr.phone.wallpaper', w);
+        $('wallpaper').setAttribute('data-wp', w);
+        renderSettings();
+      });
+      grid.appendChild(b);
+    });
+    $('aboutOwner').textContent = state.name ? state.name + ' · ID ' + state.id : '-';
+  }
+
+  /* ── Keys / bridge ────────────────────────────────── */
+  window.addEventListener('keydown', function (e) {
+    if (e.repeat) return;
+    var tag = document.activeElement && document.activeElement.tagName;
+    var typing = tag === 'INPUT' || tag === 'TEXTAREA';
+    if (e.key === 'Escape' || (!typing && (e.key === 'l' || e.key === 'L'))) { e.preventDefault(); emit('phone:close'); }
+  });
+
+  window.skrPhone = {
+    state: function (d) {
+      if (!d) return;
+      state = d;
+      if (currentView === 'home') renderHome();
+      if (currentView === 'gps') renderGps();
+      if (currentView === 'wallet') renderWallet();
+      if (currentView === 'bank') { $('bankCash').textContent = money(state.cash); validateBank(); }
+    },
+    hide: function () { document.body.classList.add('is-hidden'); },
+    open: function () {
+      document.body.classList.remove('is-hidden');
+      var p = $('phone');
+      p.style.animation = 'none'; void p.offsetWidth; p.style.animation = '';
+      show('home');
+    },
+    contacts: function (list) {
+      contacts = Array.isArray(list) ? list : [];
+      if (bankTo != null && !contacts.some(function (c) { return c.id === bankTo; })) bankTo = null;
+      if (currentView === 'contacts') renderContacts(contacts);
+      if (currentView === 'bank') renderBank();
+    },
+    sms: addSms,
+    error: function (d) { if (d && d.text) { $('smsError').textContent = d.text; $('smsError').hidden = false; } },
+    transferResult: onTransferResult,
+    transferIn: onTransferIn
+  };
+
+  if (typeof cef !== 'undefined' && cef.on) {
+    cef.on('phone:open', function () { window.skrPhone.open(); });
+    cef.on('phone:hide', function () { window.skrPhone.hide(); });
+    cef.on('phone:state', function () { window.skrPhone.state(parse(arguments[0])); });
+    cef.on('phone:contactList', function () { window.skrPhone.contacts(parse(arguments[0])); });
+    cef.on('phone:smsIn', function () { window.skrPhone.sms(parse(arguments[0])); });
+    cef.on('phone:error', function () { window.skrPhone.error(parse(arguments[0])); });
+    cef.on('phone:transferResult', function () { window.skrPhone.transferResult(parse(arguments[0])); });
+    cef.on('phone:transferIn', function () { window.skrPhone.transferIn(parse(arguments[0])); });
+    cef.on('cef:escape_menu', function () { emit('phone:close'); });
+  }
+})();
+</script>
+</body></html>
