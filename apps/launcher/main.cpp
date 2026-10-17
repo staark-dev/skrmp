@@ -88,7 +88,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     auto result = skr::launcher::LaunchGame(config, gamePid);
 
     if (result != skr::launcher::LaunchResult::Success) {
-        wchar_t msg[256];
+        wchar_t msg[512];
         _snwprintf_s(msg, _TRUNCATE,
                      L"Failed to launch game: %S",
                      skr::launcher::LaunchResultToString(result));
@@ -96,15 +96,5 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
-    // Game launched and DLL injected successfully
-    wchar_t msg[256];
-    _snwprintf_s(msg, _TRUNCATE,
-                 L"Game launched (PID %lu).\n"
-                 L"SKR.Client.dll injected.\n"
-                 L"Connecting to %s:%u",
-                 gamePid,
-                 config.serverAddress.c_str(),
-                 config.serverPort);
-    MessageBoxW(nullptr, msg, L"SKR Client", MB_OK | MB_ICONINFORMATION);
     return 0;
 }

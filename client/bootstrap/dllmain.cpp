@@ -47,6 +47,11 @@ extern "C" __declspec(dllexport) BOOL __cdecl SkrGetLaunchParams(
     return TRUE;
 }
 
+extern "C" __declspec(dllexport) DWORD WINAPI SkrRemoteInit(LPVOID) noexcept {
+    return SkrInitialize() ? 0 : 1;
+}
+#pragma comment(linker, "/EXPORT:SkrRemoteInit=_SkrRemoteInit@4")
+
 extern "C" __declspec(dllexport) void __cdecl SkrShutdown() noexcept {
     if (g_acPolicy) {
         g_acPolicy->Shutdown();

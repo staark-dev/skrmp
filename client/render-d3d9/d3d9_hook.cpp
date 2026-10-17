@@ -6,10 +6,16 @@ namespace skr::render {
 
 namespace {
 
+// GTA SA stores the RenderWare D3D9 device pointer at this address (v1.0 / Steam classic)
+constexpr uintptr_t kGtaDevicePtr = 0x00C97C28;
+
 EndSceneFn g_origEndScene = nullptr;
 ResetFn    g_origReset    = nullptr;
+void**     g_hookedVtable = nullptr;
 IntroRenderer g_intro;
 std::atomic<bool> g_initialized{false};
+std::atomic<bool> g_hookInstalled{false};
+HANDLE g_hookThread = nullptr;
 LARGE_INTEGER g_lastTime{};
 LARGE_INTEGER g_freq{};
 
@@ -20,16 +26,6 @@ bool PatchVtable(void** vtable, int index, void* hook, void** original) {
         return false;
     *original = vtable[index];
     vtable[index] = hook;
-    VirtualProtect(entry, sizeof(void*), oldProtect, &oldProtect);
-    return true;
-}
-
-bool RestoreVtable(void** vtable, int index, void* original) {
-    DWORD oldProtect = 0;
-    void* entry = &vtable[index];
-    if (!VirtualProtect(entry, sizeof(void*), PAGE_READWRITE, &oldProtect))
-        return false;
-    vtable[index] = original;
     VirtualProtect(entry, sizeof(void*), oldProtect, &oldProtect);
     return true;
 }
@@ -49,10 +45,8 @@ HRESULT WINAPI HookedEndScene(IDirect3DDevice9* device) {
         float dt = static_cast<float>(now.QuadPart - g_lastTime.QuadPart)
                    / static_cast<float>(g_freq.QuadPart);
         g_lastTime = now;
-        // Clamp delta to avoid jumps after alt-tab
         if (dt > 0.1f) dt = 0.1f;
 
-        // Skip on any key press
         for (int vk = 0x01; vk <= 0xFE; ++vk) {
             if (vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON) continue;
             if (GetAsyncKeyState(vk) & 0x0001) {
@@ -77,60 +71,65 @@ HRESULT WINAPI HookedReset(IDirect3DDevice9* device, D3DPRESENT_PARAMETERS* pp) 
     return hr;
 }
 
-IDirect3DDevice9* CreateDummyDevice(IDirect3D9* d3d, HWND hwnd) {
-    D3DPRESENT_PARAMETERS pp{};
-    pp.Windowed = TRUE;
-    pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    pp.BackBufferFormat = D3DFMT_UNKNOWN;
-    pp.hDeviceWindow = hwnd;
+DWORD WINAPI D3D9HookThread(LPVOID) {
+    auto** ppDevice = reinterpret_cast<IDirect3DDevice9**>(kGtaDevicePtr);
 
-    IDirect3DDevice9* device = nullptr;
-    HRESULT hr = d3d->CreateDevice(
-        D3DADAPTER_DEFAULT, D3DDEVTYPE_NULLREF, hwnd,
-        D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_DISABLE_DRIVER_MANAGEMENT,
-        &pp, &device);
-    if (FAILED(hr)) return nullptr;
-    return device;
+    // Poll until GTA creates its D3D9 device (game main thread must be resumed)
+    for (int i = 0; i < 600; ++i) { // 30 seconds max
+        if (*ppDevice != nullptr) break;
+        Sleep(50);
+    }
+
+    IDirect3DDevice9* device = *ppDevice;
+    if (!device) return 1;
+
+    g_hookedVtable = *reinterpret_cast<void***>(device);
+
+    bool ok = true;
+    ok &= PatchVtable(g_hookedVtable, kVtableEndScene,
+                       reinterpret_cast<void*>(&HookedEndScene),
+                       reinterpret_cast<void**>(&g_origEndScene));
+    ok &= PatchVtable(g_hookedVtable, kVtableReset,
+                       reinterpret_cast<void*>(&HookedReset),
+                       reinterpret_cast<void**>(&g_origReset));
+
+    g_hookInstalled.store(ok);
+    return ok ? 0 : 1;
 }
 
 } // anonymous namespace
 
 bool InstallD3D9Hooks() {
-    IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    if (!d3d) return false;
-
-    HWND hwnd = CreateWindowExW(0, L"STATIC", L"", WS_OVERLAPPEDWINDOW,
-                                0, 0, 1, 1, nullptr, nullptr, nullptr, nullptr);
-    if (!hwnd) { d3d->Release(); return false; }
-
-    IDirect3DDevice9* dummy = CreateDummyDevice(d3d, hwnd);
-    if (!dummy) {
-        DestroyWindow(hwnd);
-        d3d->Release();
-        return false;
-    }
-
-    void** vtable = *reinterpret_cast<void***>(dummy);
-    bool ok = true;
-    ok &= PatchVtable(vtable, kVtableEndScene,
-                       reinterpret_cast<void*>(&HookedEndScene),
-                       reinterpret_cast<void**>(&g_origEndScene));
-    ok &= PatchVtable(vtable, kVtableReset,
-                       reinterpret_cast<void*>(&HookedReset),
-                       reinterpret_cast<void**>(&g_origReset));
-
-    dummy->Release();
-    DestroyWindow(hwnd);
-    d3d->Release();
-    return ok;
+    g_hookThread = CreateThread(nullptr, 0, D3D9HookThread, nullptr, 0, nullptr);
+    return g_hookThread != nullptr;
 }
 
 void RemoveD3D9Hooks() {
+    if (g_hookThread) {
+        WaitForSingleObject(g_hookThread, 5000);
+        CloseHandle(g_hookThread);
+        g_hookThread = nullptr;
+    }
+    if (g_hookInstalled.load() && g_hookedVtable) {
+        if (g_origEndScene) {
+            DWORD old = 0;
+            void* entry = &g_hookedVtable[kVtableEndScene];
+            VirtualProtect(entry, sizeof(void*), PAGE_READWRITE, &old);
+            g_hookedVtable[kVtableEndScene] = reinterpret_cast<void*>(g_origEndScene);
+            VirtualProtect(entry, sizeof(void*), old, &old);
+        }
+        if (g_origReset) {
+            DWORD old = 0;
+            void* entry = &g_hookedVtable[kVtableReset];
+            VirtualProtect(entry, sizeof(void*), PAGE_READWRITE, &old);
+            g_hookedVtable[kVtableReset] = reinterpret_cast<void*>(g_origReset);
+            VirtualProtect(entry, sizeof(void*), old, &old);
+        }
+    }
     g_intro.Shutdown();
-    // Vtable restoration requires the live device vtable, which may differ
-    // from the dummy. For MVP the DLL stays resident until game exit.
     g_origEndScene = nullptr;
     g_origReset = nullptr;
+    g_hookInstalled.store(false);
 }
 
 } // namespace skr::render

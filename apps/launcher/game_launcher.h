@@ -36,7 +36,12 @@ const char* LaunchResultToString(LaunchResult r);
 LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut);
 
 // Injects a DLL into a target process using CreateRemoteThread + LoadLibraryW.
-// Process must have PROCESS_ALL_ACCESS or equivalent.
-bool InjectDll(HANDLE hProcess, const wchar_t* dllPath);
+// Returns the remote HMODULE, or nullptr on failure.
+HMODULE InjectDll(HANDLE hProcess, const wchar_t* dllPath);
+
+// Resolves an exported function in the remote process by RVA calculation.
+LPTHREAD_START_ROUTINE FindRemoteExport(HMODULE remoteBase,
+                                         const wchar_t* dllPath,
+                                         const char* exportName);
 
 } // namespace skr::launcher
