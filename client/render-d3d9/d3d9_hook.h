@@ -1,0 +1,18 @@
+#pragma once
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <d3d9.h>
+
+namespace skr::render {
+
+// Indices into the IDirect3DDevice9 vtable
+constexpr int kVtableEndScene = 42;
+constexpr int kVtableReset    = 16;
+
+using EndSceneFn = HRESULT(WINAPI*)(IDirect3DDevice9*);
+using ResetFn    = HRESULT(WINAPI*)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
+
+bool InstallD3D9Hooks();
+void RemoveD3D9Hooks();
+
+} // namespace skr::render

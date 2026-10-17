@@ -16,10 +16,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(SKRLauncher WIN32 apps/launcher/main.cpp)
 target_link_libraries(SKRLauncher PRIVATE user32)
 
-# --- Client ASI ---
+# --- Client DLL (injected by launcher) ---
 add_library(SKRClient SHARED
   client/bootstrap/dllmain.cpp
   client/skrac/mock_adapter.cpp
+  client/render-d3d9/intro_renderer.cpp
+  client/render-d3d9/d3d9_hook.cpp
 )
 set_target_properties(SKRClient PROPERTIES
   OUTPUT_NAME "SKR.Client" PREFIX ""
@@ -28,6 +30,7 @@ target_include_directories(SKRClient PRIVATE
   ${CMAKE_SOURCE_DIR}/client
   ${CMAKE_SOURCE_DIR}/shared
 )
+target_link_libraries(SKRClient PRIVATE d3d9)
 
 if(MSVC)
   foreach(target SKRLauncher SKRClient)
