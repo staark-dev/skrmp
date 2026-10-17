@@ -31,11 +31,15 @@ static constexpr StringPatch kPatches[] = {
      "{FFFFFF}SKR {B9C9BF}Client R1 {FFFFFF}Started"},
 
     // Connection messages
-    {"Connecting to %s:%d...", "SKR: Connecting..."},
-    {"Connected. Joining the game...", "SKR: Joining server..."},
+    {"Connecting to %s:%d...", "Connecting..."},
+    {"Connected. Joining the game...", "Joining server..."},
 
     // SA-MP 0.3.7-R5 (plain, used in various places)
     {"SA-MP 0.3.7-R5",         "SKR Client"},
+
+    // Screenshot filenames and message
+    {"\\screens\\sa-mp-%03i.png",        "\\screens\\skr-%03i.png"},
+    {"Screenshot Taken - sa-mp-%03i.png", "Screenshot Taken - skr-%03i.png"},
 
     // Window title
     {"GTA:SA:MP",              "GTA:SKR"},

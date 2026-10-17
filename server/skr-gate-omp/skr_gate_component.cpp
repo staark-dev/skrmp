@@ -63,7 +63,7 @@ void SkrGateComponent::onPlayerConnect(IPlayer& player) {
     // If not yet authorized, send a message and start a timeout
     if (!IsAuthorized(id)) {
         player.sendClientMessage(Colour::Yellow(),
-            "SKR: Authenticating... Please wait.");
+            "Authenticating... Please wait.");
     }
 }
 
