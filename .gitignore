@@ -28,6 +28,7 @@ desktop.ini
 third_party/
 deps/
 server-build/
+server-runtime/
 
 # Secrets
 *.key
