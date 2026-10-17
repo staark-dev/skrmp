@@ -22,6 +22,8 @@ add_library(SKRClient SHARED
   client/skrac/mock_adapter.cpp
   client/render-d3d9/intro_renderer.cpp
   client/render-d3d9/d3d9_hook.cpp
+  client/cef-bridge/cef_bridge.cpp
+  client/cef-bridge/cef_plugin_exports.cpp
 )
 set_target_properties(SKRClient PROPERTIES
   OUTPUT_NAME "SKR.Client" PREFIX ""

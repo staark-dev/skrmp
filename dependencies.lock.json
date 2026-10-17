@@ -5,7 +5,7 @@
     {
       "name": "open.mp-server",
       "repository": "https://github.com/openmultiplayer/open.mp",
-      "commit": "UNKNOWN — select and pin before M1 exit",
+      "commit": "UNKNOWN — select and pin before M4",
       "version": "UNKNOWN",
       "archive_url": "UNKNOWN",
       "archive_sha256": "UNKNOWN",
@@ -16,7 +16,7 @@
     {
       "name": "open.mp-sdk",
       "repository": "https://github.com/openmultiplayer/open.mp-sdk",
-      "commit": "UNKNOWN — select and pin before M1 exit",
+      "commit": "UNKNOWN — select and pin before M4",
       "version": "UNKNOWN",
       "archive_url": "UNKNOWN",
       "archive_sha256": "UNKNOWN",
@@ -27,23 +27,26 @@
     {
       "name": "samp-cef",
       "repository": "https://github.com/zottce/samp-cef",
-      "commit": "UNKNOWN — inspect Cargo.lock and build scripts at chosen commit",
-      "version": "UNKNOWN",
-      "archive_url": "UNKNOWN",
-      "archive_sha256": "UNKNOWN",
+      "commit": "f14fe4fa7f0d036edf445ba02b4bddd4cccac377",
+      "version": "post-v1.4.1 (master 2026-07-14)",
+      "archive_url": "https://github.com/zottce/samp-cef/archive/f14fe4fa7f0d036edf445ba02b4bddd4cccac377.tar.gz",
+      "archive_sha256": "UNKNOWN — compute after download",
       "architecture": "x86 (client plugin)",
-      "toolchain": "Rust + CEF — verify versions at chosen commit",
-      "license": "GPL-3.0"
+      "toolchain": "Rust stable i686-pc-windows-msvc + VS2022 Build Tools + Node.js 20+",
+      "license": "GPL-3.0",
+      "notes": "R2 NOT SUPPORTED — supports R1, R3, DL-R1 only. R2 adapter required for SKR target."
     },
     {
       "name": "cef-binary",
       "source": "https://cef-builds.spotifycdn.com/index.html",
-      "version": "UNKNOWN — determined by samp-cef commit",
-      "archive_url": "UNKNOWN",
-      "archive_sha256": "UNKNOWN",
-      "architecture": "UNKNOWN — verify x86 availability",
+      "version": "150.0.11+gb887805+chromium-150.0.7871.115",
+      "archive_url": "https://cef-builds.spotifycdn.com/cef_binary_150.0.11%2Bgb887805%2Bchromium-150.0.7871.115_windows32.tar.bz2",
+      "archive_sha256": "03b6b34328ef943d04bbd06479b097de4046e89439ae2d6122d0e95e517a7909",
+      "archive_size_bytes": 282303880,
+      "architecture": "windows32 (x86)",
       "toolchain": "N/A (prebuilt)",
-      "license": "BSD + dependency notices"
+      "license": "BSD + dependency notices",
+      "notes": "Standard distribution — no proprietary codecs (H.264/AAC unavailable)"
     },
     {
       "name": "plugin-sdk",
@@ -55,17 +58,12 @@
       "architecture": "x86",
       "toolchain": "MSVC",
       "license": "UNKNOWN — verify before linking"
-    },
+    }
+  ],
+  "removed": [
     {
       "name": "ultimate-asi-loader",
-      "repository": "https://github.com/ThirteenAG/Ultimate-ASI-Loader",
-      "commit": "UNKNOWN",
-      "version": "UNKNOWN",
-      "archive_url": "UNKNOWN",
-      "archive_sha256": "UNKNOWN",
-      "architecture": "x86",
-      "toolchain": "N/A (prebuilt)",
-      "license": "UNKNOWN — verify before redistribution"
+      "reason": "SKR uses launcher DLL injection, not ASI loading"
     }
   ]
 }
