@@ -128,8 +128,17 @@ target_include_directories(SKRSmokeClient PRIVATE
 )
 target_link_libraries(SKRSmokeClient PRIVATE SKRShared ws2_32)
 
+# --- Fake Game (DLL smoke test harness) ---
+add_executable(SKRFakeGame
+  tools/fake_game/fake_game.cpp
+)
+target_include_directories(SKRFakeGame PRIVATE
+  ${CMAKE_SOURCE_DIR}/shared
+)
+target_link_libraries(SKRFakeGame PRIVATE SKRShared ws2_32)
+
 if(MSVC)
-  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests SKRTestServer SKRSmokeClient)
+  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests SKRTestServer SKRSmokeClient SKRFakeGame)
     target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT)
