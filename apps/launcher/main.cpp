@@ -16,8 +16,12 @@ static std::wstring GetLauncherDir() {
     return path;
 }
 
+static constexpr const wchar_t* kGtaSaSearchPaths[] = {
+    L"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Grand Theft Auto San Andreas",
+};
+
 static std::wstring FindGtaSa(const std::wstring& baseDir) {
-    // Look for gta_sa.exe in same directory or known subdirectory
+    // Look in launcher directory first
     std::wstring candidate = baseDir + L"\\gta_sa.exe";
     if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES)
         return candidate;
@@ -31,6 +35,14 @@ static std::wstring FindGtaSa(const std::wstring& baseDir) {
         if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES)
             return candidate;
     }
+
+    // Try well-known install locations
+    for (auto* searchPath : kGtaSaSearchPaths) {
+        candidate = std::wstring(searchPath) + L"\\gta_sa.exe";
+        if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES)
+            return candidate;
+    }
+
     return {};
 }
 
@@ -64,12 +76,43 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
     // ── Launch phase ─────────────────────────────────────
     auto gtaPath = FindGtaSa(baseDir);
-    auto clientDll = baseDir + L"\\SKR.Client.dll";
 
     if (gtaPath.empty()) {
         MessageBoxW(nullptr,
                     L"gta_sa.exe not found.\n"
-                    L"Place the SKR launcher in your GTA San Andreas folder.",
+                    L"Place the SKR launcher in your GTA San Andreas folder\n"
+                    L"or install GTA SA via Steam.",
+                    L"SKR Client", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+
+    // Resolve the GTA directory from the found exe path
+    std::wstring gtaDir = gtaPath;
+    auto slashPos = gtaDir.rfind(L'\\');
+    if (slashPos != std::wstring::npos)
+        gtaDir.resize(slashPos);
+
+    // Look for DLLs in launcher dir first, then GTA dir
+    auto findDll = [&](const wchar_t* name) -> std::wstring {
+        std::wstring path = baseDir + L"\\" + name;
+        if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES)
+            return path;
+        path = gtaDir + L"\\" + name;
+        if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES)
+            return path;
+        return {};
+    };
+
+    auto clientDll = findDll(L"SKR.Client.dll");
+    auto sampDll = findDll(L"samp.dll");
+
+    if (clientDll.empty()) {
+        MessageBoxW(nullptr, L"SKR.Client.dll not found.\nPlace it next to the launcher or in the GTA SA folder.",
+                    L"SKR Client", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+    if (sampDll.empty()) {
+        MessageBoxW(nullptr, L"samp.dll not found.\nPlace it next to the launcher or in the GTA SA folder.",
                     L"SKR Client", MB_OK | MB_ICONERROR);
         return 1;
     }
@@ -77,7 +120,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     skr::launcher::LaunchConfig config;
     config.gtaSaPath = gtaPath;
     config.clientDllPath = clientDll;
-    config.sampDllPath = baseDir + L"\\samp.dll";
+    config.sampDllPath = sampDll;
     config.serverAddress = L"127.0.0.1";
     config.serverPort = 7777;
     config.playerName = L"SKR_Player";

@@ -181,20 +181,8 @@ void DrawCover(IDirect3DDevice9* device) {
 
 void Initialize() {
     if (g_initialized.exchange(true)) return;
-    // Phase 1 kill switch: the in-game lobby replaces the GTA main menu but
-    // the live test showed input/visibility issues we haven't solved yet, so
-    // the module ships disabled. Drop a file named `SKR\lobby.on` next to
-    // SKR.Client.dll to re-enable it for testing — mirrors the `intro.off`
-    // convention from urban_intro.cpp.
-    std::wstring dir = LogDir();
-    bool enabled = false;
-    if (!dir.empty()) {
-        enabled = GetFileAttributesW((dir + L"lobby.on").c_str()) != INVALID_FILE_ATTRIBUTES;
-    }
-    g_disabled.store(!enabled);
-    Log("lobby manager initialize (lobby.on %s -> %s)",
-        enabled ? "present" : "missing",
-        enabled ? "ENABLED" : "DISABLED (vanilla GTA menu will show)");
+    g_disabled.store(false);
+    Log("lobby manager initialize -> ENABLED");
 }
 
 void Shutdown() {

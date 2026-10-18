@@ -88,15 +88,10 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
     if (pos != std::wstring::npos)
         workDir.resize(pos);
 
-    // SA-MP's samp.dll reads these command line args for auto-connect:
-    //   -c         = connect mode
-    //   -h <IP>    = server address
-    //   -p <PORT>  = server port
-    //   -n <NAME>  = player name
-    //   -z         = close on disconnect
+    // Lobby mode: no SA-MP auto-connect flags (-c -h -p). The game starts in
+    // menu state; CMenuManager is patched by the lobby module and the CEF
+    // lobby overlay draws on top. Connection is driven by the lobby UI.
     std::wstring cmdLine = L"\"" + config.gtaSaPath + L"\""
-        + L" -c -h " + config.serverAddress
-        + L" -p " + std::to_wstring(config.serverPort)
         + L" -n " + config.playerName;
 
     // Create process in SUSPENDED state

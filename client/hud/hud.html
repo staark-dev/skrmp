@@ -13,14 +13,14 @@
   --hud-cyan: #74dce8;
   --hud-health-low: #e85b68;
   --hud-card: rgba(18,23,30,.84);
-  --hud-card-border: rgba(210,225,233,.16);
+  --hud-card-border: rgba(210,225,233,.22);
 }
 *, *::before, *::after { box-sizing: border-box; }
 html, body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; pointer-events:none; cursor:none; }
 body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased; }
 [hidden] { display:none !important; }
 .hud { position:fixed; inset:0; background:transparent; pointer-events:none; user-select:none; }
-.hud svg { width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round; }
+.hud svg { width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
 .hud-group { position:absolute; transform:scale(var(--hud-scale)); }
 
 /* Chat */
@@ -58,7 +58,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 .radar__north { position:absolute; top:-13px; left:calc(50% - 13px); width:26px; height:26px; border:1px solid var(--hud-border); border-radius:50%; background:#11171d; text-align:center; font-size:17px; font-weight:700; line-height:24px; z-index:3; }
 .radar__tiles { position:absolute; }
 .radar__tiles img { position:absolute; display:block; max-width:none; image-rendering:auto; }
-.radar__player { position:absolute; left:50%; top:50%; width:14px; height:14px; margin-left:-7px; margin-top:-7px; z-index:2; }
+.radar__player { position:absolute; left:50%; top:50%; width:24px; height:24px; margin-left:-12px; margin-top:-12px; z-index:2; }
 .radar__player svg { width:100%; height:100%; }
 .radar__pin { position:absolute; left:0; top:0; width:14px; height:18px; margin:-18px 0 0 -7px; z-index:2; }
 .radar__pin svg { width:100%; height:100%; display:block; fill:#e85b68; stroke:#fff; stroke-width:1.5; }
@@ -76,8 +76,8 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 .vitals__card--armour { top:46px; }
 .vitals__card--food, .vitals__card--water { top:90px; width:104px; height:36px; }
 .vitals__card--water { left:112px; }
-.vitals__heart { position:absolute; left:8px; top:13px; width:21px !important; height:21px !important; }
-.vitals__shield { position:absolute; left:8px; top:53px; width:21px !important; height:23px !important; }
+.vitals__heart { position:absolute; left:8px; top:13px; width:21px !important; height:21px !important; fill:currentColor !important; }
+.vitals__shield { position:absolute; left:8px; top:53px; width:21px !important; height:23px !important; fill:currentColor !important; }
 .track { position:absolute; height:10px; overflow:hidden; border:1px solid rgba(255,255,255,.16); border-radius:5px; background:rgba(9,13,18,.70); }
 .track__fill { display:block; height:100%; width:0; border-radius:inherit; transition:width 120ms linear; }
 .vitals__health { left:42px; top:20px; width:161px; height:10px; }
@@ -85,9 +85,9 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 .vitals__armour { left:42px; top:60px; width:161px; height:10px; }
 .vitals__armour .track__fill { background:linear-gradient(90deg,#00cade,#5de3ec 65%,#d9f2ef); }
 .vitals.is-low-health .vitals__health .track__fill { background:var(--hud-health-low); }
-.vitals__food { position:absolute; left:10px; top:96px; width:25px !important; height:25px !important; }
+.vitals__food { position:absolute; left:10px; top:96px; width:25px !important; height:25px !important; fill:currentColor !important; }
 .vitals__food-value { position:absolute; left:48px; top:96px; width:50px; font-size:18px; line-height:25px; font-weight:500; }
-.vitals__water { position:absolute; left:120px; top:96px; width:21px !important; height:25px !important; }
+.vitals__water { position:absolute; left:120px; top:96px; width:21px !important; height:25px !important; fill:currentColor !important; }
 .vitals__water-value { position:absolute; left:151px; top:96px; width:52px; font-size:18px; line-height:25px; font-weight:500; }
 
 /* Vehicle */
@@ -131,8 +131,8 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 /* Navigation indicator — above the minimap (reference 1672x941: left 29, bottom 288, 304x76) */
 .navigation { left:calc(29px * var(--hud-scale)); bottom:calc(288px * var(--hud-scale)); width:304px; min-height:76px; padding:12px 18px; display:flex; align-items:center; gap:16px; background:rgba(18,23,30,.84); border:1px solid rgba(210,225,233,.10); border-radius:10px; transform-origin:bottom left; pointer-events:none; }
 .navigation[hidden] { display:none !important; }
-.navigation__arrow { width:40px !important; height:40px !important; flex:0 0 40px; color:#74dce8; stroke:#74dce8 !important; stroke-width:2.6 !important; }
-.navigation__arrow--pin { stroke-width:2 !important; }
+.navigation__arrow { width:40px !important; height:40px !important; flex:0 0 40px; color:#74dce8; fill:none !important; stroke:#74dce8 !important; stroke-width:3 !important; stroke-linejoin:round !important; stroke-linecap:round !important; }
+.navigation__arrow--pin { fill:#74dce8 !important; stroke-width:2.4 !important; }
 .navigation__content { min-width:0; flex:1; }
 .navigation__distance { font-size:26px; font-weight:700; line-height:30px; color:#f0f4f7; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .navigation__destination { margin-top:2px; font-size:18px; font-weight:400; line-height:22px; color:#c0c5c7; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -155,8 +155,9 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 /* Photo mode: hide everything for a clean screenshot */
 .hud.is-photo { visibility:hidden; }
 
-/* Remove artificial shadows */
-.hud, .hud *, .hud *::before, .hud *::after { box-shadow:none; text-shadow:none; }
+/* Card depth */
+.vitals__card, .radar-group, .identity, .money__row, .vehicle, .navigation, .pnotif { box-shadow:0 2px 8px rgba(0,0,0,.45); }
+.track { box-shadow:inset 0 1px 3px rgba(0,0,0,.35); }
 
 /* Pause / reduced motion */
 .hud.is-paused *, .hud.is-paused *::before, .hud.is-paused *::after { animation-play-state:paused !important; }

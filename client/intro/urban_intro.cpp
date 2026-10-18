@@ -264,13 +264,10 @@ void BeginLoading() {
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                        reinterpret_cast<LPCWSTR>(&BeginLoading), &self);
     g_baseDir = ModuleDir(self) + L"SKR\\";
-    // Diagnostic switch: SKR\intro.off disables the intro entirely (no textures, no audio,
-    // no SA-MP Present hook), to compare startup behaviour with and without it.
-    if (GetFileAttributesW((g_baseDir + L"intro.off").c_str()) != INVALID_FILE_ATTRIBUTES) {
-        Log("intro disabled by SKR\\intro.off");
-        g_phase.store(Phase::Done);
-        return;
-    }
+    // Lobby mode: skip intro entirely, go straight to CEF lobby overlay.
+    Log("intro skipped: lobby mode");
+    g_phase.store(Phase::Done);
+    return;
     g_bg.file = L"background.png";
     g_fg.file = L"foreground.png";
     g_logo.file = L"logo.png";

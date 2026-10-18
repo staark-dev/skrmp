@@ -103,6 +103,15 @@ input, textarea { font:inherit; color:var(--hud-text); }
 .app--vehicles .app__icon { background:linear-gradient(160deg,#e8615a,#a8322c); }
 .app--services .app__icon { background:linear-gradient(160deg,#f2994a,#c0571d); }
 .app--camera .app__icon   { background:linear-gradient(160deg,#3a3f47,#1c2026); }
+.app--notifs .app__icon   { background:linear-gradient(160deg,#e85b68,#b82e3c); }
+.notif-item { display:flex; align-items:flex-start; gap:10px; padding:10px; margin-bottom:6px; border-radius:12px; background:var(--card); border:1px solid var(--card-border); }
+.notif-item__icon { width:34px; height:34px; flex:0 0 34px; border-radius:10px; display:flex; align-items:center; justify-content:center; }
+.notif-item__icon svg { width:18px; height:18px; stroke:#fff; stroke-width:2; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+.notif-item__body { flex:1; min-width:0; }
+.notif-item__head { display:flex; justify-content:space-between; align-items:center; }
+.notif-item__title { font-size:13px; font-weight:600; }
+.notif-item__time { font-size:11px; color:var(--hud-muted); flex:0 0 auto; }
+.notif-item__text { font-size:12.5px; color:var(--hud-secondary); margin-top:2px; }
 
 .veh-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:10px; }
 .veh-stat { padding:7px 8px; border-radius:10px; background:rgba(0,0,0,.25); font-size:11px; color:var(--hud-muted); }
@@ -209,8 +218,9 @@ body.phone-open .phone-anchor { transform:translateY(0); }
   background:rgba(28,38,50,.95); border:1px solid rgba(255,255,255,.08);
   border-radius:16px; box-shadow:0 6px 18px rgba(0,0,0,.4);
   opacity:0; transform:translateY(-4px); transition:opacity 180ms 220ms, transform 180ms 220ms;
+  pointer-events:none;
 }
-body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
+body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); pointer-events:auto; }
 .peek-notif__icon { width:34px; height:34px; flex:0 0 auto; border-radius:10px; display:flex; align-items:center; justify-content:center; }
 .peek-notif__icon--sms  { background:linear-gradient(160deg,#3ccf7a,#1f9a55); }
 .peek-notif__icon--bank { background:linear-gradient(160deg,#5b7cfa,#3048b8); }
@@ -297,6 +307,7 @@ body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
             <button class="app app--vehicles" data-open="vehicles"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M5 17H3v-5l2-5h14l2 5v5h-2M5 12h14"/><circle cx="7.5" cy="17" r="2"/><circle cx="16.5" cy="17" r="2"/></svg></span>Vehicule</button>
             <button class="app app--services" data-open="services"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M12 2v4M5 7l2.5 2.5M19 7l-2.5 2.5M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18"/></svg><span class="app__badge" id="svcBadge" hidden>0</span></span>Servicii</button>
             <button class="app app--notes" data-open="notes"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6Z"/><path d="M9 11h7M9 15h7M15 3v4h4"/></svg></span>Notițe</button>
+            <button class="app app--notifs" data-open="notifs"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="app__badge" id="notifBadge" hidden>0</span></span>Notificări</button>
             <button class="app app--camera" id="appCamera"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4Z"/><circle cx="12" cy="13" r="3.5"/></svg></span>Cameră</button>
             <button class="app app--settings" data-open="settings"><span class="app__icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></span>Setări</button>
             </div>
@@ -374,6 +385,15 @@ body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
           </div>
         </div>
         <div class="card">
+          <div class="card__label" id="bankAtmLabel">ATM — depune / retrage</div>
+          <input class="field" id="bankAtmAmount" inputmode="numeric" maxlength="9" placeholder="Sumă ($)" autocomplete="off">
+          <div style="display:flex; gap:8px; margin-top:6px">
+            <button class="btn" id="bankDeposit" style="flex:1" disabled>Depune</button>
+            <button class="btn" id="bankWithdraw" style="flex:1" disabled>Retrage</button>
+          </div>
+          <div class="hint" id="bankAtmResult"></div>
+        </div>
+        <div class="card">
           <div class="card__label">Transfer către</div>
           <div id="bankRecipients" style="margin-top:8px"></div>
           <input class="field" id="bankAmount" inputmode="numeric" maxlength="9" placeholder="Sumă ($)" autocomplete="off">
@@ -422,6 +442,12 @@ body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
       </div>
     </section>
 
+    <!-- Notifications -->
+    <section class="view page" id="viewNotifs" hidden>
+      <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">Notificări</span></div>
+      <div class="page__body" id="notifList"></div>
+    </section>
+
     <div class="home-bar" data-home title="Acasă"></div>
   </div>
 </div>
@@ -444,7 +470,7 @@ body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
   var transfers = [];
   var views = { home: 'viewHome', sms: 'viewSms', thread: 'viewThread', contacts: 'viewContacts', gps: 'viewGps',
                 wallet: 'viewWallet', bank: 'viewBank', notes: 'viewNotes', settings: 'viewSettings',
-                vehicles: 'viewVehicles', services: 'viewServices' };
+                vehicles: 'viewVehicles', services: 'viewServices', notifs: 'viewNotifs' };
   var VEHICLE_NAMES = window.SKR_VEHICLE_NAMES || {};
   var currentView = 'home';
   var toastTimer = null;
@@ -496,6 +522,7 @@ body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
     if (name === 'notes') renderNotes();
     if (name === 'settings') renderSettings();
     if (name === 'vehicles') { $('vehNotice').textContent = ''; $('vehList').textContent = ''; $('vehList').appendChild(el('div', 'empty', 'Se încarcă…')); emit('phone:vehicles'); }
+    if (name === 'notifs') { renderNotifs(); var nb=$('notifBadge'); if(nb) nb.hidden=true; }
     if (name === 'services') { $('svcNotice').textContent = ''; emit('phone:svcList'); }
     if (name === 'thread') { renderThread(); setTimeout(function () { $('smsInput').focus(); }, 0); }
   }
@@ -754,8 +781,10 @@ body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
 
   /* ── Bank ─────────────────────────────────────────── */
   function renderBank() {
-    $('bankCash').textContent = money(state.cash);
+    $('bankCash').textContent = money(state.bank || 0);
     $('bankHolder').textContent = state.name || '-';
+    $('bankAtmLabel').textContent = state.atm ? 'ATM — depune / retrage (langa ATM)' : 'ATM — apropie-te de un ATM';
+    validateBankAtm();
     // Decorative only: derived from the player ID, not a real account number.
     $('bankCardNo').textContent = '•••• •••• •••• ' + String(Math.max(0, state.id)).padStart(4, '0');
     var box = $('bankRecipients');
@@ -785,11 +814,28 @@ body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
   function bankAmount() { var n = parseInt(String($('bankAmount').value).replace(/\D/g, ''), 10); return isFinite(n) ? n : 0; }
   function validateBank() {
     var a = bankAmount();
-    $('bankSend').disabled = !(bankTo != null && a > 0 && a <= state.cash);
+    // Transfer debits the BANK balance (+ 1 % fee).
+    $('bankSend').disabled = !(bankTo != null && a > 0 && (a + Math.floor(a * 0.01)) <= (state.bank || 0));
   }
   $('bankAmount').addEventListener('input', function () {
     this.value = this.value.replace(/\D/g, '');
     validateBank();
+  });
+  function bankAtmAmount() { var n = parseInt(String($('bankAtmAmount').value).replace(/\D/g, ''), 10); return isFinite(n) ? n : 0; }
+  function validateBankAtm() {
+    var a = bankAtmAmount();
+    $('bankDeposit').disabled  = !(state.atm && a > 0 && a <= state.cash);
+    $('bankWithdraw').disabled = !(state.atm && a > 0 && a <= (state.bank || 0));
+  }
+  $('bankAtmAmount').addEventListener('input', function () {
+    this.value = this.value.replace(/\D/g, '');
+    validateBankAtm();
+  });
+  $('bankDeposit').addEventListener('click', function () {
+    var a = bankAtmAmount(); if (a > 0) emit('phone:deposit', a);
+  });
+  $('bankWithdraw').addEventListener('click', function () {
+    var a = bankAtmAmount(); if (a > 0) emit('phone:withdraw', a);
   });
   $('bankSend').addEventListener('click', function () {
     var a = bankAmount();
@@ -916,7 +962,8 @@ body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
   };
 
   /* ── Banner notification (iOS-style top drop) ─────── */
-  var APP_LABEL = { sms:'MESAJE', bank:'BANCA', svc:'SERVICII' };
+  var APP_LABEL = { sms:'MESAJE', bank:'BANCA', svc:'SERVICII', notifs:'NOTIFICĂRI' };
+  var notifHistory = [];
   var APP_SVG = {
     sms:  '<svg viewBox="0 0 24 24"><path d="M3 5h18v12H8l-5 4V5Z"/><path d="M7 10h10M7 13h7"/></svg>',
     bank: '<svg viewBox="0 0 24 24"><path d="M3 10h18M5 10V8l7-5 7 5v2M5 20h14M5 20V10m14 10V10M9 20V12m6 8V12"/></svg>',
@@ -939,11 +986,35 @@ body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
     document.body.classList.remove('phone-peek');
     clearTimeout(peekTimer); peekTimer = 0;
   }
+  function renderNotifs() {
+    var c = $('notifList');
+    c.textContent = '';
+    if (!notifHistory.length) { c.appendChild(el('div', 'empty', 'Nicio notificare.')); return; }
+    for (var i = notifHistory.length - 1; i >= 0; i--) {
+      var n = notifHistory[i];
+      var row = el('div', 'notif-item');
+      var ic = el('div', 'notif-item__icon peek-notif__icon--' + n.app);
+      ic.innerHTML = APP_SVG[n.app] || APP_SVG.sms;
+      var body = el('div', 'notif-item__body');
+      var head = el('div', 'notif-item__head');
+      head.appendChild(el('span', 'notif-item__title', n.title));
+      head.appendChild(el('span', 'notif-item__time', n.time));
+      body.appendChild(head);
+      body.appendChild(el('div', 'notif-item__text', n.text));
+      row.appendChild(ic);
+      row.appendChild(body);
+      c.appendChild(row);
+    }
+  }
   function showBanner(d) {
     if (!d) return;
     var app = d.app || 'sms';
+    var now = new Date();
+    notifHistory.push({ app:app, title:d.title || APP_LABEL[app] || 'SKR', text:d.text || '', time:String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0') });
+    if (notifHistory.length > 50) notifHistory.shift();
     unread[app] = (unread[app] || 0) + 1;
     paintBadge(app);
+    var nb = $('notifBadge'); if (nb) { var total = (unread.sms||0)+(unread.bank||0)+(unread.svc||0); if (total>0) { nb.textContent = total>99?'99+':String(total); nb.hidden=false; } else { nb.hidden=true; } }
     // Phone open? just show in-app toast; no peek, no body-class churn.
     if (document.body.classList.contains('phone-open')) {
       toast(d.title || APP_LABEL[app] || 'SKR', d.text || '');
@@ -974,6 +1045,12 @@ body.phone-peek .phone .peek-notif { opacity:1; transform:translateY(0); }
     cef.on('phone:smsIn', function () { window.skrPhone.sms(parse(arguments[0])); });
     cef.on('phone:error', function () { window.skrPhone.error(parse(arguments[0])); });
     cef.on('phone:transferResult', function () { window.skrPhone.transferResult(parse(arguments[0])); });
+    cef.on('phone:bankResult', function () {
+      var d = parse(arguments[0]) || {};
+      var el = document.getElementById('bankAtmResult');
+      if (el) { el.textContent = d.text || ''; el.style.color = d.ok ? '#3ccf7a' : '#e85b68'; }
+      if (d.ok) { document.getElementById('bankAtmAmount').value = ''; }
+    });
     cef.on('phone:transferIn', function () { window.skrPhone.transferIn(parse(arguments[0])); });
     cef.on('phone:vehicleList', function () { window.skrPhone.vehicles(parse(arguments[0])); });
     cef.on('phone:svcState', function () { window.skrPhone.services(parse(arguments[0])); });
