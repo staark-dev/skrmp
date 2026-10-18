@@ -288,5 +288,6 @@ void OnCefTick() {
 }
 
 bool IsLobbyActive() { return g_browserShown.load(); }
+bool IsEnabled()     { return !g_disabled.load(); }
 
 } // namespace skr::lobby

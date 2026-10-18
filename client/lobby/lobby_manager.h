@@ -27,4 +27,9 @@ void OnCefTick();
 // True once the lobby browser has been created and shown.
 bool IsLobbyActive();
 
+// True when the lobby module is enabled for this run (SKR\lobby.on exists).
+// When false, OnEndSceneAfterIntro / OnCefTick are no-ops and the caller
+// should fall back to vanilla-menu behavior.
+bool IsEnabled();
+
 } // namespace skr::lobby

@@ -109,14 +109,40 @@ HRESULT WINAPI HookedEndScene(IDirect3DDevice9* device) {
         if (!introActive) QueryPerformanceCounter(&g_transLastTime);
     }
 
-    // Phase 1: after the intro, the SKR lobby replaces GTA's main menu. The
-    // lobby manager paints an opaque black cover under the CEF browser so no
-    // vanilla menu pixels bleed through. The old "cover until in-game" fade
-    // was for a direct-to-game flow and no longer runs; the fade will come
-    // back in Phase 2 (lobby -> connect transition).
+    // Post-intro behavior branches on whether the SKR lobby is active:
+    //   - lobby ENABLED  → OnEndSceneAfterIntro draws its own cover + runs
+    //                      the CEF tick (Phase 1 lobby path).
+    //   - lobby DISABLED → fall back to the pre-Phase-1 "cover until in-game,
+    //                      then fade out" transition so SA-MP's connect text
+    //                      is hidden exactly like it was before.
     if (!introActive) {
-        skr::lobby::OnEndSceneAfterIntro(device);
-        g_transState = TransitionState::Done;
+        if (skr::lobby::IsEnabled()) {
+            skr::lobby::OnEndSceneAfterIntro(device);
+            g_transState = TransitionState::Done;
+        } else if (g_transState != TransitionState::Done) {
+            LARGE_INTEGER now;
+            QueryPerformanceCounter(&now);
+            float dt = static_cast<float>(now.QuadPart - g_transLastTime.QuadPart)
+                       / static_cast<float>(g_freq.QuadPart);
+            g_transLastTime = now;
+            if (dt > 0.1f) dt = 0.1f;
+
+            if (g_transState == TransitionState::Covering) {
+                DrawFullscreenQuad(device, 0xFF000000);
+                if (IsPlayerInGame())
+                    g_transState = TransitionState::FadingOut;
+            } else if (g_transState == TransitionState::FadingOut) {
+                g_transFadeElapsed += dt;
+                float alpha = 1.0f - (g_transFadeElapsed / kTransitionFadeSec);
+                alpha = (std::max)(0.0f, (std::min)(1.0f, alpha));
+                if (alpha > 0.001f) {
+                    DWORD a = static_cast<DWORD>(alpha * 255.0f);
+                    DrawFullscreenQuad(device, (a << 24) | 0x000000);
+                }
+                if (g_transFadeElapsed >= kTransitionFadeSec)
+                    g_transState = TransitionState::Done;
+            }
+        }
     }
 
     return g_origEndScene(device);
