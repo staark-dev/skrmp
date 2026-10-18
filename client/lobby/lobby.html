@@ -2,138 +2,146 @@
 <html lang="ro">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SKR Lobby</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SKR — Meniu în joc</title>
 <link rel="stylesheet" href="lobby.css">
+<script src="lobby.js" defer></script>
 </head>
-<body>
 <!--
-  SKR Lobby — Phase 1 (display + navigation only, no connect).
-  Palette and panel geometry mirror client/hud/hud.html; layout mirrors the
-  launcher-ui WPF pages (Home / Servere / Setări / Despre).
+  SKR Lobby — Phase 1. Design ported from the launcher-ui session's
+  ingame-menu preview. Two modes exist in the markup:
+    - "lobby" (pre-connect):  Servere / Setări / Ieșire       (active in Phase 1)
+    - "pause" (in-game):      Continuă / Hartă / Setări / Deconectare / Ieșire
+  Phase 1 defaults to lobby mode. Pause mode is a stub — the DOM is here so
+  Phase 2's native adapter can call window.skrLobby.setMode('pause').
 -->
-<div class="app" id="app">
-  <aside class="sidebar">
-    <div class="brand">
-      <span class="brand__logo">SKR</span>
-      <span class="brand__sub">CLIENT</span>
-    </div>
-    <nav class="nav">
-      <button class="nav__item is-active" data-page="home">Acasă</button>
-      <button class="nav__item" data-page="servers">Servere</button>
-      <button class="nav__item" data-page="settings">Setări</button>
-      <button class="nav__item" data-page="about">Despre</button>
-    </nav>
-    <div class="sidebar__foot">
-      <button class="btn btn--ghost" id="quitBtn" title="Închide jocul (Esc)">Ieșire</button>
-    </div>
-  </aside>
+<body class="in-game">
+<div class="shell">
+  <header class="header">
+    <a class="brand" href="#" id="brandLink">
+      <strong>SKR</strong>
+      <span>ROLEPLAY<br><small>SAN ANDREAS</small></span>
+    </a>
+    <nav id="navigation" aria-label="Meniul jocului"></nav>
+    <span class="mode-label" id="modeLabel">ÎNAINTE DE CONECTARE</span>
+  </header>
 
-  <main class="main">
-    <!-- Home -->
-    <section class="page is-active" data-page="home">
-      <header class="hero">
-        <div class="hero__eyebrow">SKR ROLEPLAY · PROTOTIP</div>
-        <h1 class="hero__title">Bine ai venit, <span id="homeNick">Jucător</span>.</h1>
-        <p class="hero__lead">Alege un server și apasă JOACĂ. Toate conturile sunt separate pe server.</p>
-        <div class="hero__row">
-          <button class="btn btn--primary btn--big" id="playBtn">JOACĂ</button>
-          <div class="hero__pill" id="homeServer">Server: <b>— nu este selectat —</b></div>
-          <div class="hero__pill" id="homeNickPill">Nickname: <b id="homeNickValue">Jucător</b></div>
-        </div>
-      </header>
-      <section class="news">
-        <h2 class="h2">Noutăți</h2>
-        <article class="news__card">
-          <h3>Phase 1 — Lobby în joc</h3>
-          <p>Meniul SKR înlocuiește meniul GTA. Navigația între pagini funcționează; conectarea la server vine în Phase 2.</p>
-        </article>
-        <article class="news__card">
-          <h3>Intro urban</h3>
-          <p>Secvența SKR urban rulează înainte de lobby. O poți dezactiva din Setări.</p>
-        </article>
-      </section>
-    </section>
-
-    <!-- Servers -->
-    <section class="page" data-page="servers">
-      <header class="page__head">
-        <h1 class="h1">Servere</h1>
-        <p class="page__sub">Lista serverelor SKR. Conectarea va fi disponibilă în Phase 2.</p>
-      </header>
-      <ul class="server-list" id="serverList"></ul>
-    </section>
-
+  <main>
     <!-- Settings -->
-    <section class="page" data-page="settings">
-      <header class="page__head">
-        <h1 class="h1">Setări</h1>
-        <p class="page__sub">Valorile se păstrează în <code>%APPDATA%\SKR\launcher.ini</code>.</p>
-      </header>
-      <form class="settings" id="settingsForm">
-        <label class="field">
-          <span class="field__label">Nickname</span>
-          <input class="input" id="setNick" type="text" maxlength="24" autocomplete="off">
-          <span class="field__hint">1–24 caractere. Fără spații la margini.</span>
-        </label>
-        <label class="field">
-          <span class="field__label">Cale GTA SA (informativ)</span>
-          <input class="input" id="setGtaPath" type="text" readonly>
-          <span class="field__hint">Configurată din launcherul Windows la prima rulare.</span>
-        </label>
-        <div class="field field--row">
-          <label class="field__grow">
-            <span class="field__label">Rezoluție</span>
-            <select class="input" id="setResolution">
-              <option value="1920x1080">1920 x 1080</option>
-              <option value="1600x900">1600 x 900</option>
-              <option value="1366x768">1366 x 768</option>
-              <option value="1280x720">1280 x 720</option>
-              <option value="auto">Automat (desktop)</option>
-            </select>
-          </label>
-          <label class="toggle">
-            <input type="checkbox" id="setWindowed">
-            <span>Fereastră (nu fullscreen)</span>
-          </label>
+    <section class="page" data-page="settings" hidden>
+      <div class="page-heading">
+        <div>
+          <span class="eyebrow">CONFIGUREAZĂ EXPERIENȚA</span>
+          <h1>Setări</h1>
         </div>
-        <label class="toggle">
-          <input type="checkbox" id="setIntro" checked>
-          <span>Rulează intro-ul SKR înainte de lobby</span>
-        </label>
-        <label class="field">
-          <span class="field__label">Volum general <span class="field__value" id="volVal">80%</span></span>
-          <input class="input" id="setVolume" type="range" min="0" max="100" step="1" value="80">
-        </label>
-        <div class="settings__actions">
-          <button type="button" class="btn btn--primary" id="saveBtn">Salvează</button>
-          <button type="button" class="btn btn--ghost" id="reloadBtn">Reîncarcă</button>
-          <span class="settings__status" id="setStatus"></span>
+        <p>Jocul tău. În ritmul tău.</p>
+      </div>
+      <div class="settings-layout">
+        <aside class="categories" aria-label="Categorii setări">
+          <button data-tab="graphics"  class="category active"><span class="category__number">01</span><span>Grafică<small>Imagine și afișare</small></span><i>›</i></button>
+          <button data-tab="audio"     class="category"><span class="category__number">02</span><span>Audio<small>Sunet și radio</small></span><i>›</i></button>
+          <button data-tab="controls"  class="category"><span class="category__number">03</span><span>Controale<small>Tastatură și mouse</small></span><i>›</i></button>
+          <button data-tab="interface" class="category"><span class="category__number">04</span><span>Interfață SKR<small>HUD, chat și radar</small></span><i>›</i></button>
+          <div class="category-note">SETĂRI JOC<span>Phase 1: valorile se aplică doar la nivelul UI. Persistența reală vine în Phase 2.</span></div>
+        </aside>
+        <div class="settings-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow" id="tabEyebrow">AFIȘARE ȘI PERFORMANȚĂ</span>
+              <h2 id="tabTitle">Grafică</h2>
+            </div>
+            <span class="panel-index" id="tabIndex">01 / 04</span>
+          </div>
+          <div id="settingsFields"></div>
+          <div class="panel-actions">
+            <span class="change-status" id="changeStatus" role="status">Nicio modificare</span>
+            <button class="button button--secondary" id="resetChanges">Anulează</button>
+            <button class="button button--gold" id="applyChanges" disabled>Aplică modificările <span>↗</span></button>
+          </div>
         </div>
-      </form>
-    </section>
-
-    <!-- About -->
-    <section class="page" data-page="about">
-      <header class="page__head">
-        <h1 class="h1">Despre</h1>
-      </header>
-      <div class="about">
-        <div class="about__row"><span>Versiune client</span><b id="aboutVersion">SKR Client R1 (Phase 1)</b></div>
-        <div class="about__row"><span>Status update</span><b id="aboutUpdate">la zi</b></div>
-        <div class="about__row"><span>Platformă</span><b>GTA SA 1.0 US · open.mp</b></div>
-        <div class="about__row"><span>Cod sursă</span><b>github.com/skr-platform</b></div>
-        <p class="about__legal">
-          SKR Client este software independent construit peste GTA San Andreas (Rockstar Games) și open.mp.
-          Nu redistribuim fișiere ale jocului. Vezi AGENTS.md pentru regulile de securitate și licențiere.
-        </p>
       </div>
     </section>
+
+    <!-- Servers (pre-connect mode landing page) -->
+    <section class="page" data-page="servers" hidden>
+      <div class="page-heading">
+        <div>
+          <span class="eyebrow">ALEGE UNDE ÎNCEPE POVESTEA</span>
+          <h1>Servere</h1>
+        </div>
+        <p>SKR / multiplayer</p>
+      </div>
+      <div class="server-intro">
+        <span class="eyebrow">SAN ANDREAS. O ALTĂ PERSPECTIVĂ.</span>
+        <h2>ORAȘUL TE<br><em>AȘTEAPTĂ.</em></h2>
+        <p>Alege un server pentru a continua.</p>
+      </div>
+      <div class="server-list">
+        <article class="server">
+          <div class="server-mark">SKR</div>
+          <div>
+            <h3>SKR Roleplay — Public</h3>
+            <p>127.0.0.1:7777 · date demonstrative</p>
+          </div>
+          <span class="server-state">Status indisponibil</span>
+          <button class="button button--gold" data-action="connect" data-addr="127.0.0.1:7777">Conectează ↗</button>
+        </article>
+        <article class="server">
+          <div class="server-mark">DEV</div>
+          <div>
+            <h3>SKR Roleplay — Dev</h3>
+            <p>127.0.0.1:7778 · date demonstrative</p>
+          </div>
+          <span class="server-state">Status indisponibil</span>
+          <button class="button button--secondary" data-action="connect" data-addr="127.0.0.1:7778">Conectează ↗</button>
+        </article>
+      </div>
+    </section>
+
+    <!-- Map (pause mode stub) -->
+    <section class="page" data-page="map" hidden>
+      <div class="page-heading">
+        <div>
+          <span class="eyebrow">ORIENTARE</span>
+          <h1>Hartă</h1>
+        </div>
+        <p>San Andreas</p>
+      </div>
+      <div class="map-placeholder">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><path d="m5 15 18-8 18 8 18-8v42l-18 8-18-8-18 8Zm18-8v42m18-34v42"/></svg>
+        <h2>Harta jocului</h2>
+        <p>Aici se deschide harta reală GTA prin adaptorul clientului.</p>
+        <span>Phase 1: harta nu este conectată.</span>
+      </div>
+    </section>
+
+    <!-- Resume (pause mode) -->
+    <section class="page resume" data-page="resume" hidden>
+      <span class="eyebrow">SKR ROLEPLAY</span>
+      <h1>ÎNAPOI ÎN<br><em>POVESTE.</em></h1>
+      <p>În joc, „Continuă” închide meniul și restabilește controlul.</p>
+      <button class="button button--gold" data-action="open-settings">Înapoi la setări</button>
+    </section>
   </main>
+
+  <footer>
+    <span><kbd>ESC</kbd> <span id="escapeLabel">Ieși din joc</span></span>
+    <span>SKR CLIENT <b>PROTOTIP · PHASE 1</b></span>
+  </footer>
 </div>
 
-<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="modal-backdrop" id="confirmModal" hidden>
+  <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <span class="eyebrow">CONFIRMARE</span>
+    <h2 id="modalTitle"></h2>
+    <p id="modalText"></p>
+    <div>
+      <button class="button button--secondary" id="cancelModal">Anulează</button>
+      <button class="button button--gold" id="confirmModalButton">Confirmă</button>
+    </div>
+  </section>
+</div>
 
-<script src="lobby.js"></script>
+<div class="toast" id="toast" hidden role="status"></div>
 </body>
 </html>

@@ -270,7 +270,7 @@ bool SettingsFromJson(const std::string& json, Settings& out) {
         if (out.volume < 0) out.volume = 0;
         if (out.volume > 100) out.volume = 100;
     }
-    (void)Utf8ToWide; (void)WideToUtf8;   // helpers available for future use
+    (void)&Utf8ToWide; (void)&WideToUtf8;  // addresses, not calls — kept for Phase 2
     return true;
 }
 
