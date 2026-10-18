@@ -88,12 +88,14 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
     if (pos != std::wstring::npos)
         workDir.resize(pos);
 
-    // Lobby mode: -c activates samp.dll (D3D9 proxy, samp-cef, networking)
-    // but without -h/-p SA-MP won't auto-connect to any server.
-    // CMenuManager is patched by the lobby module; connection is driven by
-    // the lobby UI (Phase 2).
+    // Lobby mode: -c -h -p are required for samp.dll to fully initialize its
+    // rendering pipeline (which samp-cef hooks into for CEF). Without -h/-p,
+    // SA-MP stays dormant and cef_initialize never fires. The lobby module
+    // patches CMenuManager so SA-MP's connect/failed screens never show;
+    // actual connection is driven by the lobby UI (Phase 2).
     std::wstring cmdLine = L"\"" + config.gtaSaPath + L"\""
-        + L" -c"
+        + L" -c -h " + config.serverAddress
+        + L" -p " + std::to_wstring(config.serverPort)
         + L" -n " + config.playerName;
 
     // Create process in SUSPENDED state
