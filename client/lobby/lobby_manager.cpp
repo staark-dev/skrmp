@@ -195,14 +195,46 @@ void Shutdown() {
 }
 
 void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
-    // Patch the vanilla menu now; safe once the game has mapped its code pages
-    // (true by the time EndScene fires for the first time).
+    // One-shot "we got here" marker so the next failure mode is distinguishable
+    // from "post-intro frame never fires" in lobby.log.
+    static std::atomic<bool> firstFrameLogged{false};
+    if (!firstFrameLogged.exchange(true)) Log("first post-intro EndScene frame");
+
+    // Patch the vanilla menu now; retried each frame until it sticks. On
+    // success/failure we log the actual first byte seen so the next run tells
+    // us exactly why if the offset ever drifts.
     if (!g_menuPatched.load()) {
-        if (PatchGtaMainMenu()) {
+        MenuPatchStatus st{};
+        bool ok = PatchGtaMainMenu(st);
+        static int lastReportedByte0 = -1, lastReportedByte1 = -1;
+        if (ok) {
             g_menuPatched.store(true);
-            Log("CMenuManager Process/DrawFrontEnd patched");
+            Log("CMenuManager Process/DrawFrontEnd patched: %s first=0x%02X %s %s first=0x%02X %s",
+                st.entries[0].name, st.entries[0].firstByte,
+                st.entries[0].alreadyPatched ? "(already 0xC3)" : "(we wrote 0xC3)",
+                st.entries[1].name, st.entries[1].firstByte,
+                st.entries[1].alreadyPatched ? "(already 0xC3)" : "(we wrote 0xC3)");
+        } else {
+            // Log once per distinct (byte0, byte1) tuple so a stuck repeat
+            // mode doesn't flood the file but a transient change is captured.
+            int b0 = st.entries[0].firstByte, b1 = st.entries[1].firstByte;
+            if (b0 != lastReportedByte0 || b1 != lastReportedByte1) {
+                lastReportedByte0 = b0; lastReportedByte1 = b1;
+                Log("menu patch FAILED: %s@0x%08IX first=0x%02X reason=%s | %s@0x%08IX first=0x%02X reason=%s",
+                    st.entries[0].name, st.entries[0].addr, b0,
+                    st.entries[0].reason ? st.entries[0].reason : "ok",
+                    st.entries[1].name, st.entries[1].addr, b1,
+                    st.entries[1].reason ? st.entries[1].reason : "ok");
+            }
         }
     }
+
+    // samp-cef has no `cef_samp_mainloop` plugin callback (verified by the
+    // launcher-ui session against deps/SAMPC-main). Drive the lobby's CEF
+    // tick from here instead — EndScene fires on the game thread at frame
+    // rate, which is exactly the cadence OnCefTick wants.
+    OnCefTick();
+
     // Draw cover BEFORE SA-MP's UI overlays and the CEF plugin render pass so
     // the lobby HTML (which carries its own background) appears on an opaque
     // backdrop. CEF renders on top of this on the samp-present path.
@@ -212,7 +244,11 @@ void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
 void OnCefTick() {
     auto& bridge = skr::cef::CefBridge::Instance();
     if (!bridge.IsReady()) return;
+    static bool loggedBridgeReady = false;
+    if (!loggedBridgeReady) { loggedBridgeReady = true; Log("CefBridge: Ready (api_ installed)"); }
     if (!bridge.IsCefReady()) return;
+    static bool loggedCefReady = false;
+    if (!loggedCefReady) { loggedCefReady = true; Log("CefBridge: cef_ready() -> true"); }
 
     SubscribeOnce();
 
