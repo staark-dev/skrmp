@@ -110,7 +110,7 @@ index 714366b..7ad5c0f 100644
  
      std::unordered_map<int, PlayerStatsPollState> player_stats_poll_;
 diff --git a/src/client/core/main.cpp b/src/client/core/main.cpp
-index 5479c11..86cf984 100644
+index 5479c11..f56b855 100644
 --- a/src/client/core/main.cpp
 +++ b/src/client/core/main.cpp
 @@ -3,7 +3,7 @@
@@ -131,15 +131,20 @@ index 5479c11..86cf984 100644
  {
      if (reason == DLL_PROCESS_ATTACH) {
          DisableThreadLibraryCalls(hModule);
-@@ -26,6 +26,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
+@@ -26,6 +26,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
          }
      }
      else if (reason == DLL_PROCESS_DETACH) {
 +        // reserved != nullptr: the process is terminating and the other threads
 +        // (CEF, network, audio) are already gone. Tearing them down under the
-+        // loader lock crashes, so only clean up on a dynamic FreeLibrary.
++        // loader lock crashes or hangs (SA-MP /q), so only clean up on a dynamic
++        // FreeLibrary. release() also keeps the CRT's global destructor, which
++        // runs right after this DllMain, from calling ~Runtime -> Stop().
 +        if (reserved)
++        {
++            (void)runtime.release();
 +            return TRUE;
++        }
          if (runtime) {
              runtime->Stop();
              runtime.reset();
