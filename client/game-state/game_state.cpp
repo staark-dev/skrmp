@@ -1,4 +1,5 @@
 #include "game-state/game_state.h"
+#include "protocol/client_state.h"
 #include <windows.h>
 #include <cmath>
 #include <cstdint>
@@ -11,8 +12,8 @@
 //    CMatrix::pos @0x30, CTheZones::ZoneInfoArray 0xBA3798, TotalNumberOfInfoZones 0xBA3794,
 //    CTheZones::PointLiesWithinZone 0x572270 (cdecl), CZone size 0x20,
 //    CZone::m_szTextKey @0x8, m_fX1..m_fZ2 shorts @0x10, TheText 0xC1B340, CText::Get 0x6A0050 (thiscall).
-//  samp.dll 0.3.7-R5 (sha256 b72b5dbe...2553a2): RVA 0x69900 = command send
-//    (__thiscall, 1 stack arg const char*, ecx unused; sends RPC 50), disassembled locally.
+//  samp.dll 0.3.7-R5 (sha256 b72b5dbe...2553a2): state is sent as SKR RPC 240 (see SendClientState)
+//    using the BitStream/RakClient calls of the command sender at RVA 0x69900.
 //    RVA 0x26EB94 = CNetGame*, state byte @+0x3CD (5 = connected, as used in d3d9_hook).
 
 namespace skr::game_state {
@@ -30,7 +31,6 @@ constexpr uintptr_t kCTextGet            = 0x6A0050;
 constexpr size_t    kZoneSize            = 0x20;
 
 constexpr uintptr_t kSampNetGameRva  = 0x26EB94;
-constexpr uintptr_t kSampSendCmdRva  = 0x69900;
 constexpr uintptr_t kNetGameStateOff = 0x3CD;
 constexpr uint8_t   kStateConnected  = 5;
 
@@ -60,8 +60,6 @@ constexpr uintptr_t kHandlingMaxGearVel = 0x2C + 0x58;
 constexpr uintptr_t kPhysMoveSpeed  = 0x44;
 // plugin-sdk CTheScripts.cpp: bDisplayHud 0xA444A0 (script DISPLAY_HUD flag).
 constexpr uintptr_t kDisplayHud = 0xA444A0;
-// plugin-sdk CHud.cpp: bScriptDontDisplayRadar 0xBAA3FB (radar is not covered by bDisplayHud).
-constexpr uintptr_t kScriptDontDisplayRadar = 0xBAA3FB;
 // GTA speed units are per 1/50 s frame: km/h = |v| * 50 * 3.6.
 constexpr float kSpeedToKmh = 180.0f;
 
@@ -69,7 +67,6 @@ constexpr DWORD kSendIntervalMs = 100;
 
 using PointLiesWithinZoneFn = bool(__cdecl*)(const CVector*, void*);
 using CTextGetFn            = const char*(__thiscall*)(void*, const char*);
-using SampSendCommandFn     = void(__thiscall*)(void*, const char*);
 using VoidFn                = void(__cdecl*)();
 using FindPlayerSpeedFn     = const CVector&(__cdecl*)(int);
 using FindPlayerVehicleFn   = uint8_t*(__cdecl*)(int, bool);
@@ -192,6 +189,67 @@ bool InstallProcessHook() {
 
 namespace {
 
+// ── SKR client-state RPC (format: shared/protocol/client_state.h) ─────────
+// samp.dll R5 BitStream + RakClient, exactly as used by the command sender at RVA 0x69900
+// (disassembled locally): ctor 0x1F730, WriteBits(ptr, bits, rightAligned) 0x1FFE0,
+// Write(const char*, bytes) 0x20090, dtor 0x1F8D0; CNetGame+0 = RakClientInterface*,
+// RPC(int* id, BitStream*, priority=1, reliability=8, channel=0, shiftTimestamp=0) at vtable +0x64.
+constexpr uintptr_t kBsCtorRva = 0x1F730, kBsWriteBitsRva = 0x1FFE0;
+constexpr uintptr_t kBsWriteBytesRva = 0x20090, kBsDtorRva = 0x1F8D0;
+constexpr size_t kRakRpcVtableOffset = 0x64;
+
+using BsThisFn = void(__thiscall*)(void*);
+using BsWriteBitsFn = void(__thiscall*)(void*, const uint8_t*, int, bool);
+using BsWriteBytesFn = void(__thiscall*)(void*, const char*, int);
+using RakRpcFn = bool(__thiscall*)(void*, int*, void*, int, int, char, bool);
+
+struct ClientState {
+    float x, y, z, heading, range, orient;
+    uint16_t speedKmh;
+    int8_t gear;
+    uint16_t maxKmh;
+};
+
+bool SendClientState(uintptr_t sampBase, uint8_t* netGame, const ClientState& st,
+                     const char* city, const char* area) {
+    void* rak = *reinterpret_cast<void**>(netGame);
+    if (!rak) return false;
+
+    // Larger than SA-MP's own stack BitStream (it lives inside a 0x118-byte frame).
+    alignas(16) uint8_t bs[0x400] = {};
+    auto ctor = reinterpret_cast<BsThisFn>(sampBase + kBsCtorRva);
+    auto dtor = reinterpret_cast<BsThisFn>(sampBase + kBsDtorRva);
+    auto bits = reinterpret_cast<BsWriteBitsFn>(sampBase + kBsWriteBitsRva);
+    auto bytes = reinterpret_cast<BsWriteBytesFn>(sampBase + kBsWriteBytesRva);
+    ctor(bs);
+
+    auto put = [&](const void* p, int nbits) { bits(bs, static_cast<const uint8_t*>(p), nbits, true); };
+    auto putName = [&](const char* s) {
+        uint8_t len = static_cast<uint8_t>(strnlen(s, protocol::kClientStateMaxName));
+        put(&len, 8);
+        if (len) bytes(bs, s, len);
+    };
+    const uint8_t version = protocol::kClientStateVersion;
+    put(&version, 8);
+    put(&st.x, 32); put(&st.y, 32); put(&st.z, 32);
+    put(&st.heading, 32); put(&st.range, 32); put(&st.orient, 32);
+    put(&st.speedKmh, 16);
+    put(&st.gear, 8);
+    put(&st.maxKmh, 16);
+    putName(city);
+    putName(area);
+
+    int rpcId = protocol::kRpcClientState;
+    auto vtbl = *reinterpret_cast<uint8_t**>(rak);
+    auto rpc = *reinterpret_cast<RakRpcFn*>(vtbl + kRakRpcVtableOffset);
+    // SA-MP's bundled RakNet uses PacketReliability base 6: UNRELIABLE=6, RELIABLE=8,
+    // RELIABLE_ORDERED=9 (D:\SA-MP Reverse\RE\client\docs\23-zonele-albe.md:51-52).
+    // samp.dll calls this slot as (&rpcId, buffer, prio=1, rel=9, chan=0, bcast=0).
+    bool ok = rpc(rak, &rpcId, bs, 1, 9, 0, false);
+    dtor(bs);
+    return ok;
+}
+
 bool IsConnected() {
     HMODULE samp = GetModuleHandleA("samp.dll");
     if (!samp) return false;
@@ -202,10 +260,9 @@ bool IsConnected() {
 void Tick() {
     // The CEF HUD replaces the native one while connected. Re-applied every frame because
     // SA-MP restores it (e.g. on spawn/spectate). Note: this also hides the crosshair.
-    if (IsConnected()) {
-        *reinterpret_cast<bool*>(kDisplayHud) = false;
-        *reinterpret_cast<bool*>(kScriptDontDisplayRadar) = true;
-    }
+    // CHud::bScriptDontDisplayRadar is intentionally NOT forced: forcing it crashed the game
+    // at startup (reported by the user); the native radar stays visible for now.
+    if (IsConnected()) *reinterpret_cast<bool*>(kDisplayHud) = false;
 
     DWORD now = GetTickCount();
     if (now - g_lastSend < kSendIntervalMs) return;
@@ -260,14 +317,20 @@ void Tick() {
         }
     }
 
-    // Stays below SA-MP's 128-char chat input limit (zone names truncate first).
-    char cmd[128];
-    snprintf(cmd, sizeof(cmd), "/skrloc %.1f %.1f %.1f %.1f %.1f %.1f %d %d %d|%s|%s",
-             pos.x, pos.y, pos.z, heading, range, orient, vehSpeedKmh, gear, maxKmh, city, area);
-
-    auto send = reinterpret_cast<SampSendCommandFn>(base + kSampSendCmdRva);
-    send(nullptr, cmd);
-    LogStage(5, cmd);
+    ClientState st{};
+    st.x = pos.x; st.y = pos.y; st.z = pos.z;
+    st.heading = heading; st.range = range; st.orient = orient;
+    st.speedKmh = static_cast<uint16_t>(vehSpeedKmh < 0 ? 0 : (vehSpeedKmh > 65535 ? 65535 : vehSpeedKmh));
+    st.gear = static_cast<int8_t>(gear);
+    st.maxKmh = static_cast<uint16_t>(maxKmh);
+    if (SendClientState(base, netGame, st, city, area)) {
+        char m[128];
+        snprintf(m, sizeof(m), "rpc %u sent: %.1f %.1f %.1f %s|%s", protocol::kRpcClientState,
+                 pos.x, pos.y, pos.z, city, area);
+        LogStage(5, m);
+    } else {
+        LogStage(6, "rpc send failed (no RakClient)");
+    }
 }
 
 } // namespace

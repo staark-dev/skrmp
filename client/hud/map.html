@@ -76,7 +76,9 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
   var $ = function (id) { return document.getElementById(id); };
   var GRID = 12, TILE_PX = 128, MAP_PX = GRID * TILE_PX;   // 1536 px for 6000 world units
   var WORLD = 6000, HALF = 3000;
-  var MIN_ZOOM = 0.35, MAX_ZOOM = 6;
+  var MAX_ZOOM = 6;
+  // The map always covers the whole view: never smaller than the view's larger side.
+  function minZoom() { return Math.max(view.clientWidth, view.clientHeight) / MAP_PX || 0.1; }
 
   var view = $('view'), mapEl = $('map'), playerEl = $('player'), pinEl = $('pin');
   var zoom = 1, panX = 0, panY = 0;            // screen = map * zoom + pan
@@ -105,6 +107,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
   }
 
   function clampPan() {
+    zoom = Math.max(minZoom(), Math.min(MAX_ZOOM, zoom));
     var w = view.clientWidth, h = view.clientHeight, size = MAP_PX * zoom;
     panX = size <= w ? (w - size) / 2 : Math.min(0, Math.max(w - size, panX));
     panY = size <= h ? (h - size) / 2 : Math.min(0, Math.max(h - size, panY));
@@ -129,7 +132,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
   }
 
   function zoomAt(vx, vy, factor) {
-    var nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
+    var nz = Math.max(minZoom(), Math.min(MAX_ZOOM, zoom * factor));
     var mx = (vx - panX) / zoom, my = (vy - panY) / zoom;
     zoom = nz;
     panX = vx - mx * zoom;
@@ -138,7 +141,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
   }
 
   function centerOnPlayer(z) {
-    if (z) zoom = z;
+    if (z) zoom = Math.max(minZoom(), z);
     var p = worldToMap(player.x, player.y);
     panX = view.clientWidth / 2 - p.x * zoom;
     panY = view.clientHeight / 2 - p.y * zoom;
@@ -223,6 +226,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
     cef.on('cef:escape_menu', function () { emit('map:close'); });
   }
 
+  window.addEventListener('resize', render);
   centerOnPlayer(1);
 })();
 </script>

@@ -36,3 +36,6 @@ server-runtime/
 *.pfx
 .env
 .env.*
+
+# GTA-derived assets (never redistribute — see AGENTS.md rule 13)
+assets/minimap/

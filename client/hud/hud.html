@@ -69,7 +69,8 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 .location__area { font-size:14px; line-height:18px; color:var(--hud-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* Vitals */
-.vitals { left:calc(294px * var(--hud-scale)); bottom:calc(22px * var(--hud-scale)); width:230px; height:130px; background:transparent; border:0; border-radius:0; transform-origin:bottom left; isolation:isolate; }
+.vitals { left:calc(294px * var(--hud-scale)); bottom:calc(22px * var(--hud-scale)); width:230px; height:130px; background:transparent; border:0; border-radius:0; transform-origin:bottom left; isolation:isolate;
+  transform:scale(calc(var(--hud-scale) * 0.85)); }   /* statuses 15% smaller than the rest of the HUD */
 .vitals__card { position:absolute; left:0; width:216px; height:36px; border:1px solid var(--hud-card-border); border-radius:6px; background:var(--hud-card); }
 .vitals__card--health { top:6px; }
 .vitals__card--armour { top:46px; }
@@ -127,6 +128,33 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 .notifications { position:absolute; top:calc(90px * var(--hud-scale)); left:50%; width:460px; display:grid; gap:8px; transform:translateX(-50%) scale(var(--hud-scale)); transform-origin:top center; }
 .notification { padding:12px 16px; background:var(--hud-panel); border:1px solid var(--hud-border); border-radius:8px; font-size:16px; line-height:22px; overflow-wrap:anywhere; }
 
+/* Navigation indicator — above the minimap (reference 1672x941: left 29, bottom 288, 304x76) */
+.navigation { left:calc(29px * var(--hud-scale)); bottom:calc(288px * var(--hud-scale)); width:304px; min-height:76px; padding:12px 18px; display:flex; align-items:center; gap:16px; background:rgba(18,23,30,.84); border:1px solid rgba(210,225,233,.10); border-radius:10px; transform-origin:bottom left; pointer-events:none; }
+.navigation[hidden] { display:none !important; }
+.navigation__arrow { width:40px !important; height:40px !important; flex:0 0 40px; color:#74dce8; stroke:#74dce8 !important; stroke-width:2.6 !important; }
+.navigation__arrow--pin { stroke-width:2 !important; }
+.navigation__content { min-width:0; flex:1; }
+.navigation__distance { font-size:26px; font-weight:700; line-height:30px; color:#f0f4f7; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.navigation__destination { margin-top:2px; font-size:18px; font-weight:400; line-height:22px; color:#c0c5c7; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* Phone notifications (phone closed) — bottom-right, above the vehicle panel */
+.phone-notifs { position:absolute; right:calc(28px * var(--hud-scale)); bottom:calc(172px * var(--hud-scale)); width:300px; display:flex; flex-direction:column-reverse; gap:8px; transform:scale(var(--hud-scale)); transform-origin:bottom right; }
+.pnotif { display:flex; gap:10px; align-items:center; padding:10px 12px; border-radius:14px; background:var(--hud-card); border:1px solid var(--hud-card-border); animation:pnotifIn 200ms ease-out; transition:opacity 250ms linear, transform 250ms ease-in; }
+.pnotif.is-leaving { opacity:0; transform:translateX(20px); }
+.pnotif__icon { width:32px; height:32px; flex:0 0 32px; border-radius:9px; display:flex; align-items:center; justify-content:center; }
+.pnotif__icon svg { width:17px !important; height:17px !important; stroke:#fff; }
+.pnotif__icon--sms { background:linear-gradient(160deg,#3ccf7a,#1f9a55); }
+.pnotif__icon--bank { background:linear-gradient(160deg,#5b7cfa,#3048b8); }
+.pnotif__icon--svc { background:linear-gradient(160deg,#f2994a,#c0571d); }
+.pnotif__main { min-width:0; flex:1; }
+.pnotif__head { display:flex; justify-content:space-between; gap:8px; font-size:11px; color:var(--hud-muted); }
+.pnotif__title { font-size:13px; font-weight:700; color:var(--hud-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pnotif__text { font-size:12.5px; color:var(--hud-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+@keyframes pnotifIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+
+/* Photo mode: hide everything for a clean screenshot */
+.hud.is-photo { visibility:hidden; }
+
 /* Remove artificial shadows */
 .hud, .hud *, .hud *::before, .hud *::after { box-shadow:none; text-shadow:none; }
 
@@ -172,6 +200,14 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
   <div class="money__row money__bank">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m2 8 10-6 10 6ZM3 21h18M4 18h16M6 10v6m6-6v6m6-6v6"/></svg>
     <span class="money__amount" id="moneyBank">$ 0</span>
+  </div>
+</section>
+
+<section class="navigation hud-group" id="navigation" hidden aria-label="Navigație">
+  <svg class="navigation__arrow" id="navArrow" viewBox="0 0 24 24" aria-hidden="true"><path id="navArrowPath" d=""/></svg>
+  <div class="navigation__content">
+    <div class="navigation__distance" id="navDistance"></div>
+    <div class="navigation__destination" id="navDestination"></div>
   </div>
 </section>
 
@@ -226,6 +262,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 
 <div class="voice hud-group" id="voice" aria-label="Voce"><i class="voice__bar"></i><i class="voice__bar"></i><i class="voice__bar"></i></div>
 <div class="notifications" id="notifications" aria-live="polite"></div>
+<div class="phone-notifs" id="phoneNotifs" aria-live="polite"></div>
 </main>
 
 <script>
@@ -499,7 +536,98 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
     }, Math.min(duration, 5000));
   }
 
-  window.skrHud = { update: updateHud, radar: onRadar, addChat: addChatLine, notify: showNotification };
+  // ── Navigation indicator ─────────────────────────────────
+  // updateNavigation(payload) — internal SKR contract (not an SA-MP/CEF API):
+  //   { active: bool, destination: string <= 120, distanceMeters: number >= 0,
+  //     nextTurn: "left"|"right"|"straight"|"uturn"|null, nextTurnMeters: number >= 0 | null }
+  // With nextTurn (real routing): turn arrow, row 1 = distance to the manoeuvre,
+  // row 2 = destination · remaining route distance. Without it (waypoint only): pin icon,
+  // row 1 = distance to the waypoint (the server sends straight-line distance), row 2 = name.
+  var NAV_ICONS = {
+    left: 'M15 19v-6a4 4 0 0 0-4-4H5m4-4-4 4 4 4',
+    right: 'M9 19v-6a4 4 0 0 1 4-4h6m-4-4 4 4-4 4',
+    straight: 'M12 20V5m-5 5 5-5 5 5',
+    uturn: 'M8 20V9a4 4 0 0 1 8 0v4m-4-1 4 4 4-4',
+    pin: 'M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21Zm0-9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z'
+  };
+  var NAV_TURNS = ['left', 'right', 'straight', 'uturn'];
+
+  function navDistance(m) {
+    if (Math.round(m) < 1000) return Math.round(m) + ' m';
+    var km = Math.round(m / 100) / 10;
+    return (km % 1 === 0 ? String(km) : km.toFixed(1).replace('.', ',')) + ' km';
+  }
+  function navNumber(v) { return typeof v === 'number' && isFinite(v) && v >= 0 ? v : null; }
+
+  function updateNavigation(p) {
+    var box = $('navigation');
+    if (!p || p.active !== true) {
+      box.hidden = true;
+      $('navDistance').textContent = '';
+      $('navDestination').textContent = '';
+      $('navArrowPath').setAttribute('d', '');
+      return;
+    }
+    var dest = typeof p.destination === 'string' ? p.destination.slice(0, 120) : '';
+    var dist = navNumber(p.distanceMeters);
+    var turn = NAV_TURNS.indexOf(p.nextTurn) >= 0 ? p.nextTurn : null;
+    var turnDist = turn ? navNumber(p.nextTurnMeters) : null;
+    if (dist === null) { updateNavigation(null); return; }   // invalid data: hide rather than show 0
+
+    var routed = turn !== null && turnDist !== null;
+    var arrow = $('navArrow');
+    arrow.classList.toggle('navigation__arrow--pin', !routed);
+    $('navArrowPath').setAttribute('d', NAV_ICONS[routed ? turn : 'pin']);
+    $('navDistance').textContent = navDistance(routed ? turnDist : dist);
+    $('navDestination').textContent = routed ? (dest ? dest + ' · ' : '') + navDistance(dist) : (dest || 'Destinație');
+    box.hidden = false;
+  }
+
+  // ── Phone notifications ──────────────────────────────────
+  var PNOTIF_ICONS = {
+    sms: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12Z"/>',
+    bank: '<path d="m3 9 9-5 9 5ZM4 20h16M6 11v6M10 11v6M14 11v6M18 11v6"/>',
+    svc: '<path d="M12 2v4M5 7l2.5 2.5M19 7l-2.5 2.5M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18"/>'
+  };
+  function phoneNotify(d) {
+    if (!d || typeof d.title !== 'string') return;
+    var app = PNOTIF_ICONS[d.app] ? d.app : 'sms';
+    var box = $('phoneNotifs');
+    while (box.children.length >= 3) box.removeChild(box.lastChild);
+    var n = document.createElement('div');
+    n.className = 'pnotif';
+    var icon = document.createElement('span');
+    icon.className = 'pnotif__icon pnotif__icon--' + app;
+    icon.innerHTML = '<svg viewBox="0 0 24 24">' + PNOTIF_ICONS[app] + '</svg>';   // static, not received text
+    var main = document.createElement('div');
+    main.className = 'pnotif__main';
+    var head = document.createElement('div');
+    head.className = 'pnotif__head';
+    var title = document.createElement('span');
+    title.className = 'pnotif__title';
+    title.textContent = d.title;
+    var hint = document.createElement('span');
+    hint.textContent = 'L';
+    head.appendChild(title);
+    head.appendChild(hint);
+    var text = document.createElement('div');
+    text.className = 'pnotif__text';
+    text.textContent = String(d.text || '');
+    main.appendChild(head);
+    main.appendChild(text);
+    n.appendChild(icon);
+    n.appendChild(main);
+    box.insertBefore(n, box.firstChild);
+    setTimeout(function () {
+      n.classList.add('is-leaving');
+      setTimeout(function () { if (n.parentNode) n.parentNode.removeChild(n); }, 260);
+    }, 5000);
+  }
+
+  function setPhotoMode(on) { $('hud').classList.toggle('is-photo', !!on); }
+
+  window.skrHud = { update: updateHud, radar: onRadar, addChat: addChatLine, notify: showNotification,
+                    phoneNotify: phoneNotify, photoMode: setPhotoMode, navigation: updateNavigation };
 
   if (typeof cef !== 'undefined' && cef.on) {
     cef.on('hud:update', function() {
@@ -507,6 +635,15 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
     });
     cef.on('hud:radar', function() {
       try { onRadar(JSON.parse(arguments[0])); } catch(e) {}
+    });
+    cef.on('hud:navigation', function() {
+      try { updateNavigation(JSON.parse(arguments[0])); } catch(e) { updateNavigation(null); }
+    });
+    cef.on('hud:phoneNotify', function() {
+      try { phoneNotify(JSON.parse(arguments[0])); } catch(e) {}
+    });
+    cef.on('hud:photo', function() {
+      try { setPhotoMode(JSON.parse(arguments[0]).on); } catch(e) {}
     });
     cef.on('hud:pin', function() {
       try {

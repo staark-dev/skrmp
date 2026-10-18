@@ -1,9 +1,11 @@
 <!doctype html>
 <html lang="ro"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SKR Telefon</title>
+<!-- Generated from the local GTA install by tools/gen_vehicle_names.py (not committed). -->
+<script src="vehicle_names.js"></script>
 <style>
 :root {
   --hud-scale: 1;
-  --phone-size: 0.8;   /* phone-only factor on top of the HUD scale */
+  --phone-size: 0.85;  /* phone-only factor on top of the HUD scale */
   --hud-text: #f0f4f7;
   --hud-secondary: #a7b4c0;
   --hud-muted: #84939f;
@@ -24,17 +26,20 @@ body.is-hidden { display:none; }
 button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; }
 input, textarea { font:inherit; color:var(--hud-text); }
 
+/* zoom (not transform: scale) so text and borders rasterize at the final pixel size and stay
+   sharp at small scales. An unzoomed anchor holds the screen position; zoom on a positioned
+   element would also rescale its right/bottom offsets. */
+.phone-anchor { position:absolute; right:calc(48px * var(--hud-scale)); bottom:calc(40px * var(--hud-scale)); }
 .phone {
-  position:absolute; right:calc(48px * var(--hud-scale)); bottom:calc(40px * var(--hud-scale));
+  position:relative; display:block;
   width:300px; height:620px; padding:10px;
   border-radius:48px; background:#06080b;
   border:1px solid rgba(210,225,233,.18);
   box-shadow:0 0 0 2px #1c232b inset, 0 18px 50px rgba(0,0,0,.55);
-  transform-origin:bottom right;
-  transform:scale(calc(var(--hud-scale) * var(--phone-size)));
+  zoom:calc(var(--hud-scale) * var(--phone-size));
   animation:slideUp 220ms ease-out;
 }
-@keyframes slideUp { from { opacity:0; transform:translateY(60px) scale(calc(var(--hud-scale) * var(--phone-size))); } to { opacity:1; transform:translateY(0) scale(calc(var(--hud-scale) * var(--phone-size))); } }
+@keyframes slideUp { from { opacity:0; transform:translateY(60px); } to { opacity:1; transform:translateY(0); } }
 
 .screen { position:relative; width:100%; height:100%; border-radius:38px; overflow:hidden; background:var(--screen); }
 .wallpaper { position:absolute; inset:0; transition:background 300ms; }
@@ -44,7 +49,7 @@ input, textarea { font:inherit; color:var(--hud-text); }
 .wallpaper[data-wp="apus"]   { background:linear-gradient(170deg, #5a2a3a 0%, #2a1730 45%, #0e0b14 100%); }
 .island { position:absolute; top:10px; left:50%; width:96px; height:28px; margin-left:-48px; border-radius:16px; background:#000; z-index:5; }
 
-.status { position:absolute; top:0; left:0; right:0; height:48px; padding:16px 26px 0; display:flex; justify-content:space-between; font-size:13px; font-weight:600; z-index:4; }
+.status { position:absolute; top:0; left:0; right:0; height:48px; padding:16px 26px 0; display:flex; justify-content:space-between; font-size:13.5px; font-weight:600; z-index:4; }
 .status__icons { display:flex; gap:6px; align-items:center; }
 .status__icons svg { width:16px; height:12px; fill:var(--hud-text); }
 
@@ -58,15 +63,26 @@ input, textarea { font:inherit; color:var(--hud-text); }
 .widgets { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:14px 16px 0; }
 .widget { padding:10px 11px; border-radius:16px; background:var(--card-strong); border:1px solid var(--card-border); backdrop-filter:blur(6px); text-align:left; min-width:0; }
 .widget--wide { grid-column:1 / -1; display:flex; align-items:center; gap:10px; }
-.widget__label { font-size:10px; letter-spacing:1px; text-transform:uppercase; color:var(--hud-muted); }
+.widget__label { font-size:11px; letter-spacing:1px; text-transform:uppercase; color:var(--hud-muted); }
 .widget__value { margin-top:3px; font-size:15px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.widget__sub { font-size:12px; color:var(--hud-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.widget__sub { font-size:12.5px; color:var(--hud-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .widget__icon { width:30px; height:30px; flex:0 0 30px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:linear-gradient(160deg,#3ccf7a,#1f9a55); }
 .widget__icon svg { width:16px; height:16px; fill:none; stroke:#fff; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 .widget__main { min-width:0; flex:1; }
 
 .apps { margin-top:auto; margin-bottom:14px; padding:0 18px; display:grid; grid-template-columns:repeat(4, 1fr); gap:14px 8px; }
-.app { display:flex; flex-direction:column; align-items:center; gap:5px; font-size:10.5px; color:var(--hud-secondary); position:relative; }
+
+/* Home: two swipeable pages above a fixed dock */
+.pages { position:relative; flex:1; min-height:0; overflow:hidden; }
+.pages__track { display:flex; width:200%; height:100%; transition:transform 260ms ease; }
+.page-home { width:50%; height:100%; display:flex; flex-direction:column; }
+.page-home--apps .apps { margin-top:22px; margin-bottom:0; gap:18px 8px; }
+.dots { display:flex; justify-content:center; gap:7px; padding:6px 0 8px; }
+.dot { width:7px; height:7px; border-radius:50%; background:rgba(240,244,247,.3); transition:background 150ms; }
+.dot.is-active { background:rgba(240,244,247,.9); }
+.dock { margin:0 12px 10px; padding:10px 10px; border-radius:24px; display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;
+        background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.08); }
+.app { display:flex; flex-direction:column; align-items:center; gap:5px; font-size:12px; color:var(--hud-secondary); position:relative; }
 .app__icon { width:50px; height:50px; border-radius:14px; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,.08); box-shadow:0 4px 10px rgba(0,0,0,.25); }
 .app__icon svg { width:24px; height:24px; fill:none; stroke:#fff; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
 .app__badge { position:absolute; top:-4px; right:2px; min-width:18px; height:18px; padding:0 5px; border-radius:9px; background:var(--hud-red); color:#fff; font-size:11px; font-weight:700; line-height:18px; text-align:center; }
@@ -78,6 +94,20 @@ input, textarea { font:inherit; color:var(--hud-text); }
 .app--bank .app__icon     { background:linear-gradient(160deg,#5b7cfa,#3048b8); }
 .app--notes .app__icon    { background:linear-gradient(160deg,#f5d36a,#d39b2a); }
 .app--settings .app__icon { background:linear-gradient(160deg,#6b7480,#3c444e); }
+.app--vehicles .app__icon { background:linear-gradient(160deg,#e8615a,#a8322c); }
+.app--services .app__icon { background:linear-gradient(160deg,#f2994a,#c0571d); }
+.app--camera .app__icon   { background:linear-gradient(160deg,#3a3f47,#1c2026); }
+
+.veh-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:10px; }
+.veh-stat { padding:7px 8px; border-radius:10px; background:rgba(0,0,0,.25); font-size:11px; color:var(--hud-muted); }
+.veh-stat b { display:block; margin-top:2px; font-size:13px; color:var(--hud-text); }
+.veh-actions { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:10px; }
+.veh-actions .btn { margin-top:0; height:34px; font-size:11px; padding:0 2px; }
+.btn.btn--ghost { background:rgba(116,220,232,.14); color:var(--hud-cyan); }
+.svc-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:8px; }
+.svc-btn { padding:12px 6px; border-radius:12px; background:var(--card); border:1px solid var(--card-border); font-size:12px; font-weight:600; display:flex; flex-direction:column; align-items:center; gap:6px; }
+.svc-btn svg { width:22px; height:22px; fill:none; stroke:var(--hud-text); stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+.notice { font-size:12px; color:var(--hud-cyan); text-align:center; min-height:16px; margin-bottom:8px; }
 
 /* App pages */
 .page { background:rgba(15,20,26,.94); }
@@ -93,7 +123,7 @@ input, textarea { font:inherit; color:var(--hud-text); }
 .avatar { width:34px; height:34px; flex:0 0 34px; border-radius:50%; background:#2a3a4a; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; color:var(--hud-cyan); }
 .list__main { min-width:0; flex:1; }
 .list__name { font-size:14px; font-weight:600; }
-.list__sub { font-size:12px; color:var(--hud-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.list__sub { font-size:12.5px; color:var(--hud-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .unread { width:8px; height:8px; border-radius:50%; background:var(--hud-cyan); }
 .icon-btn { width:28px; height:28px; border-radius:8px; color:var(--hud-muted); display:flex; align-items:center; justify-content:center; }
 .icon-btn:hover { color:var(--hud-red); background:rgba(232,91,104,.12); }
@@ -111,7 +141,7 @@ input, textarea { font:inherit; color:var(--hud-text); }
 .ok { color:var(--hud-green); }
 
 .card { padding:14px; margin-bottom:10px; border-radius:14px; background:var(--card); border:1px solid var(--card-border); }
-.card__label { font-size:11px; letter-spacing:1px; color:var(--hud-muted); text-transform:uppercase; }
+.card__label { font-size:11.5px; letter-spacing:1px; color:var(--hud-muted); text-transform:uppercase; }
 .card__value { margin-top:4px; font-size:17px; font-weight:600; }
 .card__sub { margin-top:2px; font-size:13px; color:var(--hud-secondary); }
 .card__value--big { font-size:30px; font-weight:700; }
@@ -160,6 +190,7 @@ textarea.field { height:70px; padding:8px 12px; resize:none; }
 @keyframes toastIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:none; } }
 </style>
 </head><body class="is-hidden">
+<div class="phone-anchor">
 <div class="phone" id="phone">
   <div class="screen">
     <div class="wallpaper" id="wallpaper" data-wp="noapte"></div>
@@ -175,38 +206,52 @@ textarea.field { height:70px; padding:8px 12px; resize:none; }
 
     <!-- Home -->
     <section class="view" id="viewHome">
-      <div class="home__clock">
-        <div class="home__time" id="homeTime">--:--</div>
-        <div class="home__date" id="homeDate"></div>
+      <div class="pages" id="homePages">
+        <div class="pages__track" id="pagesTrack">
+          <div class="page-home">
+            <div class="home__clock">
+              <div class="home__time" id="homeTime">--:--</div>
+              <div class="home__date" id="homeDate"></div>
+            </div>
+            <div class="widgets">
+              <button class="widget" data-open="gps">
+                <div class="widget__label">Locație</div>
+                <div class="widget__value" id="wCity">-</div>
+                <div class="widget__sub" id="wArea">-</div>
+              </button>
+              <button class="widget" data-open="wallet">
+                <div class="widget__label">Numerar</div>
+                <div class="widget__value" id="wCash">$ 0</div>
+                <div class="widget__sub" id="wPin">Fără destinație</div>
+              </button>
+              <button class="widget widget--wide" data-open="sms">
+                <span class="widget__icon"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12Z"/></svg></span>
+                <span class="widget__main">
+                  <div class="widget__value" id="wMsgTitle">Niciun mesaj nou</div>
+                  <div class="widget__sub" id="wMsgText">Mesajele apar aici.</div>
+                </span>
+              </button>
+            </div>
+          </div>
+          <div class="page-home page-home--apps">
+            <div class="apps">
+            <button class="app app--gps" data-open="gps"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/></svg></span>GPS</button>
+            <button class="app app--wallet" data-open="wallet"><span class="app__icon"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M16 12.5h2M3 9.5h18"/></svg></span>Portofel</button>
+            <button class="app app--vehicles" data-open="vehicles"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M5 17H3v-5l2-5h14l2 5v5h-2M5 12h14"/><circle cx="7.5" cy="17" r="2"/><circle cx="16.5" cy="17" r="2"/></svg></span>Vehicule</button>
+            <button class="app app--services" data-open="services"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M12 2v4M5 7l2.5 2.5M19 7l-2.5 2.5M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18"/></svg></span>Servicii</button>
+            <button class="app app--notes" data-open="notes"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6Z"/><path d="M9 11h7M9 15h7M15 3v4h4"/></svg></span>Notițe</button>
+            <button class="app app--camera" id="appCamera"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4Z"/><circle cx="12" cy="13" r="3.5"/></svg></span>Cameră</button>
+            <button class="app app--settings" data-open="settings"><span class="app__icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></span>Setări</button>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="widgets">
-        <button class="widget" data-open="gps">
-          <div class="widget__label">Locație</div>
-          <div class="widget__value" id="wCity">-</div>
-          <div class="widget__sub" id="wArea">-</div>
-        </button>
-        <button class="widget" data-open="wallet">
-          <div class="widget__label">Numerar</div>
-          <div class="widget__value" id="wCash">$ 0</div>
-          <div class="widget__sub" id="wPin">Fără destinație</div>
-        </button>
-        <button class="widget widget--wide" data-open="sms">
-          <span class="widget__icon"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12Z"/></svg></span>
-          <span class="widget__main">
-            <div class="widget__value" id="wMsgTitle">Niciun mesaj nou</div>
-            <div class="widget__sub" id="wMsgText">Mesajele apar aici.</div>
-          </span>
-        </button>
-      </div>
-      <div class="apps">
-        <button class="app app--sms" data-open="sms"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12Z"/></svg></span>Mesaje<span class="app__badge" id="smsBadge" hidden>0</span></button>
-        <button class="app app--contacts" data-open="contacts"><span class="app__icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.4 4.2-6.5 8-6.5s7 2.1 8 6.5"/></svg></span>Contacte</button>
-        <button class="app app--gps" data-open="gps"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/></svg></span>GPS</button>
-        <button class="app app--map" id="appMap"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2ZM9 4v14M15 6v14"/></svg></span>Hartă</button>
-        <button class="app app--wallet" data-open="wallet"><span class="app__icon"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M16 12.5h2M3 9.5h18"/></svg></span>Portofel</button>
-        <button class="app app--bank" data-open="bank"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="m3 9 9-5 9 5ZM4 20h16M6 11v6M10 11v6M14 11v6M18 11v6"/></svg></span>Bancă</button>
-        <button class="app app--notes" data-open="notes"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6Z"/><path d="M9 11h7M9 15h7M15 3v4h4"/></svg></span>Notițe</button>
-        <button class="app app--settings" data-open="settings"><span class="app__icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></span>Setări</button>
+      <div class="dots" id="homeDots"><button class="dot is-active" data-page="0" aria-label="Pagina 1"></button><button class="dot" data-page="1" aria-label="Pagina 2"></button></div>
+      <div class="dock">
+          <button class="app app--dock app--sms" data-open="sms"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12Z"/></svg></span>Mesaje<span class="app__badge" id="smsBadge" hidden>0</span></button>
+          <button class="app app--dock app--contacts" data-open="contacts"><span class="app__icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.4 4.2-6.5 8-6.5s7 2.1 8 6.5"/></svg></span>Contacte</button>
+          <button class="app app--dock app--map" id="appMap"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2ZM9 4v14M15 6v14"/></svg></span>Hartă</button>
+          <button class="app app--dock app--bank" data-open="bank"><span class="app__icon"><svg viewBox="0 0 24 24"><path d="m3 9 9-5 9 5ZM4 20h16M6 11v6M10 11v6M14 11v6M18 11v6"/></svg></span>Bancă</button>
       </div>
     </section>
 
@@ -292,6 +337,25 @@ textarea.field { height:70px; padding:8px 12px; resize:none; }
       </div>
     </section>
 
+    <!-- Vehicles -->
+    <section class="view page" id="viewVehicles" hidden>
+      <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">Vehicule</span></div>
+      <div class="page__body">
+        <div class="notice" id="vehNotice"></div>
+        <div id="vehList"></div>
+      </div>
+    </section>
+
+    <!-- Services -->
+    <section class="view page" id="viewServices" hidden>
+      <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">Servicii</span></div>
+      <div class="page__body">
+        <div class="notice" id="svcNotice"></div>
+        <div class="card" id="svcOwn"></div>
+        <div class="card"><div class="card__label">Cereri active</div><div id="svcRequests" style="margin-top:8px"></div></div>
+      </div>
+    </section>
+
     <!-- Settings -->
     <section class="view page" id="viewSettings" hidden>
       <div class="page__head"><button class="page__back" data-home>‹ Acasă</button><span class="page__title">Setări</span></div>
@@ -303,6 +367,7 @@ textarea.field { height:70px; padding:8px 12px; resize:none; }
 
     <div class="home-bar" data-home title="Acasă"></div>
   </div>
+</div>
 </div>
 
 <script>
@@ -321,7 +386,9 @@ textarea.field { height:70px; padding:8px 12px; resize:none; }
   var bankTo = null;
   var transfers = [];
   var views = { home: 'viewHome', sms: 'viewSms', thread: 'viewThread', contacts: 'viewContacts', gps: 'viewGps',
-                wallet: 'viewWallet', bank: 'viewBank', notes: 'viewNotes', settings: 'viewSettings' };
+                wallet: 'viewWallet', bank: 'viewBank', notes: 'viewNotes', settings: 'viewSettings',
+                vehicles: 'viewVehicles', services: 'viewServices' };
+  var VEHICLE_NAMES = window.SKR_VEHICLE_NAMES || {};
   var currentView = 'home';
   var toastTimer = null;
 
@@ -371,6 +438,8 @@ textarea.field { height:70px; padding:8px 12px; resize:none; }
     if (name === 'bank') { renderBank(); emit('phone:contacts'); }
     if (name === 'notes') renderNotes();
     if (name === 'settings') renderSettings();
+    if (name === 'vehicles') { $('vehNotice').textContent = ''; $('vehList').textContent = ''; $('vehList').appendChild(el('div', 'empty', 'Se încarcă…')); emit('phone:vehicles'); }
+    if (name === 'services') { $('svcNotice').textContent = ''; emit('phone:svcList'); }
     if (name === 'thread') { renderThread(); setTimeout(function () { $('smsInput').focus(); }, 0); }
   }
 
@@ -380,6 +449,120 @@ textarea.field { height:70px; padding:8px 12px; resize:none; }
     if (t.hasAttribute('data-home')) show('home'); else show(t.getAttribute('data-open'));
   });
   $('appMap').addEventListener('click', function () { emit('phone:openMap'); });
+
+  /* ── Home pages (dots, wheel, horizontal drag) ────── */
+  var homePage = 0, wheelLock = 0, dragStart = null;
+  function setPage(n) {
+    homePage = Math.max(0, Math.min(1, n));
+    $('pagesTrack').style.transform = 'translateX(' + (-50 * homePage) + '%)';
+    Array.prototype.forEach.call($('homeDots').children, function (d, i) { d.classList.toggle('is-active', i === homePage); });
+  }
+  $('homeDots').addEventListener('click', function (e) {
+    var d = e.target.closest('[data-page]');
+    if (d) setPage(Number(d.getAttribute('data-page')));
+  });
+  $('homePages').addEventListener('wheel', function (e) {
+    var now = Date.now();
+    if (now < wheelLock) return;
+    var delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (Math.abs(delta) < 4) return;
+    wheelLock = now + 350;
+    setPage(homePage + (delta > 0 ? 1 : -1));
+  }, { passive: true });
+  $('homePages').addEventListener('mousedown', function (e) { dragStart = { x: e.clientX, y: e.clientY }; });
+  window.addEventListener('mouseup', function (e) {
+    if (!dragStart) return;
+    var dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
+    dragStart = null;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) setPage(homePage + (dx < 0 ? 1 : -1));
+  });
+  $('appCamera').addEventListener('click', function () { emit('phone:camera'); });
+
+  /* ── Vehicles ─────────────────────────────────────── */
+  var VEH_LOCATE = 0, VEH_ENGINE = 1, VEH_LOCK = 2;
+  function vehicleName(model) { return VEHICLE_NAMES[String(model)] || ('Model ' + model); }
+  function renderVehicles(d) {
+    if (!d) return;
+    $('vehNotice').textContent = String(d.notice || '');
+    var list = $('vehList');
+    list.textContent = '';
+    var vehicles = Array.isArray(d.vehicles) ? d.vehicles : [];
+    if (!vehicles.length) { list.appendChild(el('div', 'empty', 'Nu ai niciun vehicul. Creează unul cu /v [model].')); return; }
+    vehicles.forEach(function (v) {
+      var card = el('div', 'card');
+      card.appendChild(el('div', 'card__label', 'ID ' + v.id + (v.inside ? ' · Ești în vehicul' : '')));
+      card.appendChild(el('div', 'card__value', vehicleName(v.model)));
+      card.appendChild(el('div', 'card__sub', String(v.zone || '-') + ' · ' + distText(v.dist)));
+      var stats = el('div', 'veh-stats');
+      [['Stare', Math.round(Math.max(0, Math.min(1000, v.health)) / 10) + '%'],
+       ['Motor', v.engine ? 'Pornit' : 'Oprit'],
+       ['Uși', v.locked ? 'Încuiate' : 'Deschise']].forEach(function (s) {
+        var st = el('div', 'veh-stat', s[0]);
+        st.appendChild(el('b', null, s[1]));
+        stats.appendChild(st);
+      });
+      card.appendChild(stats);
+      var actions = el('div', 'veh-actions');
+      [['Localizează', VEH_LOCATE], [v.engine ? 'Oprește' : 'Pornește', VEH_ENGINE], [v.locked ? 'Descuie' : 'Încuie', VEH_LOCK]].forEach(function (a) {
+        var b = el('button', 'btn btn--ghost', a[0]);
+        b.addEventListener('click', function () { emit('phone:vehAction', a[1], v.id); });
+        actions.appendChild(b);
+      });
+      card.appendChild(actions);
+      list.appendChild(card);
+    });
+  }
+
+  /* ── Services ─────────────────────────────────────── */
+  var SERVICES = [
+    { type: 1, name: 'Taxi', icon: '<path d="M5 17H3v-5l2-5h14l2 5v5h-2M5 12h14M9 4h6"/><circle cx="7.5" cy="17" r="2"/><circle cx="16.5" cy="17" r="2"/>' },
+    { type: 2, name: 'Mecanic', icon: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4Z"/>' },
+    { type: 3, name: 'Medic', icon: '<path d="M10 3h4v7h7v4h-7v7h-4v-7H3v-4h7Z"/>' }
+  ];
+  function renderServices(d) {
+    if (!d) return;
+    $('svcNotice').textContent = String(d.notice || '');
+    var own = $('svcOwn');
+    own.textContent = '';
+    if (d.own) {
+      own.appendChild(el('div', 'card__label', 'Cererea ta'));
+      own.appendChild(el('div', 'card__value', String(d.own.name)));
+      own.appendChild(el('div', 'card__sub', 'Expiră în ' + Math.max(0, d.own.left | 0) + ' s · trimisă tuturor jucătorilor'));
+      var cancel = el('button', 'btn btn--danger', 'Anulează');
+      cancel.addEventListener('click', function () { emit('phone:svcCancel'); });
+      own.appendChild(cancel);
+    } else {
+      own.appendChild(el('div', 'card__label', 'Cere un serviciu'));
+      var grid = el('div', 'svc-grid');
+      SERVICES.forEach(function (s) {
+        var b = el('button', 'svc-btn');
+        var icon = document.createElement('span');
+        icon.innerHTML = '<svg viewBox="0 0 24 24">' + s.icon + '</svg>';   // static icon markup
+        b.appendChild(icon);
+        b.appendChild(document.createTextNode(s.name));
+        b.addEventListener('click', function () { emit('phone:svcRequest', s.type); });
+        grid.appendChild(b);
+      });
+      own.appendChild(grid);
+    }
+    var box = $('svcRequests');
+    box.textContent = '';
+    var reqs = Array.isArray(d.requests) ? d.requests : [];
+    if (!reqs.length) { box.appendChild(el('div', 'list__sub', 'Nicio cerere activă.')); return; }
+    reqs.forEach(function (r) {
+      var item = el('div', 'list__item');
+      item.appendChild(el('span', 'avatar', String(r.name).charAt(0).toUpperCase()));
+      var main = el('span', 'list__main');
+      main.appendChild(el('div', 'list__name', r.type + ' · ' + r.name));
+      main.appendChild(el('div', 'list__sub', String(r.zone || '-') + ' · acum ' + Math.max(0, r.age | 0) + ' s'));
+      item.appendChild(main);
+      var accept = el('button', 'btn', 'Acceptă');
+      accept.style.cssText = 'width:auto;margin:0;padding:0 12px;height:30px';
+      accept.addEventListener('click', function () { emit('phone:svcAccept', r.id); });
+      item.appendChild(accept);
+      box.appendChild(item);
+    });
+  }
 
   /* ── Home ─────────────────────────────────────────── */
   function renderHome() {
@@ -652,6 +835,7 @@ textarea.field { height:70px; padding:8px 12px; resize:none; }
       document.body.classList.remove('is-hidden');
       var p = $('phone');
       p.style.animation = 'none'; void p.offsetWidth; p.style.animation = '';
+      setPage(0);
       show('home');
     },
     contacts: function (list) {
@@ -663,7 +847,12 @@ textarea.field { height:70px; padding:8px 12px; resize:none; }
     sms: addSms,
     error: function (d) { if (d && d.text) { $('smsError').textContent = d.text; $('smsError').hidden = false; } },
     transferResult: onTransferResult,
-    transferIn: onTransferIn
+    transferIn: onTransferIn,
+    vehicles: function (d) { if (currentView === 'vehicles') renderVehicles(d); },
+    services: function (d) {
+      if (currentView === 'services') renderServices(d);
+      else if (d && d.notice && /acceptat/i.test(d.notice)) toast('Servicii', d.notice);
+    }
   };
 
   if (typeof cef !== 'undefined' && cef.on) {
@@ -675,6 +864,8 @@ textarea.field { height:70px; padding:8px 12px; resize:none; }
     cef.on('phone:error', function () { window.skrPhone.error(parse(arguments[0])); });
     cef.on('phone:transferResult', function () { window.skrPhone.transferResult(parse(arguments[0])); });
     cef.on('phone:transferIn', function () { window.skrPhone.transferIn(parse(arguments[0])); });
+    cef.on('phone:vehicleList', function () { window.skrPhone.vehicles(parse(arguments[0])); });
+    cef.on('phone:svcState', function () { window.skrPhone.services(parse(arguments[0])); });
     cef.on('cef:escape_menu', function () { emit('phone:close'); });
   }
 })();

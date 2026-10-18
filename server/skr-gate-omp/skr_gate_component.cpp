@@ -1,8 +1,82 @@
 #include "skr_gate_component.hpp"
+#include <Server/Components/Variables/variables.hpp>
+#include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
 namespace skr::gate_omp {
+
+// ── RPC 240: client state from SKRClient.dll ──────────────
+
+namespace {
+
+constexpr uint64_t kClientStateMinIntervalMs = 50;
+
+uint64_t NowMs() {
+    using namespace std::chrono;
+    return static_cast<uint64_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+bool InRange(float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; }
+
+// Zone names end up inside JSON on the server: keep printable ASCII, drop quotes/backslashes.
+bool ReadName(NetworkBitStream& bs, char (&out)[protocol::kClientStateMaxName + 1]) {
+    uint8_t len = 0;
+    if (!bs.readUINT8(len) || len > protocol::kClientStateMaxName) return false;
+    if (len && !bs.Read(out, len)) return false;
+    out[len] = '\0';
+    for (uint8_t i = 0; i < len; ++i) {
+        char c = out[i];
+        if (c < 0x20 || c > 0x7E || c == '"' || c == '\\') out[i] = ' ';
+    }
+    return true;
+}
+
+} // namespace
+
+bool SkrClientStateHandler::onReceive(IPlayer& peer, NetworkBitStream& bs) {
+    const int id = peer.getID();
+    if (!gate_ || !gate_->IsAuthorized(id)) return false;
+
+    const uint64_t now = NowMs();
+    auto it = lastAcceptMs_.find(id);
+    if (it != lastAcceptMs_.end() && now - it->second < kClientStateMinIntervalMs) return false;
+
+    uint8_t version = 0;
+    float x, y, z, heading, range, orient;
+    uint16_t speed = 0, maxSpeed = 0;
+    int8_t gear = 0;
+    char city[protocol::kClientStateMaxName + 1], area[protocol::kClientStateMaxName + 1];
+    if (!bs.readUINT8(version) || version != protocol::kClientStateVersion) return false;
+    if (!bs.readFLOAT(x) || !bs.readFLOAT(y) || !bs.readFLOAT(z) || !bs.readFLOAT(heading)
+        || !bs.readFLOAT(range) || !bs.readFLOAT(orient)) return false;
+    if (!bs.readUINT16(speed) || !bs.readINT8(gear) || !bs.readUINT16(maxSpeed)) return false;
+    if (!ReadName(bs, city) || !ReadName(bs, area)) return false;
+
+    if (!InRange(x, -20000.f, 20000.f) || !InRange(y, -20000.f, 20000.f) || !InRange(z, -5000.f, 5000.f)
+        || !InRange(heading, -1.f, 361.f) || !InRange(range, 1.f, 10000.f) || !InRange(orient, -181.f, 181.f)
+        || speed > 2000 || gear < -1 || gear > 10 || maxSpeed > 2000) {
+        return false;
+    }
+
+    auto* vars = queryExtension<IPlayerVariableData>(peer);
+    if (!vars) return false;
+    lastAcceptMs_[id] = now;
+    vars->setFloat("skr_x", x);
+    vars->setFloat("skr_y", y);
+    vars->setFloat("skr_z", z);
+    vars->setFloat("skr_heading", heading);
+    vars->setFloat("skr_range", range);
+    vars->setFloat("skr_orient", orient);
+    vars->setInt("skr_speed", speed);
+    vars->setInt("skr_gear", gear);
+    vars->setInt("skr_maxspeed", maxSpeed);
+    vars->setString("skr_city", city);
+    vars->setString("skr_area", area);
+    vars->setInt("skr_state_seq", ++seq_[id]);   // set last: scripts read the rest when it changes
+    return false;   // consumed: nothing else handles SKR-private RPC 240
+}
 
 // ── RPC 25 filter: block non-SKR clients at join ────────
 
@@ -93,6 +167,7 @@ bool SkrJoinFilter::onReceive(IPlayer& peer, NetworkBitStream& bs) {
 SkrGateComponent::~SkrGateComponent() {
     if (core_) {
         core_->removePerRPCInEventHandler<kRPC_ClientJoin>(&joinFilter_);
+        core_->removePerRPCInEventHandler<protocol::kRpcClientState>(&clientStateHandler_);
         core_->getEventDispatcher().removeEventHandler(this);
         core_->getPlayers().getPlayerConnectDispatcher().removeEventHandler(this);
     }
@@ -112,7 +187,11 @@ void SkrGateComponent::onInit(IComponentList* /*components*/) {
     // Register per-RPC handler for CLIENT_JOIN (RPC 25) — high priority to run first
     joinFilter_.setCore(core_);
     core_->addPerRPCInEventHandler<kRPC_ClientJoin>(&joinFilter_, EventPriority_FairlyHigh);
-    core_->printLn("SKR Gate: registered player event handlers + RPC filter");
+
+    clientStateHandler_.setOwner(this, core_);
+    core_->addPerRPCInEventHandler<protocol::kRpcClientState>(&clientStateHandler_);
+    core_->printLn("SKR Gate: registered player event handlers + RPC filter + client-state RPC %d",
+                   protocol::kRpcClientState);
 }
 
 void SkrGateComponent::onReady() {
@@ -170,6 +249,7 @@ void SkrGateComponent::onPlayerDisconnect(IPlayer& player, PeerDisconnectReason 
         std::lock_guard<std::mutex> lock(mutex_);
         players_.erase(id);
     }
+    clientStateHandler_.forget(id);
     core_->printLn("SKR Gate: player %d disconnected (reason %d)",
                    id, static_cast<int>(reason));
 }

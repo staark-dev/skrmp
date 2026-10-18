@@ -2,6 +2,7 @@
 
 #include <sdk.hpp>
 #include "protocol/messages.h"
+#include "protocol/client_state.h"
 #include "crypto/crypto.h"
 #include <bitstream.hpp>
 
@@ -52,6 +53,25 @@ public:
     void setCore(ICore* c) { core_ = c; }
 private:
     ICore* core_ = nullptr;
+};
+
+class SkrGateComponent;
+
+// RPC 240 (shared/protocol/client_state.h): display-only client state from SKRClient.dll.
+// Validated, rate-limited and exposed to scripts as player variables (PVars):
+//   skr_state_seq (int, increments per accepted packet), skr_x/y/z, skr_heading,
+//   skr_range, skr_orient (float), skr_speed, skr_gear, skr_maxspeed (int),
+//   skr_city, skr_area (string).
+class SkrClientStateHandler final : public SingleNetworkInEventHandler {
+public:
+    bool onReceive(IPlayer& peer, NetworkBitStream& bs) override;
+    void setOwner(SkrGateComponent* gate, ICore* core) { gate_ = gate; core_ = core; }
+    void forget(int playerId) { lastAcceptMs_.erase(playerId); seq_.erase(playerId); }
+private:
+    SkrGateComponent* gate_ = nullptr;
+    ICore* core_ = nullptr;
+    std::unordered_map<int, uint64_t> lastAcceptMs_;
+    std::unordered_map<int, int> seq_;
 };
 
 class SkrGateComponent final
@@ -112,6 +132,7 @@ private:
     static constexpr int kRPC_ClientJoin = 25;
 
     SkrJoinFilter joinFilter_;
+    SkrClientStateHandler clientStateHandler_;
     uint64_t tickAccumulatorMs_ = 0;
 };
 
