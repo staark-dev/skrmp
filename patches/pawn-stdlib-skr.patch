@@ -1,0 +1,25 @@
+diff --git a/omp_core.inc b/omp_core.inc
+index 68aa514..7895a3f 100644
+--- a/omp_core.inc
++++ b/omp_core.inc
+@@ -1465,6 +1465,20 @@ forward OnGameModeInit();
+  */
+ forward OnGameModeExit();
+ 
++/**
++ * <summary>SKR: asked by the SKR Gate server component when an SKR client joins, to learn whether
++ * this server shows its own intro/login page. The SKR lobby then stays on screen until that page
++ * takes focus, instead of hiding as soon as the player is in the world.</summary>
++ * <seealso name="OnGameModeInit" />
++ * <remarks>Also checked in filterscripts. Not called by servers without the SKR Gate component.
++ * The intro itself is the script's own CEF page (CEF_CreateBrowser with focus).</remarks>
++ * <returns>
++ *   <b><c>1</c></b> - This server has an intro: the SKR lobby waits for it (at most 30 seconds).<br />
++ *   <b><c>0</c></b> - No intro (same as not implementing the callback): the lobby hides right away.
++ * </returns>
++ */
++forward OnGameModeIntro();
++
+ /**
+  * <summary>This callback is called when a filterscript is initialized (loaded).  It is only called
+  * inside the filterscript which is starting.</summary>

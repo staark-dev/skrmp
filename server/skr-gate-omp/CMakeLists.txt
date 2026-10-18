@@ -25,11 +25,17 @@ add_library(${PROJECT_NAME} SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/crypto/crypto.cpp
 )
 
+# AMX headers for the SDK's Pawn component interface (OnGameModeIntro lookup).
+# Same Pawn source tree and cell size as the open.mp server build's Pawn component.
+set(OMP_PAWN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../server-build/open.mp/lib/pawn/source")
+
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared
     ${OMP_NET_DIR}
+    ${OMP_PAWN_DIR}
 )
+target_compile_definitions(${PROJECT_NAME} PRIVATE PAWN_CELL_SIZE=32 HAVE_STDINT_H)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     OMP-SDK

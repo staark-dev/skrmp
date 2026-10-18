@@ -180,7 +180,8 @@ void SkrGateComponent::onLoad(ICore* c) {
     core_->printLn("SKR Gate component loaded (v0.1.0)");
 }
 
-void SkrGateComponent::onInit(IComponentList* /*components*/) {
+void SkrGateComponent::onInit(IComponentList* components) {
+    pawn_ = components->queryComponent<IPawnComponent>();
     core_->getPlayers().getPlayerConnectDispatcher().addEventHandler(this);
     core_->getEventDispatcher().addEventHandler(this);
 
@@ -198,7 +199,8 @@ void SkrGateComponent::onReady() {
     core_->printLn("SKR Gate: ready, enforcing ticket-based auth");
 }
 
-void SkrGateComponent::onFree(IComponent* /*component*/) {
+void SkrGateComponent::onFree(IComponent* component) {
+    if (component == pawn_) pawn_ = nullptr;
 }
 
 void SkrGateComponent::free() {
@@ -257,6 +259,36 @@ void SkrGateComponent::onPlayerDisconnect(IPlayer& player, PeerDisconnectReason 
 void SkrGateComponent::onPlayerClientInit(IPlayer& player) {
     int id = player.getID();
     core_->printLn("SKR Gate: player %d client initialized", id);
+    if (IsAuthorized(id)) SendSessionInfo(player);
+}
+
+// True when the gamemode or a filterscript implements
+// `public OnGameModeIntro()` and returns non-zero.
+// A missing public returns the default (false): no server intro.
+bool SkrGateComponent::ScriptsHaveIntro() {
+    if (!pawn_) return false;
+    if (IPawnScript* gm = pawn_->mainScript()) {
+        if (gm->Call(protocol::kIntroCallback, DefaultReturnValue_False)) return true;
+    }
+    for (IPawnScript* fs : pawn_->sideScripts()) {
+        if (fs && fs->Call(protocol::kIntroCallback, DefaultReturnValue_False)) return true;
+    }
+    return false;
+}
+
+// RPC 241 (shared/protocol/session_info.h). Runs after the scripts'
+// OnPlayerConnect, so OnGameModeIntro can depend on what they set up there.
+void SkrGateComponent::SendSessionInfo(IPlayer& player) {
+    const uint8_t mode = static_cast<uint8_t>(ScriptsHaveIntro()
+        ? protocol::SessionMode::CefIntro : protocol::SessionMode::None);
+
+    NetworkBitStream bs;
+    bs.writeUINT8(protocol::kSessionInfoVersion);
+    bs.writeUINT8(mode);
+    const bool sent = player.sendRPC(protocol::kRpcSessionInfo,
+        Span<uint8_t>(bs.GetData(), bs.GetNumberOfBitsUsed()), OrderingChannel_SyncRPC);
+    core_->printLn("SKR Gate: session info (mode %u) %s to player %d",
+                   mode, sent ? "sent" : "NOT sent", player.getID());
 }
 
 // ── Tick: enforce auth timeout ───────────────────────────

@@ -63,12 +63,14 @@ add_library(SKRClient SHARED
   client/lobby/lobby_manager.cpp
   client/lobby/menu_patch.cpp
   client/lobby/settings_io.cpp
+  client/lobby/server_query.cpp
   client/cef-local/cef_local_loader.cpp
   client/samp-loader/samp_loader.cpp
   client/compatibility/compat_profile.cpp
   client/transport/auth_client.cpp
   client/samp-hooks/samp_hooks.cpp
   client/game-state/game_state.cpp
+  client/gta-fixes/gta_fixes.cpp
 )
 set_target_properties(SKRClient PROPERTIES
   OUTPUT_NAME "SKR.Client" PREFIX ""
@@ -78,7 +80,7 @@ target_include_directories(SKRClient PRIVATE
   ${CMAKE_SOURCE_DIR}/shared
   ${CMAKE_SOURCE_DIR}/deps/miniaudio-0.11.23
 )
-target_link_libraries(SKRClient PRIVATE d3d9 version bcrypt windowscodecs ole32 shell32 SKRShared)
+target_link_libraries(SKRClient PRIVATE d3d9 dxguid version bcrypt windowscodecs ole32 shell32 ws2_32 SKRShared)
 # Third-party single-header implementation; keep its warnings out of the /W4 build.
 set_source_files_properties(client/intro/miniaudio_impl.cpp PROPERTIES COMPILE_OPTIONS "/W0")
 
@@ -90,26 +92,25 @@ set(SKR_LOBBY_WEB_FILES
   client/lobby/lobby.css
   client/lobby/lobby.js
 )
-foreach(f ${SKR_LOBBY_WEB_FILES})
-  get_filename_component(_name "${f}" NAME)
-  add_custom_command(TARGET SKRClient POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/${f}"
-            "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/${_name}"
-    VERBATIM)
-endforeach()
-add_custom_command(TARGET SKRClient POST_BUILD
+# Always stage web assets, including builds where no C++ file changed.
+add_custom_target(SKRLobbyAssets
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/assets"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "${CMAKE_SOURCE_DIR}/client/lobby/assets/background.png"
-          "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/assets/background.png"
+          ${SKR_LOBBY_WEB_FILES}
+          "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_SOURCE_DIR}/client/lobby/assets/background.png"
           "${CMAKE_SOURCE_DIR}/client/lobby/assets/logo.png"
-          "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/assets/logo.png"
+          "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/assets/"
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   VERBATIM)
+add_dependencies(SKRClient SKRLobbyAssets)
 
 # --- Intro timeline/transport tests (no GTA, no device) ---
+add_executable(SKRLobbyTests tests/unit/test_lobby_settings.cpp client/lobby/settings_io.cpp)
+target_include_directories(SKRLobbyTests PRIVATE ${CMAKE_SOURCE_DIR}/client)
+target_link_libraries(SKRLobbyTests PRIVATE shell32 ole32)
+
 add_executable(SKRIntroTests
   tests/unit/test_intro_timeline.cpp
 )
@@ -197,7 +198,7 @@ target_include_directories(SKRFakeGame PRIVATE
 target_link_libraries(SKRFakeGame PRIVATE SKRShared ws2_32)
 
 if(MSVC)
-  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests SKRIntroTests SKRTestServer SKRSmokeClient SKRFakeGame)
+  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests SKRIntroTests SKRLobbyTests SKRTestServer SKRSmokeClient SKRFakeGame)
     target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT)

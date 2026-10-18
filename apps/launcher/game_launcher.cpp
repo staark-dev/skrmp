@@ -85,30 +85,32 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
     if (pos != std::wstring::npos)
         workDir.resize(pos);
 
-    // FiveM-style: GTA starts clean — no SA-MP flags at all.
-    // omp-cef handles CEF independently. samp.dll is loaded dynamically
-    // by SKR.Client.dll when the user picks a server (Phase 2).
-    //
-    // Hide samp.dll AND the custom d3d9.dll proxy so neither the proxy
-    // nor any ASI loader can auto-load SA-MP at startup. The proxy
-    // crashes if samp.dll is missing, so both must go together.
-    // samp_loader restores them when the user picks a server (Phase 2).
-    // Hide the SA-MP loading chain so GTA starts clean:
-    //   vorbisHooked.dll — ASI loader that auto-loads samp.dll
-    //   samp.dll         — SA-MP client
-    //   d3d9.dll         — optional D3D9 proxy (samp-cef)
-    // samp_loader restores them when the user picks a server.
+    // samp.dll is preloaded by SKR.Client (with its start held until the
+    // lobby's Connect), so nothing else may load it first.
+    //   samp.dll — SA-MP client
+    //   d3d9.dll — optional D3D9 proxy (samp-cef)
     struct HideEntry { const wchar_t* orig; const wchar_t* hidden; };
     HideEntry hideList[] = {
-        { L"\\vorbisHooked.dll", L"\\vorbisHooked.dll.skr" },
-        { L"\\samp.dll",         L"\\samp.dll.skr" },
-        { L"\\d3d9.dll",         L"\\d3d9.dll.skr" },
+        { L"\\samp.dll", L"\\samp.dll.skr" },
+        { L"\\d3d9.dll", L"\\d3d9.dll.skr" },
     };
     for (auto& e : hideList) {
         std::wstring orig   = workDir + e.orig;
         std::wstring hidden = workDir + e.hidden;
         if (GetFileAttributesW(orig.c_str()) != INVALID_FILE_ATTRIBUTES)
             MoveFileExW(orig.c_str(), hidden.c_str(), MOVEFILE_REPLACE_EXISTING);
+    }
+
+    // vorbisHooked.dll is the real Ogg Vorbis library (imports ogg.dll and
+    // vorbis.dll); vorbisFile.dll only forwards to it. Hiding it left GTA's
+    // ov_* calls null, which crashed on the first Ogg stream (vehicle radio).
+    // Undo that rename from older launcher builds.
+    {
+        std::wstring orig   = workDir + L"\\vorbisHooked.dll";
+        std::wstring hidden = workDir + L"\\vorbisHooked.dll.skr";
+        if (GetFileAttributesW(orig.c_str()) == INVALID_FILE_ATTRIBUTES &&
+            GetFileAttributesW(hidden.c_str()) != INVALID_FILE_ATTRIBUTES)
+            MoveFileExW(hidden.c_str(), orig.c_str(), 0);
     }
 
     std::wstring cmdLine = L"\"" + config.gtaSaPath + L"\"";
@@ -133,10 +135,6 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
         return LaunchResult::ProcessCreateFailed;
 
     pidOut = pi.dwProcessId;
-
-    // samp.dll is NO LONGER injected at launch. SKR.Client.dll loads it
-    // dynamically when the user connects from the lobby (samp_loader module).
-    // omp-cef (cef.asi + cef/client.dll) handles CEF independently.
 
     // Inject SKR.Client.dll — lobby, AC, CEF overlay
     HMODULE remoteModule = InjectDll(pi.hProcess, config.clientDllPath.c_str());

@@ -35,8 +35,8 @@ constexpr int kTextLeft = 45;
 constexpr int kPadX = 10, kPadY = 6;
 constexpr float kRadius = 8.0f;
 constexpr DWORD kPanelColor = D3DCOLOR_ARGB(140, 18, 23, 30);  // rgba(18,23,30,.55)
-constexpr float kPanelWidth = 394.0f;
-constexpr float kPanelHeight = 113.0f;
+// Lines starting above this height (measured up from the last line) are clipped.
+constexpr float kPanelMaxHeight = 113.0f;
 
 using ChatFn = void(__thiscall*)(void*);
 using DrawLineFn = void(__thiscall*)(void*, const char*, int, int, int, int, DWORD);
@@ -79,18 +79,9 @@ void __fastcall HookedDrawLine(void* chat, void*, const char* text,
                                int left, int top, int right, int bottom, DWORD colour) {
     // Clip lines that would extend above the fixed-height panel. Uses the previous
     // frame's content bottom as the anchor so the cutoff tracks newly added lines.
-    if (g_contentBottom > 0 && top < g_contentBottom + kPadY - static_cast<int>(kPanelHeight)) {
-        if (text && *text) {
-            int lineHeight = *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(chat) + 0x63E2);
-            int w = MeasureText(static_cast<uint8_t*>(chat), text);
-            if (w > 0) {
-                g_passRight = (std::max)(g_passRight, left + w);
-                g_passBottom = (std::max)(g_passBottom, top + lineHeight);
-                g_passTop = (std::min)(g_passTop, top);
-            }
-        }
+    // Clipped lines are not drawn, so they do not count toward the panel size.
+    if (g_contentBottom > 0 && top < g_contentBottom + kPadY - static_cast<int>(kPanelMaxHeight))
         return;
-    }
     g_origDrawLine(chat, text, left, top, right, bottom, colour);
     if (!text || !*text) return;
     int w = MeasureText(static_cast<uint8_t*>(chat), text);
@@ -187,10 +178,12 @@ void __fastcall HookedChatDraw(void* chatPtr, void*) {
     uint32_t mode = *reinterpret_cast<uint32_t*>(chat + 0x8);
     if (dev && mode != 0 && !*reinterpret_cast<bool*>(kMenuActive) &&
         g_contentRight > kTextLeft && g_contentBottom > g_contentTop) {
-        // Chat fills from the bottom, so anchor the fixed-size panel at the last line.
+        // Fit the panel to the lines drawn in the last pass.
         float l = float(kTextLeft - kPadX);
+        float r = float(g_contentRight + kPadX);
         float b = float(g_contentBottom + kPadY);
-        DrawRoundedRect(dev, l, b - kPanelHeight, l + kPanelWidth, b, kPanelColor);
+        float t = (std::max)(b - kPanelMaxHeight, float(g_contentTop - kPadY));
+        DrawRoundedRect(dev, l, t, r, b, kPanelColor);
     }
     g_origChatDraw(chatPtr);
 }

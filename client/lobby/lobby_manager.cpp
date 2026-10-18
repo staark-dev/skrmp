@@ -1,17 +1,25 @@
 #include "lobby/lobby_manager.h"
 #include "lobby/menu_patch.h"
 #include "lobby/settings_io.h"
+#include "lobby/server_query.h"
+#include "protocol/session_info.h"
 #include "cef-bridge/cef_bridge.h"
 #include "cef-local/cef_local_loader.h"
 #include "intro/urban_intro.h"
+#include "samp-loader/samp_loader.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d9.h>
+#define DIRECTINPUT_VERSION 0x0800
+#include <dinput.h>
+#include <wincodec.h>
 #include <atomic>
 #include <cstdio>
 #include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace skr::lobby {
 
@@ -54,8 +62,14 @@ std::atomic<bool> g_browserCreated{false};
 std::atomic<bool> g_browserShown{false};
 std::atomic<bool> g_menuPatched{false};
 std::atomic<bool> g_eventsSubscribed{false};
+std::atomic<bool> g_connecting{false};
+std::atomic<bool> g_gameplayActive{false};
+std::atomic<bool> g_gameInputReleased{false};
+std::atomic<bool> g_connectTimeoutReported{false};
+std::atomic<DWORD> g_connectStartedAt{0};
 
 constexpr uint32_t kBrowserId = skr::cef::BrowserId::kMainMenu;
+constexpr DWORD kConnectTimeoutMs = 30000;
 
 // ── Resource URL ───────────────────────────────────────────────────
 // Lobby HTML ships alongside the DLL at <dll_dir>\SKR\lobby\lobby.html.
@@ -95,29 +109,88 @@ void WriteSettingsSidecar() {
 int __cdecl OnSettingsGet(const char*, skr::cef::CefListValue*) {
     WriteSettingsSidecar();
     auto& bridge = skr::cef::CefBridge::Instance();
-    bridge.EmitEvent("skr:lobby:settings:ready", nullptr);
+    Settings settings;
+    LoadSettings(settings);
+    if (!bridge.EmitEventString("skr:lobby:settings:ready", SettingsToJson(settings).c_str()))
+        bridge.EmitEvent("skr:lobby:settings:ready", nullptr);
     Log("settings:get -> sidecar written, ready event emitted");
     return 0;
 }
 
-int __cdecl OnSettingsSave(const char*, skr::cef::CefListValue*) {
-    // Phase 1: the samp-cef bridge wrapper we embed does not yet expose
-    // CefListValue readers, so the JSON string the JS side packs into the
-    // event cannot be read on this side. The JS lobby therefore shows a
-    // read-only confirmation and tells the user to edit through the WPF
-    // launcher until the bridge gains list getters (Phase 2 scope).
+int __cdecl OnSettingsSave(const char*, skr::cef::CefListValue* args) {
     auto& bridge = skr::cef::CefBridge::Instance();
-    bridge.EmitEvent("skr:lobby:settings:save-pending", nullptr);
-    Log("settings:save -> deferred to Phase 2 (CefListValue readers missing)");
+    const char* payload = bridge.LocalPayload(args);
+    Settings settings;
+    LoadSettings(settings);
+    if (!payload || !SettingsFromJson(payload, settings)) {
+        bridge.EmitEventString("skr:lobby:settings:error", "invalid");
+        return 0;
+    }
+    if (!SaveSettings(settings)) {
+        bridge.EmitEventString("skr:lobby:settings:error", "write");
+        return 0;
+    }
+    WriteSettingsSidecar();
+    bridge.EmitEventString("skr:lobby:settings:saved", SettingsToJson(settings).c_str());
+    Log("settings:save -> persisted (display preferences apply next launch)");
     return 0;
 }
 
-int __cdecl OnPlay(const char*, skr::cef::CefListValue*) {
-    Log("play -> Phase 2 (connect) not implemented");
+int __cdecl OnNicknameSave(const char*, skr::cef::CefListValue* args) {
+    auto& bridge = skr::cef::CefBridge::Instance();
+    const char* payload = bridge.LocalPayload(args);
+    Settings settings;
+    LoadSettings(settings);
+    if (!payload || !NicknameFromJson(payload, settings.nickname)) {
+        bridge.EmitEventString("skr:lobby:nickname:error", "invalid");
+        return 0;
+    }
+    if (!SaveSettings(settings)) {
+        bridge.EmitEventString("skr:lobby:nickname:error", "write");
+        return 0;
+    }
+    WriteSettingsSidecar();
+    bridge.EmitEventString("skr:lobby:nickname:saved", settings.nickname.c_str());
+    return 0;
+}
+
+int __cdecl OnPlay(const char*, skr::cef::CefListValue* args) {
+    auto& bridge = skr::cef::CefBridge::Instance();
+    if (g_connecting.load() || g_gameplayActive.load()) {
+        bridge.EmitEventString("skr:lobby:connect:error", "busy");
+        Log("connect -> rejected duplicate request");
+        return 0;
+    }
+    const char* payload = bridge.LocalPayload(args);
+    std::string address;
+    std::string nickname;
+    uint16_t port = 0;
+    if (!payload || !ConnectRequestFromJson(payload, address, port, nickname)) {
+        bridge.EmitEventString("skr:lobby:connect:error", "invalid");
+        Log("connect -> invalid request");
+        return 0;
+    }
+    skr::samp_loader::ConnectParams params{address.c_str(), port, nickname.c_str()};
+    if (!skr::samp_loader::LoadSamp(params)) {
+        bridge.EmitEventString("skr:lobby:connect:error", "load");
+        Log("connect -> samp loader rejected request or binary");
+        return 0;
+    }
+    bridge.EmitEventString("skr:lobby:connect:started", nullptr);
+    g_connectStartedAt.store(GetTickCount());
+    g_connectTimeoutReported.store(false);
+    g_connecting.store(true);
+    g_gameInputReleased.store(true);
+    Log("connect -> SA-MP configured for %s:%u", address.c_str(), port);
     return 0;
 }
 
 int __cdecl OnQuit(const char*, skr::cef::CefListValue*) {
+    // In the world, quitting belongs to SA-MP (/q, its own exit path).
+    if (g_gameplayActive.load()) {
+        Log("quit from lobby ignored: gameplay active");
+        return 0;
+    }
     Log("quit requested from lobby");
     // Close the GTA process cleanly. ExitProcess runs atexit handlers in this
     // module; d3d9 teardown is driven by that.
@@ -129,14 +202,360 @@ int __cdecl OnQuit(const char*, skr::cef::CefListValue*) {
     ExitProcess(0);
 }
 
+// ── Personal servers ("Adaugă server") ─────────────────────────────
+// Persisted in launcher.ini [servers]; the page only renders what we emit.
+void EmitPersonalServers() {
+    std::vector<PersonalServer> list;
+    LoadPersonalServers(list);
+    std::string json = PersonalServersToJson(list);
+    if (!skr::cef::CefBridge::Instance().EmitEventString("skr:lobby:servers:personal", json.c_str()))
+        Log("servers:personal -> not sent (omp-cef build lacks skr_cef_emit_event_str)");
+}
+
+// `code`: "invalid" | "limit" | "write" — the page maps it to a message.
+void EmitServerError(const char* code) {
+    skr::cef::CefBridge::Instance().EmitEventString("skr:lobby:servers:error", code);
+}
+
+// Live name / players / ping for every listed server, queried in parallel off
+// the game thread and sent to the page as one "skr:lobby:servers:info" array.
+std::atomic<bool> g_serverQueryRunning{false};
+constexpr unsigned kServerQueryTimeoutMs = 1000;
+
+void StartServerQueries() {
+    if (g_serverQueryRunning.exchange(true)) return;
+    std::vector<PersonalServer> list;
+    LoadPersonalServers(list);
+    std::vector<std::string> addresses;
+    for (const auto& s : list) addresses.push_back(s.address);
+    std::thread([addresses]() {
+        std::vector<ServerInfo> results(addresses.size());
+        std::vector<std::thread> workers;
+        for (size_t i = 0; i < addresses.size(); ++i)
+            workers.emplace_back([&results, &addresses, i]() {
+                results[i] = QueryServer(addresses[i], kServerQueryTimeoutMs);
+            });
+        for (auto& w : workers) w.join();
+        const std::string json = ServerInfoToJson(results);
+        skr::cef::CefBridge::Instance().EmitEventString("skr:lobby:servers:info", json.c_str());
+        g_serverQueryRunning.store(false);
+    }).detach();
+}
+
+int __cdecl OnServersRequest(const char*, skr::cef::CefListValue*) {
+    EmitPersonalServers();
+    StartServerQueries();
+    // No public directory provider is configured in this checkout.
+    skr::cef::CefBridge::Instance().EmitEventString("skr:lobby:servers", "[]");
+    return 0;
+}
+
+int __cdecl OnServerAdd(const char*, skr::cef::CefListValue* args) {
+    const char* payload = skr::cef::CefBridge::Instance().LocalPayload(args);
+    PersonalServer ps;
+    if (!payload || !PersonalServerFromJson(payload, ps)) {
+        Log("servers:add -> rejected (invalid payload/address)");
+        EmitServerError("invalid");
+        return 0;
+    }
+    std::vector<PersonalServer> list;
+    LoadPersonalServers(list);
+    bool updated = false;
+    for (auto& e : list) {
+        if (e.address == ps.address) { e.name = ps.name; updated = true; break; }
+    }
+    if (!updated) {
+        if (list.size() >= kMaxPersonalServers) {
+            EmitServerError("limit");
+            return 0;
+        }
+        list.push_back(ps);
+    }
+    if (!SavePersonalServers(list)) {
+        Log("servers:add -> launcher.ini write failed");
+        EmitServerError("write");
+        return 0;
+    }
+    Log("servers:add -> %s (%s)", ps.address.c_str(), updated ? "updated" : "added");
+    EmitPersonalServers();
+    StartServerQueries();
+    return 0;
+}
+
+int __cdecl OnServerRemove(const char*, skr::cef::CefListValue* args) {
+    const char* payload = skr::cef::CefBridge::Instance().LocalPayload(args);
+    PersonalServer target;
+    if (!payload || !PersonalServerFromJson(payload, target)) {
+        Log("servers:remove -> rejected (invalid payload/address)");
+        return 0;
+    }
+    std::vector<PersonalServer> list;
+    LoadPersonalServers(list);
+    size_t before = list.size();
+    std::vector<PersonalServer> kept;
+    for (const auto& e : list) if (e.address != target.address) kept.push_back(e);
+    if (kept.size() != before && !SavePersonalServers(kept)) {
+        Log("servers:remove -> launcher.ini write failed");
+        EmitServerError("write");
+    } else {
+        Log("servers:remove -> %s", target.address.c_str());
+    }
+    EmitPersonalServers();
+    return 0;
+}
+
 void SubscribeOnce() {
     if (g_eventsSubscribed.exchange(true)) return;
     auto& bridge = skr::cef::CefBridge::Instance();
     bridge.Subscribe("skr:lobby:settings:get",  &OnSettingsGet);
     bridge.Subscribe("skr:lobby:settings:save", &OnSettingsSave);
     bridge.Subscribe("skr:lobby:play",          &OnPlay);
+    bridge.Subscribe("skr:lobby:connect",       &OnPlay);
+    bridge.Subscribe("skr:lobby:nickname:save", &OnNicknameSave);
     bridge.Subscribe("skr:lobby:quit",          &OnQuit);
+    bridge.Subscribe("skr:lobby:servers:request", &OnServersRequest);
+    bridge.Subscribe("skr:lobby:servers:add",     &OnServerAdd);
+    bridge.Subscribe("skr:lobby:servers:remove",  &OnServerRemove);
     Log("CEF event handlers subscribed");
+}
+
+// ── SKR splash (logo on black while CEF initializes) ─────────────────
+IDirect3DTexture9* g_splashTex = nullptr;
+bool g_splashAttempted = false;
+UINT g_splashW = 0, g_splashH = 0;
+
+void LoadSplashOnce(IDirect3DDevice9* device) {
+    if (g_splashAttempted) return;
+    g_splashAttempted = true;
+
+    std::wstring path = LogDir() + L"lobby\\assets\\logo.png";
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        Log("splash: logo.png not found at %ls", path.c_str());
+        return;
+    }
+
+    IWICImagingFactory* wic = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_IWICImagingFactory, reinterpret_cast<void**>(&wic)))) {
+        Log("splash: WIC unavailable");
+        return;
+    }
+
+    IWICBitmapDecoder* dec = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICFormatConverter* conv = nullptr;
+    bool ok = false;
+
+    if (SUCCEEDED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
+                                                  WICDecodeMetadataCacheOnLoad, &dec)) &&
+        SUCCEEDED(dec->GetFrame(0, &frame)) &&
+        SUCCEEDED(wic->CreateFormatConverter(&conv)) &&
+        SUCCEEDED(conv->Initialize(frame, GUID_WICPixelFormat32bppBGRA,
+                                   WICBitmapDitherTypeNone, nullptr, 0.0,
+                                   WICBitmapPaletteTypeMedianCut))) {
+        UINT w = 0, h = 0;
+        conv->GetSize(&w, &h);
+        if (w && h && SUCCEEDED(device->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8,
+                                                       D3DPOOL_MANAGED, &g_splashTex, nullptr))) {
+            D3DLOCKED_RECT lr{};
+            if (SUCCEEDED(g_splashTex->LockRect(0, &lr, nullptr, 0))) {
+                std::vector<BYTE> px(w * 4 * h);
+                conv->CopyPixels(nullptr, w * 4, static_cast<UINT>(px.size()), px.data());
+                for (UINT y = 0; y < h; y++)
+                    memcpy(static_cast<BYTE*>(lr.pBits) + y * lr.Pitch,
+                           px.data() + y * w * 4, w * 4);
+                g_splashTex->UnlockRect(0);
+                g_splashW = w;
+                g_splashH = h;
+                ok = true;
+                Log("splash loaded: %ux%u", w, h);
+            }
+        }
+    }
+
+    if (!ok && g_splashTex) { g_splashTex->Release(); g_splashTex = nullptr; }
+    if (conv)  conv->Release();
+    if (frame) frame->Release();
+    if (dec)   dec->Release();
+    wic->Release();
+}
+
+// Text overlay texture — rendered once via GDI DIB, then drawn as a quad.
+IDirect3DTexture9* g_textTex = nullptr;
+bool g_textAttempted = false;
+UINT g_textW = 0, g_textH = 0;
+
+void BuildTextTexture(IDirect3DDevice9* device, UINT screenW, UINT screenH) {
+    if (g_textAttempted) return;
+    g_textAttempted = true;
+
+    UINT tw = screenW, th = screenH;
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = static_cast<LONG>(tw);
+    bmi.bmiHeader.biHeight      = -static_cast<LONG>(th);
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HDC memDC = CreateCompatibleDC(nullptr);
+    HBITMAP dib = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!dib || !bits) { DeleteDC(memDC); return; }
+    HBITMAP oldBmp = static_cast<HBITMAP>(SelectObject(memDC, dib));
+
+    // Clear to transparent black (BGRA 0,0,0,0)
+    memset(bits, 0, tw * th * 4);
+    SetBkMode(memDC, TRANSPARENT);
+    int sw = static_cast<int>(tw), sh = static_cast<int>(th);
+    int centerY = static_cast<int>(sh * 0.46f);
+
+    // All fonts use ANTIALIASED_QUALITY — ClearType uses colored subpixels
+    // which look broken on transparent backgrounds.
+
+    // "SKR ROLEPLAY" — gold
+    HFONT titleFont = CreateFontW(
+        -MulDiv(24, sh, 720), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    HFONT oldFont = static_cast<HFONT>(SelectObject(memDC, titleFont));
+    SetTextColor(memDC, RGB(255, 255, 255));
+    RECT rTitle = {0, centerY, sw, centerY + 44};
+    DrawTextW(memDC, L"SKR ROLEPLAY", -1, &rTitle, DT_CENTER | DT_NOCLIP);
+
+    // "SAN ANDREAS"
+    HFONT subFont = CreateFontW(
+        -MulDiv(13, sh, 720), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    SelectObject(memDC, subFont);
+    SetTextColor(memDC, RGB(200, 170, 80));
+    RECT rSub = {0, centerY + 40, sw, centerY + 60};
+    DrawTextW(memDC, L"S A N   A N D R E A S", -1, &rSub, DT_CENTER | DT_NOCLIP);
+
+    // "Se incarca..."
+    HFONT loadFont = CreateFontW(
+        -MulDiv(14, sh, 720), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    SelectObject(memDC, loadFont);
+    SetTextColor(memDC, RGB(180, 180, 180));
+    RECT rLoad = {0, sh - 80, sw, sh - 55};
+    DrawTextW(memDC, L"Se incarca...", -1, &rLoad, DT_CENTER | DT_NOCLIP);
+
+    // Credits
+    HFONT credFont = CreateFontW(
+        -MulDiv(11, sh, 720), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    SelectObject(memDC, credFont);
+    SetTextColor(memDC, RGB(120, 120, 120));
+    RECT rCred = {0, sh - 35, sw, sh - 10};
+    DrawTextW(memDC, L"SKR Client v0.1.0", -1, &rCred, DT_CENTER | DT_NOCLIP);
+
+    GdiFlush();
+    SelectObject(memDC, oldFont);
+    DeleteObject(titleFont);
+    DeleteObject(subFont);
+    DeleteObject(loadFont);
+    DeleteObject(credFont);
+
+    // GDI renders BGRX with alpha=0. Derive alpha from pixel luminance
+    // so antialiased edges blend smoothly against the black cover.
+    auto* px = static_cast<BYTE*>(bits);
+    for (UINT i = 0; i < tw * th; i++) {
+        BYTE b = px[0], g = px[1], r = px[2];
+        BYTE a = r > g ? (r > b ? r : b) : (g > b ? g : b);
+        px[3] = a;
+        px += 4;
+    }
+
+    // Upload to D3D9 MANAGED texture
+    if (SUCCEEDED(device->CreateTexture(tw, th, 1, 0, D3DFMT_A8R8G8B8,
+                                         D3DPOOL_MANAGED, &g_textTex, nullptr))) {
+        D3DLOCKED_RECT lr{};
+        if (SUCCEEDED(g_textTex->LockRect(0, &lr, nullptr, 0))) {
+            for (UINT y = 0; y < th; y++)
+                memcpy(static_cast<BYTE*>(lr.pBits) + y * lr.Pitch,
+                       static_cast<BYTE*>(bits) + y * tw * 4, tw * 4);
+            g_textTex->UnlockRect(0);
+            g_textW = tw;
+            g_textH = th;
+            Log("splash text texture built: %ux%u", tw, th);
+        } else {
+            g_textTex->Release();
+            g_textTex = nullptr;
+        }
+    }
+
+    SelectObject(memDC, oldBmp);
+    DeleteObject(dib);
+    DeleteDC(memDC);
+}
+
+void DrawSplash(IDirect3DDevice9* device) {
+    IDirect3DSurface9* rt = nullptr;
+    if (FAILED(device->GetRenderTarget(0, &rt)) || !rt) return;
+    D3DSURFACE_DESC sd{};
+    rt->GetDesc(&sd);
+    rt->Release();
+
+    // ── Draw logo texture centered (upper third) ──
+    if (g_splashTex && g_splashW && g_splashH) {
+        float scale = (sd.Width * 0.22f) / static_cast<float>(g_splashW);
+        float dw = g_splashW * scale, dh = g_splashH * scale;
+        float lx = (sd.Width  - dw) / 2.0f;
+        float ly = sd.Height * 0.28f - dh / 2.0f;
+
+        device->SetTexture(0, g_splashTex);
+        device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+        device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+        device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+
+        struct TV { float x, y, z, rhw; DWORD c; float u, v; };
+        DWORD white = D3DCOLOR_ARGB(255, 255, 255, 255);
+        TV quad[4] = {
+            {lx,      ly,      0, 1, white, 0, 0},
+            {lx + dw, ly,      0, 1, white, 1, 0},
+            {lx,      ly + dh, 0, 1, white, 0, 1},
+            {lx + dw, ly + dh, 0, 1, white, 1, 1},
+        };
+        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(TV));
+        device->SetTexture(0, nullptr);
+    }
+
+    // ── Text overlay (full-screen texture with alpha) ──
+    BuildTextTexture(device, sd.Width, sd.Height);
+    if (g_textTex && g_textW && g_textH) {
+        float w = static_cast<float>(sd.Width), h = static_cast<float>(sd.Height);
+
+        device->SetTexture(0, g_textTex);
+        device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+        device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+        device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+
+        struct TV { float x, y, z, rhw; DWORD c; float u, v; };
+        DWORD white = D3DCOLOR_ARGB(255, 255, 255, 255);
+        TV quad[4] = {
+            {0, 0, 0, 1, white, 0, 0},
+            {w, 0, 0, 1, white, 1, 0},
+            {0, h, 0, 1, white, 0, 1},
+            {w, h, 0, 1, white, 1, 1},
+        };
+        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(TV));
+        device->SetTexture(0, nullptr);
+    }
 }
 
 // ── Full-screen black cover (hides any menu pixels under the CEF page) ─
@@ -178,6 +597,217 @@ void DrawCover(IDirect3DDevice9* device) {
     sb->Release();
 }
 
+// ── Video mode (resolution from launcher.ini) ──────────────────────
+// GTA SA 1.0 US. RW functions: plugin-sdk game_sa/RenderWare.h (also in
+// deps/omp-cef/src/client/core/game_sa/RenderWare.h). ChangeVideoModeWrapper:
+// SA-MP client subclass.cpp SwitchWindowedMode (ported in D:\GCMP gclient.c).
+// CMenuManager offsets: plugin-sdk VALIDATE_OFFSET(m_nPrefsVideoMode 0xD4,
+// m_nDisplayVideoMode 0xD8), FrontEndMenuManager at 0xBA6748.
+struct RwVideoModeInfo { int width, height, depth, flags, refRate, format; };
+constexpr int kRwVideoModeExclusive = 0x1;
+using RwGetNumVideoModesFn  = int(__cdecl*)();
+using RwGetVideoModeInfoFn  = RwVideoModeInfo*(__cdecl*)(RwVideoModeInfo*, int);
+using RwGetCurrentVideoModeFn = int(__cdecl*)();
+using ChangeVideoModeWrapperFn = void(__cdecl*)(int);
+const auto RwGetNumVideoModes    = reinterpret_cast<RwGetNumVideoModesFn>(0x007F2CC0);
+const auto RwGetVideoModeInfo    = reinterpret_cast<RwGetVideoModeInfoFn>(0x007F2CF0);
+const auto RwGetCurrentVideoMode = reinterpret_cast<RwGetCurrentVideoModeFn>(0x007F2D20);
+const auto ChangeVideoModeWrapper = reinterpret_cast<ChangeVideoModeWrapperFn>(0x00745C70);
+constexpr uintptr_t kFrontEndMenuManager  = 0x00BA6748;
+constexpr uintptr_t kMenuPrefsVideoMode   = kFrontEndMenuManager + 0xD4;
+constexpr uintptr_t kMenuDisplayVideoMode = kFrontEndMenuManager + 0xD8;
+// CMenuManager::SaveSettings, __thiscall void() (plugin-sdk CMenuManager.cpp:210).
+using CMenuSaveSettingsFn = void(__thiscall*)(void*);
+const auto CMenuSaveSettings = reinterpret_cast<CMenuSaveSettingsFn>(0x0057C660);
+
+constexpr UINT kMsgApplyVideoMode = WM_APP + 0x5C1;
+constexpr DWORD kVideoModeTimeoutMs = 3000;
+
+enum class VideoModeState { Idle, Requested, Done };
+std::atomic<VideoModeState> g_vmState{VideoModeState::Idle};
+std::atomic<int> g_vmTarget{-1};
+DWORD g_vmRequestTick = 0;
+WNDPROC g_origWndProc = nullptr;
+
+bool ParseResolution(const std::string& s, int& w, int& h) {
+    return sscanf_s(s.c_str(), "%dx%d", &w, &h) == 2 && w > 0 && h > 0;
+}
+
+int FindVideoMode(int w, int h, bool windowed) {
+    int best = -1, bestRate = -1;
+    const int count = RwGetNumVideoModes();
+    for (int i = 0; i < count; ++i) {
+        RwVideoModeInfo m{};
+        if (!RwGetVideoModeInfo(&m, i)) continue;
+        const bool exclusive = (m.flags & kRwVideoModeExclusive) != 0;
+        if (m.width != w || m.height != h || m.depth != 32 || exclusive == windowed) continue;
+        if (m.refRate > bestRate) { best = i; bestRate = m.refRate; }
+    }
+    return best;
+}
+
+LRESULT CALLBACK LobbyWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == kMsgApplyVideoMode) {
+        const int target = g_vmTarget.load();
+        if (g_vmState.load() == VideoModeState::Requested && target >= 0) {
+            // Same path as the Options menu: tears down and rebuilds RW's own resources.
+            __try {
+                ChangeVideoModeWrapper(target);
+                *reinterpret_cast<int*>(kMenuPrefsVideoMode)   = target;
+                *reinterpret_cast<int*>(kMenuDisplayVideoMode) = target;
+                // Persist to gta_sa.set: the front-end otherwise re-applies the
+                // saved (800x600) mode the first time it runs, e.g. on ESC.
+                CMenuSaveSettings(reinterpret_cast<void*>(kFrontEndMenuManager));
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                Log("video mode: ChangeVideoModeWrapper(%d) raised an exception", target);
+            }
+            Log("video mode: applied index %d (current now %d)", target, RwGetCurrentVideoMode());
+            g_vmState.store(VideoModeState::Done);
+        }
+        return 0;
+    }
+    return CallWindowProcA(g_origWndProc, hwnd, msg, wp, lp);
+}
+
+// Returns true once the lobby may create its browser at the final resolution.
+bool EnsureVideoMode(IDirect3DDevice9* device) {
+    const VideoModeState st = g_vmState.load();
+    if (st == VideoModeState::Done) return true;
+
+    if (st == VideoModeState::Requested) {
+        if (GetTickCount() - g_vmRequestTick > kVideoModeTimeoutMs) {
+            Log("video mode: request not handled within %lu ms, continuing", kVideoModeTimeoutMs);
+            g_vmState.store(VideoModeState::Done);
+            return true;
+        }
+        return false;
+    }
+
+    Settings s;
+    LoadSettings(s);
+    int w = 0, h = 0;
+    if (!ParseResolution(s.resolution, w, h)) {
+        // Desktop mode from the registry: GetSystemMetrics is DPI-scaled and the
+        // current mode is already GTA's fullscreen 800x600 at this point.
+        DEVMODEW dm{};
+        dm.dmSize = sizeof(dm);
+        if (EnumDisplaySettingsW(nullptr, ENUM_REGISTRY_SETTINGS, &dm)) {
+            w = static_cast<int>(dm.dmPelsWidth);
+            h = static_cast<int>(dm.dmPelsHeight);
+        }
+    }
+
+    const int current = RwGetCurrentVideoMode();
+    RwVideoModeInfo cur{};
+    RwGetVideoModeInfo(&cur, current);
+    const int target = FindVideoMode(w, h, s.windowed);
+    Log("video mode: setting '%s' windowed=%d -> want %dx%d, current #%d %dx%d flags=0x%X, target #%d",
+        s.resolution.c_str(), s.windowed ? 1 : 0, w, h, current, cur.width, cur.height, cur.flags, target);
+
+    if (target < 0 || target == current) {
+        g_vmState.store(VideoModeState::Done);
+        return true;
+    }
+
+    D3DDEVICE_CREATION_PARAMETERS cp{};
+    HWND hwnd = SUCCEEDED(device->GetCreationParameters(&cp)) ? cp.hFocusWindow : nullptr;
+    if (!hwnd || !IsWindow(hwnd)) {
+        Log("video mode: no game window, skipping");
+        g_vmState.store(VideoModeState::Done);
+        return true;
+    }
+
+    // Reset is illegal inside BeginScene/EndScene; run the switch from the
+    // game's message pump instead, like SA-MP does for Alt+Enter.
+    if (!g_origWndProc) {
+        g_origWndProc = reinterpret_cast<WNDPROC>(
+            SetWindowLongPtrA(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&LobbyWndProc)));
+    }
+    g_vmTarget.store(target);
+    g_vmRequestTick = GetTickCount();
+    g_vmState.store(VideoModeState::Requested);
+    PostMessageW(hwnd, kMsgApplyVideoMode, 0, 0);
+    return false;
+}
+
+// ── DirectInput release while the lobby owns input ─────────────────
+// GTA's DirectInput mouse is exclusive: Windows hides the cursor and sends no
+// mouse messages, so the CEF page gets no input. While the lobby is shown we
+// keep GTA's devices unacquired; the WndProc -> CEF path then works. Same
+// shared-vtable technique as D:\GCMP gclient.c hook_dinput_mouse (ANSI
+// interfaces, as GTA SA creates them). IDirectInputDevice8 vtable slots:
+// 7 Acquire, 8 Unacquire, 9 GetDeviceState.
+using DIAcquireFn  = HRESULT(WINAPI*)(IDirectInputDevice8A*);
+using DIGetStateFn = HRESULT(WINAPI*)(IDirectInputDevice8A*, DWORD, LPVOID);
+DIAcquireFn  g_origDIAcquire  = nullptr;
+DIGetStateFn g_origDIGetState = nullptr;
+
+// The lobby only owns input while GTA sits in the frontend. SA-MP's StartGame
+// sets gGameState to 8 (initialization_flow.md §4.3); from then on the game
+// gets its devices back. Checked here because SKR's EndScene hook stops being
+// called once SA-MP installs its device proxy.
+bool LobbyOwnsInput() {
+    constexpr uintptr_t kGtaGameState = 0x00C8D4C0;   // plugin-sdk CGame.cpp:18
+    return g_gameInputReleased.load() && *reinterpret_cast<volatile int*>(kGtaGameState) <= 7;
+}
+
+HRESULT WINAPI HookedDIAcquire(IDirectInputDevice8A* dev) {
+    if (LobbyOwnsInput()) return DI_OK;
+    return g_origDIAcquire(dev);
+}
+
+HRESULT WINAPI HookedDIGetDeviceState(IDirectInputDevice8A* dev, DWORD size, LPVOID data) {
+    if (LobbyOwnsInput()) {
+        dev->Unacquire();
+        if (data) memset(data, 0, size);
+        return DI_OK;
+    }
+    HRESULT hr = g_origDIGetState(dev, size, data);
+    if (hr == DIERR_INPUTLOST || hr == DIERR_NOTACQUIRED) {
+        if (SUCCEEDED(g_origDIAcquire(dev))) hr = g_origDIGetState(dev, size, data);
+    }
+    return hr;
+}
+
+void InstallDInputHookOnce() {
+    static bool attempted = false;
+    if (attempted) return;
+    attempted = true;
+
+    using DI8CreateFn = HRESULT(WINAPI*)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
+    HMODULE hDI = GetModuleHandleW(L"dinput8.dll");
+    auto create = hDI ? reinterpret_cast<DI8CreateFn>(GetProcAddress(hDI, "DirectInput8Create")) : nullptr;
+    if (!create) { Log("dinput: DirectInput8Create not found"); return; }
+
+    IDirectInput8A* di = nullptr;
+    if (FAILED(create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8A,
+                      reinterpret_cast<LPVOID*>(&di), nullptr)) || !di) {
+        Log("dinput: DirectInput8Create failed");
+        return;
+    }
+    IDirectInputDevice8A* mouse = nullptr;
+    if (FAILED(di->CreateDevice(GUID_SysMouse, &mouse, nullptr)) || !mouse) {
+        Log("dinput: CreateDevice(SysMouse) failed");
+        di->Release();
+        return;
+    }
+
+    void** vtbl = *reinterpret_cast<void***>(mouse);
+    DWORD old = 0;
+    if (VirtualProtect(&vtbl[7], 3 * sizeof(void*), PAGE_EXECUTE_READWRITE, &old)) {
+        g_origDIAcquire  = reinterpret_cast<DIAcquireFn>(vtbl[7]);
+        g_origDIGetState = reinterpret_cast<DIGetStateFn>(vtbl[9]);
+        vtbl[7] = reinterpret_cast<void*>(&HookedDIAcquire);
+        vtbl[9] = reinterpret_cast<void*>(&HookedDIGetDeviceState);
+        VirtualProtect(&vtbl[7], 3 * sizeof(void*), old, &old);
+        Log("dinput: Acquire/GetDeviceState hooked");
+    } else {
+        Log("dinput: VirtualProtect failed");
+    }
+    mouse->Release();
+    di->Release();
+}
+
 } // namespace
 
 void Initialize() {
@@ -196,47 +826,237 @@ void Shutdown() {
     Log("lobby manager shutdown");
 }
 
+void OnNetGameState(int sampState) {
+    if (!g_connecting.load()) return;
+    static int last = -2;
+    if (sampState == last) return;
+    last = sampState;
+    // Raw R5 CNetGame states (omp-cef samp/components/r5/netgame.hpp RawMode).
+    const char* phase = nullptr;
+    switch (sampState) {
+        case 1: case 2: phase = "server";   break;  // WaitConnect, Connecting
+        case 5:         phase = "join";     break;  // Connected
+        case 6:         phase = "waitjoin"; break;  // WaitJoin
+        case 11:        phase = "restart";  break;  // Restarting
+        default: break;
+    }
+    if (!phase) return;
+    skr::cef::CefBridge::Instance().EmitEventString("skr:lobby:connect:phase", phase);
+    Log("connect phase -> %s (native %d)", phase, sampState);
+}
+
+// -1 = no RPC 241 yet, otherwise protocol::SessionMode.
+std::atomic<int> g_sessionMode{-1};
+DWORD g_inWorldSince = 0;
+constexpr DWORD kNoSessionInfoGraceMs = 1500;   // RPC 241 may land just after the first world tick
+constexpr DWORD kIntroWaitMaxMs = 30000;        // never block on a server intro that never shows
+constexpr DWORD kResourceWaitMaxMs = 120000;    // never block on a stalled resource download
+
+void OnSessionInfo(uint8_t mode) {
+    const int value = mode == static_cast<uint8_t>(skr::protocol::SessionMode::CefIntro) ? 1 : 0;
+    g_sessionMode.store(value);
+    Log("session info (rpc 241): mode %d (%s)", value, value ? "server CEF intro" : "none");
+}
+
+bool ServerPageFocused() {
+    using FocusFn = bool(__cdecl*)(uint32_t);
+    static FocusFn fn = reinterpret_cast<FocusFn>(
+        GetProcAddress(GetModuleHandleW(L"client.dll"), "skr_cef_foreign_browser_focused"));
+    return fn && fn(kBrowserId);
+}
+
+bool ResourcesPending() {
+    using PendingFn = bool(__cdecl*)();
+    static PendingFn fn = reinterpret_cast<PendingFn>(
+        GetProcAddress(GetModuleHandleW(L"client.dll"), "skr_cef_resources_pending"));
+    return fn && fn();
+}
+
+void OnInWorldTick() {
+    if (g_gameplayActive.load()) return;
+    const DWORD now = GetTickCount();
+    if (!g_inWorldSince) g_inWorldSince = now;
+
+    // Server CEF resources still downloading: the lobby stays as the loading
+    // screen (progress shown on its overlay), never longer than the cap. The
+    // intro / no-info timers start once the download is over.
+    static DWORD resourcesSince = 0;
+    if (ResourcesPending()) {
+        if (!resourcesSince) resourcesSince = now;
+        if (now - resourcesSince < kResourceWaitMaxMs) {
+            g_inWorldSince = now;
+            return;
+        }
+    }
+    const DWORD waited = now - g_inWorldSince;
+
+    switch (g_sessionMode.load()) {
+        case 1:
+            if (ServerPageFocused()) OnGameplayConfirmed("server CEF page took focus");
+            else if (waited >= kIntroWaitMaxMs) OnGameplayConfirmed("server intro did not appear in time");
+            break;
+        case 0:
+            OnGameplayConfirmed("server session mode none");
+            break;
+        default:
+            if (waited >= kNoSessionInfoGraceMs) OnGameplayConfirmed("no session info (non-SKR server)");
+            break;
+    }
+}
+
+void OnGameplayConfirmed(const char* reason) {
+    if (g_disabled.load() || g_gameplayActive.exchange(true)) return;
+    auto& bridge = skr::cef::CefBridge::Instance();
+    // Destroyed, not hidden: a hidden page keeps keyboard focus and its
+    // Escape handler would still quit the game.
+    bridge.DestroyBrowser(kBrowserId);
+    // Give GTA its front-end back so ESC opens the pause menu in the world.
+    if (g_menuPatched.exchange(false)) RestoreGtaMainMenu();
+    *reinterpret_cast<bool*>(0x00BA677A) = false;   // m_bDontDrawFrontEnd (+0x32), set by the lobby
+    g_browserShown.store(false);
+    g_gameInputReleased.store(false);
+    g_connecting.store(false);
+    Log("connect -> %s; lobby browser destroyed and game input restored", reason);
+}
+
 void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
     if (g_disabled.load()) return;   // vanilla menu path: do nothing
+    if (g_gameplayActive.load()) return; // SA-MP owns rendering and input after confirmation
+    if (g_connecting.load()) {
+        static int previousState = -2;
+        static unsigned diagnosticFrames = 0;
+        const int state = skr::samp_loader::TickConnection();
+        if (state != previousState || (++diagnosticFrames % 300) == 0) {
+            Log("connect state -> %d", state);
+            previousState = state;
+        }
+        const DWORD startedAt = g_connectStartedAt.load();
+        if (startedAt != 0 && GetTickCount() - startedAt >= kConnectTimeoutMs &&
+            !g_connectTimeoutReported.exchange(true)) {
+            skr::cef::CefBridge::Instance().EmitEventString("skr:lobby:connect:error", "timeout");
+            Log("connect -> timed out waiting for native SA-MP CONNECTED state; lobby remains visible and monitoring continues");
+        }
+        // Keep pumping and drawing CEF until samp.dll confirms CONNECTED.
+    }
     static std::atomic<bool> firstFrameLogged{false};
     if (!firstFrameLogged.exchange(true)) Log("first post-intro EndScene frame");
 
-    // Drive the CEF tick every frame — this polls for omp-cef / samp-cef
-    // and creates the lobby browser once a CEF engine is available.
-    OnCefTick();
-
-    // Only take over the screen (patch menu + draw cover) once CEF is
-    // actually rendering the lobby. Without this gate, a missing CEF
-    // engine (omp-cef not deployed, samp-cef not loaded) would leave the
-    // user staring at an unrecoverable black screen.
-    auto& bridge = skr::cef::CefBridge::Instance();
-    if (!bridge.IsReady()) return;
-
+    // Kill vanilla menu immediately — user never sees it.
+    // CEF lobby renders on top once omp-cef initializes.
     if (!g_menuPatched.load()) {
         MenuPatchStatus st{};
-        bool ok = PatchGtaMainMenu(st);
-        static int lastReportedByte0 = -1, lastReportedByte1 = -1;
-        if (ok) {
+        PatchGtaMainMenu(st);
+
+        // Process being patched to 0xC3 is sufficient — it prevents menu logic
+        // from running.  DrawFrontEnd at 0x0057B210 consistently reads 0x00
+        // (not live code) and may never succeed; don't block on it.
+        bool processOk = (st.entries[0].firstByte == 0xC3 || st.entries[0].patched);
+        if (processOk && !g_menuPatched.load()) {
             g_menuPatched.store(true);
-            Log("CMenuManager Process/DrawFrontEnd patched: %s first=0x%02X %s %s first=0x%02X %s",
-                st.entries[0].name, st.entries[0].firstByte,
-                st.entries[0].alreadyPatched ? "(already 0xC3)" : "(we wrote 0xC3)",
-                st.entries[1].name, st.entries[1].firstByte,
-                st.entries[1].alreadyPatched ? "(already 0xC3)" : "(we wrote 0xC3)");
-        } else {
-            int b0 = st.entries[0].firstByte, b1 = st.entries[1].firstByte;
-            if (b0 != lastReportedByte0 || b1 != lastReportedByte1) {
-                lastReportedByte0 = b0; lastReportedByte1 = b1;
-                Log("menu patch FAILED: %s@0x%08IX first=0x%02X reason=%s | %s@0x%08IX first=0x%02X reason=%s",
-                    st.entries[0].name, st.entries[0].addr, b0,
-                    st.entries[0].reason ? st.entries[0].reason : "ok",
-                    st.entries[1].name, st.entries[1].addr, b1,
-                    st.entries[1].reason ? st.entries[1].reason : "ok");
-            }
+
+            // GTA starts with the main menu active.  Process is now a ret-stub
+            // so nothing will ever clear m_bMenuActive.  omp-cef's
+            // UpdateBrowserDrawState checks this flag and disables all browser
+            // rendering while it's true — clear it so CEF can draw.
+            // GTA SA 1.0 US: FrontEndMenuManager 0xBA6748.
+            *reinterpret_cast<bool*>(0x00BA67A4) = false;   // m_bMenuActive  (+0x5C)
+            *reinterpret_cast<bool*>(0x00BA677A) = true;    // m_bDontDrawFrontEnd (+0x32)
+
+            Log("CMenuManager::Process patched (0x%02X). DrawFrontEnd: first=0x%02X %s",
+                st.entries[0].firstByte,
+                st.entries[1].firstByte,
+                st.entries[1].patched ? "patched" : (st.entries[1].reason ? st.entries[1].reason : "skipped"));
+            Log("FrontEndMenuManager: m_bMenuActive=false, m_bDontDrawFrontEnd=true");
         }
     }
 
-    DrawCover(device);
+    // Cover + splash while CEF is loading.  Once the lobby browser is shown,
+    // stop drawing — omp-cef renders the CEF overlay via its own D3D9 hooks
+    // and our cover would paint over it.
+    if (!g_browserShown.load()) {
+        DrawCover(device);
+        LoadSplashOnce(device);
+        DrawSplash(device);
+    }
+
+    // The browser is sized to the backbuffer when created, so switch the
+    // video mode first.
+    if (EnsureVideoMode(device))
+        OnCefTick();
+
+    // When omp-cef's bootstrap D3D9 hooks failed (dummy device creation fails
+    // after GTA already owns one), its PollD3D/OnPresent pipeline is dead.
+    // Pump it manually from our EndScene hook so RenderManager captures the
+    // real device and CEF browsers draw to the screen.
+    if (g_browserShown.load()) {
+        InstallDInputHookOnce();
+        if (!g_gameInputReleased.exchange(true)) Log("dinput: game input released to lobby");
+
+        using PumpFn = void(__cdecl*)();
+        using ForceFn = void(__cdecl*)(bool);
+        static PumpFn pPump = nullptr;
+        static ForceFn pForce = nullptr;
+        static bool resolved = false;
+        if (!resolved) {
+            HMODULE hCef = GetModuleHandleW(L"client.dll");
+            if (hCef) {
+                pPump  = reinterpret_cast<PumpFn>(GetProcAddress(hCef, "skr_cef_pump_render"));
+                pForce = reinterpret_cast<ForceFn>(GetProcAddress(hCef, "skr_cef_set_force_draw"));
+            }
+            if (pPump)  Log("skr_cef_pump_render resolved");
+            if (pForce) Log("skr_cef_set_force_draw resolved");
+            resolved = true;
+        }
+        // Force draw_enabled_ on so rendering works even when the launcher
+        // window still has focus (UpdateBrowserDrawState checks foreground).
+        static bool forceSet = false;
+        if (pForce && !forceSet) { pForce(true); forceSet = true; Log("force draw enabled"); }
+        if (pPump) pPump();
+
+        // The lobby layout targets ~1366x768; zoom the page by screen height so
+        // it keeps that size at higher resolutions while rendering natively.
+        using ZoomFn = void(__cdecl*)(uint32_t, double);
+        static ZoomFn pZoom = reinterpret_cast<ZoomFn>(
+            GetProcAddress(GetModuleHandleW(L"client.dll"), "skr_cef_set_zoom"));
+        static unsigned zoomTick = 0;
+        if (pZoom && (zoomTick++ % 60) == 0) {
+            IDirect3DSurface9* rt = nullptr;
+            if (SUCCEEDED(device->GetRenderTarget(0, &rt)) && rt) {
+                D3DSURFACE_DESC d{};
+                rt->GetDesc(&d);
+                rt->Release();
+                double factor = static_cast<double>(d.Height) / 768.0;
+                if (factor < 1.0) factor = 1.0;
+                if (factor > 2.5) factor = 2.5;
+                pZoom(kBrowserId, factor);
+            }
+        }
+
+        // Diagnostic: log render pipeline state for first 5 frames
+        using DiagFn = void(__cdecl*)(void*);
+        static DiagFn pDiag = nullptr;
+        static bool diagResolved = false;
+        static int diagCount = 0;
+        if (!diagResolved) {
+            HMODULE hCef = GetModuleHandleW(L"client.dll");
+            if (hCef)
+                pDiag = reinterpret_cast<DiagFn>(GetProcAddress(hCef, "skr_cef_get_render_diag"));
+            diagResolved = true;
+        }
+        if (pDiag && diagCount < 200) {
+            struct { bool hd,hop,de,fd; int bc,vc,pc; bool vhd,vht,hf; } d{};
+            pDiag(&d);
+            // Log key transitions + first/last few frames
+            static bool prevDev = false, prevTex = false, prevPend = false, prevOnP = false;
+            bool transition = (d.hd != prevDev) || (d.vht != prevTex) || (d.pc > 0) != prevPend || (d.hop != prevOnP);
+            if (diagCount < 3 || transition || diagCount == 199) {
+                Log("DIAG[%d] dev=%d onP=%d draw=%d force=%d browsers=%d vis=%d pend=%d vDev=%d vTex=%d hwnd=%d",
+                    diagCount, d.hd, d.hop, d.de, d.fd, d.bc, d.vc, d.pc, d.vhd, d.vht, d.hf);
+            }
+            prevDev = d.hd; prevTex = d.vht; prevPend = (d.pc > 0); prevOnP = d.hop;
+            diagCount++;
+        }
+    }
 }
 
 void OnCefTick() {

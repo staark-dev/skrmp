@@ -69,14 +69,24 @@ bool TryLoad() {
     // It's loaded by cef.asi before we get here; try GetModuleHandle first.
     HMODULE mod = GetModuleHandleW(L"client.dll");
     if (!mod) {
-        // Fallback: load relative to gta_sa.exe
+        // Load from <gta_dir>/cef/client.dll.
+        // client.dll depends on libcef.dll which lives in the same cef/ folder.
+        // Resolve siblings without changing the process-wide DLL search path.
         wchar_t exe[MAX_PATH]{};
-        GetModuleFileNameW(nullptr, exe, MAX_PATH);
-        std::wstring path(exe);
-        auto slash = path.rfind(L'\\');
-        if (slash != std::wstring::npos) path.resize(slash);
-        path += L"\\cef\\client.dll";
-        mod = LoadLibraryW(path.c_str());
+        DWORD length = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        if (!length || length >= MAX_PATH) return false;
+        std::wstring dir(exe);
+        auto slash = dir.rfind(L'\\');
+        if (slash != std::wstring::npos) dir.resize(slash);
+        std::wstring cefDir = dir + L"\\cef";
+        std::wstring path = cefDir + L"\\client.dll";
+        Log("loading omp-cef from %ls", path.c_str());
+        mod = LoadLibraryExW(path.c_str(), nullptr,
+                             LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        if (!mod) {
+            DWORD err = GetLastError();
+            Log("LoadLibraryW failed: error %lu", err);
+        }
     }
 
     if (!mod) {
@@ -108,8 +118,13 @@ bool TryLoad() {
         return false;
     }
 
+    // Optional (newer omp-cef builds): string-arg emit for C++ -> JS payloads.
+    skr::cef::EmitEventStrFn emitStr = reinterpret_cast<skr::cef::EmitEventStrFn>(
+        GetProcAddress(mod, "skr_cef_emit_event_str"));
+    if (!emitStr) Log("skr_cef_emit_event_str missing — C++ -> JS events carry no args");
+
     // Wire it up to CefBridge — exactly as samp-cef would via cef_initialize().
-    skr::cef::CefBridge::Instance().Initialize(&g_api);
+    skr::cef::CefBridge::Instance().InitializeLocal(&g_api, emitStr);
     g_loaded.store(true);
     Log("CefBridge initialized via omp-cef local API");
     return true;

@@ -1,5 +1,7 @@
 #include "game-state/game_state.h"
 #include "protocol/client_state.h"
+#include "protocol/session_info.h"
+#include "lobby/lobby_manager.h"
 #include <windows.h>
 #include <cmath>
 #include <cstdint>
@@ -250,6 +252,38 @@ bool SendClientState(uintptr_t sampBase, uint8_t* netGame, const ClientState& st
     return ok;
 }
 
+// ── SKR session-info RPC 241 (shared/protocol/session_info.h) ────────────
+// RakClientInterface slot +0x58 (index 22) = RegisterAsRemoteProcedureCall(const int* id,
+// void(*)(RPCParameters*)) — how samp.dll R5 registers its own 141 RPCs
+// (D:\SA-MP Reverse\RE\client\research\docs\network_protocol.md §4, CONFIRMED).
+// RPCParameters starts with { unsigned char* input; unsigned int numberOfBitsOfData; }
+// (SA-MP RakNet sdk/raknet/NetworkTypes.h). Handlers run on the game thread (NetGame tick).
+constexpr size_t kRakRegisterRpcVtableOffset = 0x58;
+struct RpcParams { const uint8_t* input; unsigned int numberOfBitsOfData; };
+using RpcHandlerFn = void(__cdecl*)(RpcParams*);
+using RakRegisterRpcFn = void(__thiscall*)(void*, const int*, RpcHandlerFn);
+
+const int g_sessionInfoRpcId = protocol::kRpcSessionInfo;
+void* g_sessionRpcRakClient = nullptr;
+
+void __cdecl OnSessionInfoRpc(RpcParams* params) {
+    if (!params || !params->input || params->numberOfBitsOfData < 16) return;
+    if (params->input[0] != protocol::kSessionInfoVersion) return;
+    skr::lobby::OnSessionInfo(params->input[1]);
+}
+
+// CNetGame (and its RakClient) is created once per session; register before
+// the connection completes so the server's RPC 241 is not dropped.
+void RegisterSessionInfoRpc(uint8_t* netGame) {
+    void* rak = *reinterpret_cast<void**>(netGame);
+    if (!rak || rak == g_sessionRpcRakClient) return;
+    auto vtbl = *reinterpret_cast<uint8_t**>(rak);
+    auto reg = *reinterpret_cast<RakRegisterRpcFn*>(vtbl + kRakRegisterRpcVtableOffset);
+    reg(rak, &g_sessionInfoRpcId, &OnSessionInfoRpc);
+    g_sessionRpcRakClient = rak;
+    LogStage(13, "rpc 241 (session info) handler registered");
+}
+
 bool IsConnected() {
     HMODULE samp = GetModuleHandleA("samp.dll");
     if (!samp) return false;
@@ -274,6 +308,8 @@ void Tick() {
     auto base = reinterpret_cast<uintptr_t>(samp);
     auto* netGame = *reinterpret_cast<uint8_t**>(base + kSampNetGameRva);
     if (!netGame) { LogStage(2, "no CNetGame"); return; }
+    RegisterSessionInfoRpc(netGame);
+    skr::lobby::OnNetGameState(netGame[kNetGameStateOff]);
     if (netGame[kNetGameStateOff] != kStateConnected) {
         char m[64];
         snprintf(m, sizeof(m), "netgame state %u", netGame[kNetGameStateOff]);
@@ -324,6 +360,10 @@ void Tick() {
     st.gear = static_cast<int8_t>(gear);
     st.maxKmh = static_cast<uint16_t>(maxKmh);
     if (SendClientState(base, netGame, st, city, area)) {
+        // Connected with a ped in the world. Runs from CGame::Process, which keeps
+        // ticking after SA-MP proxies the D3D device; the lobby decides when to
+        // hand over based on the server's session info (RPC 241).
+        skr::lobby::OnInWorldTick();
         char m[128];
         snprintf(m, sizeof(m), "rpc %u sent: %.1f %.1f %.1f %s|%s", protocol::kRpcClientState,
                  pos.x, pos.y, pos.z, city, area);

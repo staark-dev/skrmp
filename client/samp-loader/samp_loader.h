@@ -1,15 +1,6 @@
 #pragma once
-// Dynamic SA-MP loader — loads samp.dll at runtime when the user
-// picks a server from the lobby, without restarting GTA.
-//
-// SA-MP must hook GTA functions at load time.  We call LoadLibrary
-// which triggers DllMain → DLL_PROCESS_ATTACH, and SA-MP patches
-// GTA code sections from there.  This works because GTA's game
-// loop is already running and the code sections are live.
-//
-// NOTE: SA-MP needs the -c command-line flag to activate.  The
-//       launcher writes this flag into the GTA process command
-//       line BEFORE calling LoadSamp().
+// SA-MP loader for the pinned 0.3.7-R5 binary: preloaded at process start,
+// game start held until the player picks a server in the lobby.
 
 #include <cstdint>
 
@@ -21,18 +12,24 @@ struct ConnectParams {
     const char* playerName;      // "Player"
 };
 
-// Load samp.dll from the GTA directory.  Returns true on success.
-// May only be called once per process lifetime.
-bool LoadSamp();
+// Load the pinned samp.dll before GTA initializes (its pre-game patches must
+// precede GTA's own allocations) with SA-MP's client mode on, and hold its
+// StartGame at a gate. Returns false for any unknown binary or late call.
+bool PreloadSamp();
+
+// Write the chosen server into SA-MP's Settings block and open the gate:
+// SA-MP starts the game and creates CNetGame for this server. Once per process.
+bool LoadSamp(const ConnectParams& params);
 
 // True after LoadSamp() succeeded.
 bool IsSampLoaded();
 
-// Trigger SA-MP's internal connect to a server.
-// Requires IsSampLoaded() == true.
-// This writes to SA-MP's internal state (netGame) to initiate
-// the RakNet connection — same as if the user clicked Connect
-// in SA-MP's server browser.
+// Trigger a subsequent attempt after the native bootstrap created CNetGame.
 bool Connect(const ConnectParams& params);
+
+// Called from the game frame after LoadSamp. Starts one explicit attempt if
+// SA-MP has created CNetGame, then only observes its state.
+// Returns -1 while CNetGame does not exist, otherwise the native game state.
+int TickConnection();
 
 } // namespace skr::samp_loader

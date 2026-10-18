@@ -38,8 +38,9 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 .map img { position:absolute; left:0; top:0; width:1536px; height:1536px; display:block; max-width:none; }
 
 .marker { position:absolute; left:0; top:0; pointer-events:none; }
-.marker--player svg { width:20px; height:20px; margin:-10px 0 0 -10px; display:block; fill:var(--hud-cyan); filter:drop-shadow(0 1px 2px rgba(0,0,0,.8)); }
-.marker--pin svg { width:26px; height:34px; margin:-34px 0 0 -13px; display:block; fill:var(--hud-pin); stroke:#fff; stroke-width:1.5; filter:drop-shadow(0 1px 2px rgba(0,0,0,.8)); }
+.marker--player svg { width:36px; height:36px; margin:-18px 0 0 -18px; display:block; fill:var(--hud-cyan); stroke:#0b1014; stroke-width:1; stroke-linejoin:round; filter:drop-shadow(0 1px 2px rgba(0,0,0,.85)); }
+/* icons.svg symbols set fill/stroke themselves; `color` is what tints them. */
+.marker--pin svg { width:30px; height:38px; margin:-38px 0 0 -15px; display:block; color:var(--hud-pin); filter:drop-shadow(0 1px 2px rgba(0,0,0,.85)); }
 
 .panel__foot { height:40px; padding:0 18px; display:flex; align-items:center; gap:18px; font-size:12px; color:var(--hud-secondary); border-top:1px solid var(--hud-card-border); }
 .panel__foot span b { color:var(--hud-text); font-weight:600; }
@@ -60,7 +61,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
       <svg aria-hidden="true"><use href="icons/icons.svg#hud-pin"/></svg>
     </div>
     <div class="marker marker--player" id="player">
-      <svg viewBox="0 0 14 14"><polygon points="7,0 12,12 7,9 2,12"/></svg>
+      <svg viewBox="-1 -1 16 16"><polygon points="7,0 12,12 7,9 2,12"/></svg>
     </div>
   </div>
   <footer class="panel__foot">
@@ -182,7 +183,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
     var v = eventToView(e);
     var w = mapToWorld((v.x - panX) / zoom, (v.y - panY) / zoom);
     if (Math.abs(w.x) > HALF || Math.abs(w.y) > HALF) return;
-    emit('map:pin', Math.round(w.x * 10) / 10, Math.round(w.y * 10) / 10);
+    emit('map:pin', asFloat(w.x), asFloat(w.y));
   });
   view.addEventListener('contextmenu', function (e) {
     e.preventDefault();
@@ -193,6 +194,13 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
     if (e.repeat) return;
     if (e.key === 'Escape' || e.key === 'm' || e.key === 'M') { e.preventDefault(); emit('map:close'); }
   });
+
+  // cef.emit sends whole numbers as ints, but OnMapPin takes Floats; keep a
+  // fractional part (at most 1 cm off) so the argument types match.
+  function asFloat(v) {
+    var r = Math.round(v * 10) / 10;
+    return r % 1 === 0 ? r + 0.01 : r;
+  }
 
   function emit() {
     if (typeof cef !== 'undefined' && cef.emit) cef.emit.apply(cef, arguments);

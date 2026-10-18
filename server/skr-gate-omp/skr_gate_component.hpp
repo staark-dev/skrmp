@@ -1,8 +1,10 @@
 #pragma once
 
 #include <sdk.hpp>
+#include <Server/Components/Pawn/pawn.hpp>
 #include "protocol/messages.h"
 #include "protocol/client_state.h"
+#include "protocol/session_info.h"
 #include "crypto/crypto.h"
 #include <bitstream.hpp>
 
@@ -117,9 +119,12 @@ public:
 
     const SkrPlayerData* GetPlayerData(int playerId) const;
     bool IsAuthorized(int playerId) const;
+    void SendSessionInfo(IPlayer& player);
+    bool ScriptsHaveIntro();
 
 private:
     ICore* core_ = nullptr;
+    IPawnComponent* pawn_ = nullptr;
     crypto::MockSigningProvider crypto_;
 
     mutable std::mutex mutex_;

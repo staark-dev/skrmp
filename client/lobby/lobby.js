@@ -7,7 +7,7 @@
 //
 // CEF bridge contract (unchanged from previous Phase 1):
 //   emit "skr:lobby:settings:get"            -> C++ writes settings.json next to us
-//   emit "skr:lobby:settings:save" (JSON)    -> stub until bridge gains list readers
+//   emit "skr:lobby:settings:save" (flat JSON) -> local bridge persists preferences
 //   emit "skr:lobby:quit"                    -> C++ closes GTA
 //   emit "skr:lobby:servers:request"         -> request public server directory
 //   on   "skr:lobby:servers"    (JSON array) -> render public server directory
@@ -42,9 +42,18 @@
   var pendingAction = null;
   var previousFocus = null;
   var toastTimer;
+  var pendingSettings = null;
+  var settingsTimer;
+  var nicknameTimer;
   var publicServers = [];
   var serverFilter = 'all';
   var favoriteServers = Object.create(null);
+  var personalServers = [];      // [{address, name}] as persisted by C++
+  var pendingAddAddress = '';
+  var pendingRemoveAddress = '';
+  var addServerFocus = null;
+  var connectPending = false;
+  var MAX_PERSONAL_SERVERS = 50; // mirrors kMaxPersonalServers (settings_io.h)
 
   var previewServers = [
     { id:'skr-main', name:'SKR Roleplay', shortName:'SKR', mode:'Roleplay', language:'RO', players:142, maxPlayers:500, ping:24, recommended:true, address:'127.0.0.1:7777', description:'Construiește-ți povestea într-un San Andreas refăcut pentru roleplay.' },
@@ -67,7 +76,7 @@
     $('nickname').classList.toggle('invalid', !!value && !valid);
     $('nicknameValid').hidden = !valid;
     document.querySelectorAll('[data-action="connect"]').forEach(function (button) {
-      button.disabled = !valid;
+      button.disabled = !valid || connectPending || button.dataset.connectable !== 'true';
     });
     $('saveNickname').disabled = !valid;
     $('playerStatus').classList.toggle('valid', valid);
@@ -81,7 +90,7 @@
 
   var config = {
     graphics:{title:'Grafică',eyebrow:'AFIȘARE ȘI PERFORMANȚĂ',fields:[
-      ['resolution','Rezoluție','Dimensiunea imaginii jocului.','select',['Automat','1280 × 720','1366 × 768','1600 × 900','1920 × 1080','2560 × 1440']],
+      ['resolution','Rezoluție','Se aplică la următoarea pornire a jocului.','select',['Automat','1280 × 720','1366 × 768','1600 × 900','1920 × 1080','2560 × 1440']],
       ['screen','Mod de afișare','Aplicarea în joc necesită confirmare și revenire la eșec.','select',['Fullscreen','Fereastră','Fereastră fără margini']],
       ['distance','Distanță de afișare','Distanța la care sunt desenate elementele lumii.','range'],
       ['effects','Calitatea efectelor','Nivelul detaliilor efectelor vizuale.','select',['Scăzută','Medie','Ridicată','Foarte ridicată']],
@@ -90,7 +99,7 @@
     audio:{title:'Audio',eyebrow:'SUNET ȘI AMBIANȚĂ',fields:[
       ['effects','Efecte sonore','Vehicule, pași și sunetele lumii.','range'],
       ['radio','Radio','Volumul posturilor radio din joc.','range'],
-      ['volume','Audio SKR','Volumul elementelor audio ale clientului.','range']
+      ['volume','Audio SKR','Preferință salvată; aplicarea audio în joc este în lucru.','range']
     ]},
     controls:{title:'Controale',eyebrow:'TASTATURĂ ȘI MOUSE',fields:[
       ['sensitivity','Sensibilitate mouse','Viteza de mișcare a camerei.','range'],
@@ -121,13 +130,42 @@
     var changed = dirty();
     $('changeStatus').textContent = changed ? 'Modificări neaplicate' : 'Nicio modificare';
     $('changeStatus').classList.toggle('dirty', changed);
-    $('applyChanges').disabled = !changed;
+    $('applyChanges').disabled = !changed || !!pendingSettings;
   }
   function toast(text) {
     $('toast').textContent = text;
     $('toast').hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { $('toast').hidden = true; }, 3600);
+  }
+
+  function showConnection(message, detail) {
+    $('connectionTitle').textContent = message;
+    $('connectionText').textContent = detail;
+    $('connectionModal').hidden = false;
+  }
+
+  var connectionStepOrder = ['launch', 'world', 'server', 'download', 'join'];
+
+  function formatMb(bytes) {
+    return (Math.max(0, Number(bytes) || 0) / 1048576).toFixed(1);
+  }
+  function setConnectionStep(step, allDone) {
+    var reached = connectionStepOrder.indexOf(step);
+    var items = $('connectionSteps').querySelectorAll('li');
+    for (var i = 0; i < items.length; i++) {
+      var index = connectionStepOrder.indexOf(items[i].dataset.step);
+      items[i].classList.toggle('done', allDone || index < reached);
+      items[i].classList.toggle('active', !allDone && index === reached);
+    }
+  }
+  function setConnectionServer(server) {
+    $('connectionServer').textContent = server.name || server.address;
+    $('connectionAddress').textContent = server.address || '';
+  }
+
+  function hideConnection() {
+    $('connectionModal').hidden = true;
   }
 
   function normalized(value) {
@@ -143,13 +181,204 @@
       .replace(/'/g, '&#39;');
   }
 
+  // ── Personal servers ────────────────────────────────────────────
+  // Same rules as NormalizeServerAddress (settings_io.cpp): IPv4 or DNS name,
+  // port 1..65535, no IPv6. Returns the canonical "host:port" or ''.
+  function normalizeAddress(value) {
+    var m = /^([^:\s]+):(\d{1,5})$/.exec(String(value || '').trim());
+    if (!m) return '';
+    var host = m[1].toLowerCase();
+    var port = Number(m[2]);
+    if (port < 1 || port > 65535 || host.length > 253) return '';
+    var labels = host.split('.');
+    var ok = labels.every(function (label) {
+      return /^[a-z0-9-]{1,63}$/.test(label) && label.charAt(0) !== '-' && label.charAt(label.length - 1) !== '-';
+    });
+    if (!ok) return '';
+    if (/^[0-9.]+$/.test(host)) {
+      if (labels.length !== 4) return '';
+      if (!labels.every(function (o) { return o.length <= 3 && Number(o) <= 255; })) return '';
+    }
+    return host + ':' + port;
+  }
+
+  // Live query results from the native client, keyed by "host:port".
+  var liveInfo = Object.create(null);
+
+  function personalAsServer(entry) {
+    var info = liveInfo[entry.address];
+    var online = !!(info && info.online);
+    var name = entry.name || (online && info.name) || entry.address;
+    var initials = name.replace(/[^A-Za-z0-9]/g, '').slice(0, 3);
+    return {
+      id: 'personal:' + entry.address,
+      name: name,
+      shortName: (initials || 'IP').toUpperCase(),
+      mode: online ? (info.mode || '—') : '—',
+      language: online ? (info.language || '') : '',
+      players: online ? info.players : null,
+      maxPlayers: online ? info.maxPlayers : null,
+      ping: online ? info.ping : null,
+      offline: !!info && !online,
+      locked: online && info.password,
+      recommended: false,
+      personal: true,
+      address: entry.address,
+      description: entry.address
+    };
+  }
+
+  function applyLiveInfo(server) {
+    var info = server.address && liveInfo[server.address];
+    if (!info) return server;
+    if (!info.online) { server.offline = true; return server; }
+    server.players = info.players;
+    server.maxPlayers = info.maxPlayers;
+    server.ping = info.ping;
+    server.locked = info.password;
+    return server;
+  }
+
+  function loadServerInfo(json) {
+    try {
+      var data = typeof json === 'string' ? JSON.parse(json) : json;
+      (Array.isArray(data) ? data : []).forEach(function (s) {
+        if (!s || typeof s.address !== 'string') return;
+        liveInfo[s.address] = {
+          online: !!s.online,
+          password: !!s.password,
+          players: Math.max(0, Number(s.players) || 0),
+          maxPlayers: Math.max(0, Number(s.maxPlayers) || 0),
+          ping: Math.max(0, Number(s.ping) || 0),
+          name: String(s.name || '').slice(0, 64),
+          mode: String(s.mode || '').slice(0, 40),
+          language: String(s.language || '').slice(0, 20)
+        };
+      });
+    } catch (e) {}
+    renderServerBrowser();
+  }
+
+  function loadPersonalServers(json) {
+    try {
+      var data = typeof json === 'string' ? JSON.parse(json) : json;
+      personalServers = (Array.isArray(data) ? data : []).map(function (entry) {
+        if (!entry || typeof entry !== 'object') return null;
+        var address = normalizeAddress(entry.address);
+        if (!address) return null;
+        return { address: address, name: String(entry.name || '').trim().slice(0, 64) };
+      }).filter(Boolean);
+    } catch (e) {
+      personalServers = [];
+    }
+    if (pendingAddAddress && personalServers.some(function (s) { return s.address === pendingAddAddress; })) {
+      toast('Server adăugat: ' + pendingAddAddress);
+      pendingAddAddress = '';
+      closeAddServer();
+    }
+    if (pendingRemoveAddress && !personalServers.some(function (s) { return s.address === pendingRemoveAddress; })) {
+      delete favoriteServers['personal:' + pendingRemoveAddress];
+      toast('Server eliminat: ' + pendingRemoveAddress);
+      pendingRemoveAddress = '';
+    }
+    renderServerBrowser();
+  }
+
+  function setAddServerError(text) {
+    $('addServerError').textContent = text || '';
+    $('addServerAddress').classList.toggle('invalid', !!text);
+  }
+  function updateAddServerState() {
+    var raw = $('addServerAddress').value.trim();
+    var valid = !!normalizeAddress(raw);
+    $('confirmAddServer').disabled = !valid || !!pendingAddAddress;
+    $('addServerAddress').classList.toggle('invalid', !!raw && !valid);
+    if (!raw || valid) $('addServerError').textContent = '';
+    return valid;
+  }
+  function openAddServer() {
+    addServerFocus = document.activeElement;
+    pendingAddAddress = '';
+    $('addServerAddress').value = '';
+    $('addServerName').value = '';
+    setAddServerError('');
+    updateAddServerState();
+    $('addServerModal').hidden = false;
+    $('addServerAddress').focus();
+  }
+  function closeAddServer() {
+    if ($('addServerModal').hidden) return;
+    $('addServerModal').hidden = true;
+    pendingAddAddress = '';
+    if (addServerFocus) addServerFocus.focus();
+  }
+  function submitAddServer() {
+    if (pendingAddAddress) return;
+    var address = normalizeAddress($('addServerAddress').value);
+    if (!address) {
+      setAddServerError('Adresă invalidă. Folosește formatul host:port (ex. 127.0.0.1:7777).');
+      $('addServerAddress').focus();
+      return;
+    }
+    var exists = personalServers.some(function (s) { return s.address === address; });
+    if (!exists && personalServers.length >= MAX_PERSONAL_SERVERS) {
+      setAddServerError('Ai atins limita de ' + MAX_PERSONAL_SERVERS + ' servere personale.');
+      return;
+    }
+    var name = $('addServerName').value.trim().slice(0, 64);
+    // address first: the C++ reader is a flat key scanner (settings_io.cpp).
+    var payload = JSON.stringify({ address: address, name: name });
+    if (typeof cef === 'undefined' || !cef.emit) {
+      // Browser preview: no C++ side, keep the list in memory only.
+      var next = personalServers.filter(function (s) { return s.address !== address; });
+      next.push({ address: address, name: name });
+      pendingAddAddress = address;
+      loadPersonalServers(next);
+      return;
+    }
+    pendingAddAddress = address;
+    updateAddServerState();
+    cefEmit('skr:lobby:servers:add', payload);
+    setTimeout(function () {
+      if (pendingAddAddress === address) {
+        pendingAddAddress = '';
+        updateAddServerState();
+        setAddServerError('Clientul nu a confirmat salvarea. Încearcă din nou.');
+      }
+    }, 4000);
+  }
+  function removePersonalServer(address) {
+    if (pendingRemoveAddress) return;
+    pendingRemoveAddress = address;
+    if (typeof cef === 'undefined' || !cef.emit) {
+      loadPersonalServers(personalServers.filter(function (s) { return s.address !== address; }));
+    } else {
+      cefEmit('skr:lobby:servers:remove', JSON.stringify({ address: address }));
+    }
+    setTimeout(function () {
+      if (pendingRemoveAddress === address) {
+        pendingRemoveAddress = '';
+        toast('Clientul nu a confirmat eliminarea. Încearcă din nou.');
+      }
+    }, 4000);
+  }
+  function serverErrorText(code) {
+    if (code === 'limit') return 'Ai atins limita de ' + MAX_PERSONAL_SERVERS + ' servere personale.';
+    if (code === 'write') return 'Lista de servere nu a putut fi salvată în launcher.ini.';
+    return 'Adresă invalidă. Folosește formatul host:port (ex. 127.0.0.1:7777).';
+  }
+
+  function allServers() {
+    return personalServers.map(personalAsServer).concat(publicServers.map(applyLiveInfo));
+  }
+
   function filteredServers() {
     var query = normalized($('serverSearch').value.trim());
-    return publicServers.filter(function (server) {
+    return allServers().filter(function (server) {
       if (serverFilter === 'recommended' && !server.recommended) return false;
       if (serverFilter === 'favorites' && !favoriteServers[server.id]) return false;
       if (!query) return true;
-      return [server.name, server.mode, server.language].some(function (value) {
+      return [server.name, server.mode, server.language, server.address].some(function (value) {
         return normalized(value).indexOf(query) !== -1;
       });
     });
@@ -165,16 +394,29 @@
       return;
     }
     servers.forEach(function (server) {
-      var occupancy = Math.max(0, Math.min(100, Math.round((server.players / server.maxPlayers) * 100)));
+      var occupancy = server.maxPlayers > 0 ? Math.max(0, Math.min(100, Math.round((server.players / server.maxPlayers) * 100))) : 0;
       var row = document.createElement('article');
       row.className = 'inline-server-row';
       row.innerHTML =
         '<div class="inline-server-identity"><span class="server-mark">' + html(server.shortName) + '</span><span class="server-copy"><span class="server-name-line"><strong>' + html(server.name) + '</strong>' + (server.recommended ? '<i class="recommended-tag">RECOMANDAT</i>' : '') + '</span><small>' + html(server.description) + '</small></span></div>' +
         '<div class="inline-server-mode"><strong>' + html(server.mode) + '</strong><small>' + html(String(server.language).toUpperCase()) + '</small></div>' +
-        '<div class="inline-population"><span><strong>' + html(server.players) + '</strong> / ' + html(server.maxPlayers) + '</span><i class="population-track"><i style="width:' + occupancy + '%"></i></i></div>' +
-        '<div class="inline-ping"><i></i><span>' + html(server.ping) + ' ms</span></div>' +
-        '<div class="inline-server-actions"><button class="inline-favorite" type="button" data-favorite-id="' + html(server.id) + '" aria-label="Favorite">' + (favoriteServers[server.id] ? '★' : '☆') + '</button><button class="button button--gold inline-connect" data-action="connect" data-server-id="' + html(server.id) + '"' + (nicknameIsValid(nicknameValue()) ? '' : ' disabled') + '>Conectează <span>→</span></button></div>';
+        '<div class="inline-population"><span><strong>' + (server.players == null ? '—' : html(server.players)) + '</strong> / ' + (server.maxPlayers == null ? '—' : html(server.maxPlayers)) + '</span><i class="population-track"><i style="width:' + occupancy + '%"></i></i></div>' +
+        '<div class="inline-ping' + (server.offline ? ' is-offline' : '') + '"><i></i><span>' + (server.offline ? 'Offline' : server.ping == null ? '—' : html(server.ping) + ' ms') + '</span></div>' +
+        '<div class="inline-server-actions"><button class="inline-favorite" type="button" data-favorite-id="' + html(server.id) + '" aria-label="Favorite">' + (favoriteServers[server.id] ? '★' : '☆') + '</button><button class="button button--gold inline-connect" data-action="connect" data-server-id="' + html(server.id) + '" data-connectable="' + (server.address ? 'true' : 'false') + '"' + (nicknameIsValid(nicknameValue()) && server.address && !connectPending ? '' : ' disabled') + '>Conectează <span>→</span></button></div>';
       list.appendChild(row);
+      if (server.personal) {
+        var tag = document.createElement('i');
+        tag.className = 'personal-tag';
+        tag.textContent = 'PERSONAL';
+        row.querySelector('.server-name-line').appendChild(tag);
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'inline-remove';
+        remove.dataset.removeAddress = server.address;
+        remove.setAttribute('aria-label', 'Elimină ' + server.name);
+        remove.textContent = '×';
+        row.querySelector('.inline-server-actions').prepend(remove);
+      }
     });
   }
 
@@ -196,6 +438,7 @@
           players: Math.max(0, Number(server.players) || 0),
           maxPlayers: Math.max(1, Number(server.maxPlayers) || 1),
           ping: Math.max(0, Number(server.ping) || 0),
+          address: normalizeAddress(server.address),
           recommended: !!server.recommended,
           description: String(server.description || 'Server public din rețeaua SKR.'),
           order: Number(server.order) || index
@@ -203,7 +446,7 @@
       }).filter(Boolean).sort(function (a, b) { return a.order - b.order; });
       $('refreshServers').classList.remove('refreshing');
       $('directoryStatus').textContent = publicServers.length
-        ? 'Catalog actualizat · ' + publicServers.length + (publicServers.length === 1 ? ' server' : ' servere')
+        ? 'Catalog actualizat Â· ' + publicServers.length + (publicServers.length === 1 ? ' server' : ' servere')
         : 'Catalogul nu conține servere';
       renderServerBrowser();
     } catch (e) {
@@ -267,13 +510,17 @@
       } else {
         holder = document.createElement('button');
         holder.id = 'setting-' + f[0]; holder.className = 'binding';
-        holder.textContent = 'Configurare taste';
+        holder.textContent = 'În lucru';
+        holder.disabled = true;
         holder.addEventListener('click', function () {
           toast('Phase 1: configurarea tastelor native va fi conectată în Phase 2.');
         });
       }
       if (input) {
         input.id = 'setting-' + f[0];
+        var supported = (currentTab === 'graphics' && (f[0] === 'resolution' || f[0] === 'screen')) || (currentTab === 'audio' && f[0] === 'volume');
+        input.disabled = !supported;
+        if (!supported) hint.textContent = 'Disponibil după integrarea adaptorului de joc.';
         input.addEventListener(input.type === 'range' ? 'input' : 'change', function () {
           state[currentTab][f[0]] = input.type === 'checkbox'
             ? input.checked
@@ -350,6 +597,11 @@
   function hydrateFromSidecar(json) {
     try {
       var incoming = typeof json === 'string' ? JSON.parse(json) : (json || {});
+      if (typeof incoming.nickname === 'string') {
+        $('nickname').value = incoming.nickname;
+        updateNicknameState(false);
+      }
+      if (dirty() || pendingSettings) return;
       // Map launcher.ini fields that still make sense here.
       if (typeof incoming.resolution === 'string' && incoming.resolution) {
         // launcher.ini stores "1920x1080"; UI uses "1920 × 1080".
@@ -377,6 +629,8 @@
 
   // ── Wire up ─────────────────────────────────────────────────────
   document.addEventListener('click', function (ev) {
+    var remove = ev.target.closest ? ev.target.closest('[data-remove-address]') : null;
+    if (remove) { removePersonalServer(remove.dataset.removeAddress); return; }
     var favorite = ev.target.closest ? ev.target.closest('[data-favorite-id]') : null;
     if (favorite) {
       var favoriteId = favorite.dataset.favoriteId;
@@ -389,12 +643,27 @@
     var act = ev.target.closest ? ev.target.closest('[data-action]') : null;
     if (act) {
       if (act.dataset.action === 'connect') {
+        if (connectPending) return;
         if (!updateNicknameState(true)) { $('nickname').focus(); return; }
-        cefEmit('skr:lobby:connect', JSON.stringify({
-          serverId: act.dataset.serverId || '',
+        var selected = allServers().filter(function (server) { return server.id === act.dataset.serverId; })[0];
+        if (!selected || !selected.address) {
+          toast('Serverul nu are o adresă de conectare configurată.');
+          return;
+        }
+        connectPending = true;
+        updateNicknameState(false);
+        setConnectionServer(selected);
+        setConnectionStep('launch');
+        showConnection('Se pornește sesiunea…', 'Pregătim jocul pentru ' + nicknameValue() + '.');
+        if (!cefEmit('skr:lobby:connect', JSON.stringify({
+          address: selected.address,
           nickname: nicknameValue()
-        }));
-        toast('Se pregătește conexiunea pentru ' + nicknameValue() + '…');
+        }))) {
+          connectPending = false;
+          updateNicknameState(false);
+          hideConnection();
+          toast('Clientul nativ nu este disponibil pentru conectare.');
+        }
       } else if (act.dataset.action === 'open-settings') {
         showPage('settings');
       }
@@ -403,6 +672,13 @@
   $('resetChanges').addEventListener('click', function () {
     state = JSON.parse(JSON.stringify(saved));
     renderFields();
+  });
+  $('addServerButton').addEventListener('click', openAddServer);
+  $('cancelAddServer').addEventListener('click', closeAddServer);
+  $('addServerAddress').addEventListener('input', updateAddServerState);
+  $('addServerForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    submitAddServer();
   });
   $('nickname').addEventListener('input', function () { updateNicknameState(false); });
   $('nickname').addEventListener('blur', function () { updateNicknameState(true); });
@@ -417,8 +693,8 @@
   $('saveNickname').addEventListener('click', function () {
     if (updateNicknameState(true)) {
       cefEmit('skr:lobby:nickname:save', JSON.stringify({ nickname: nicknameValue() }));
-      setProfileOpen(false);
-      toast('Profil salvat pentru ' + nicknameValue() + '.');
+      clearTimeout(nicknameTimer);
+      nicknameTimer = setTimeout(function () { toast('Salvarea profilului nu a fost confirmată de client.'); }, 4000);
     }
   });
   document.addEventListener('click', function (e) {
@@ -448,10 +724,25 @@
     });
   });
   $('applyChanges').addEventListener('click', function () {
-    saved = JSON.parse(JSON.stringify(state));
+    if (pendingSettings) return;
+    pendingSettings = JSON.parse(JSON.stringify(state));
     updateDirty();
-    cefEmit('skr:lobby:settings:save', JSON.stringify(state));
-    toast('Phase 1: setările se păstrează doar în memorie. Persistența reală vine în Phase 2.');
+    var payload = {
+      resolution: state.graphics.resolution === 'Automat' ? 'auto' : state.graphics.resolution.replace(' × ', 'x'),
+      windowed: state.graphics.screen === 'Fereastră',
+      volume: state.audio.volume
+    };
+    if (!cefEmit('skr:lobby:settings:save', JSON.stringify(payload))) {
+      pendingSettings = null;
+      updateDirty();
+      toast('Salvarea necesită clientul GTA și bridge-ul local CEF.');
+      return;
+    }
+    settingsTimer = setTimeout(function () {
+      pendingSettings = null;
+      updateDirty();
+      toast('Salvarea nu a fost confirmată. Modificările rămân neaplicate.');
+    }, 4000);
   });
   $('cancelModal').addEventListener('click', closeModal);
   $('confirmModalButton').addEventListener('click', function () {
@@ -462,6 +753,16 @@
   });
 
   document.addEventListener('keydown', function (e) {
+    if (!$('addServerModal').hidden) {
+      if (e.key === 'Escape') { e.preventDefault(); closeAddServer(); return; }
+      if (e.key === 'Tab') {
+        var fields = Array.prototype.filter.call($('addServerForm').querySelectorAll('input, button'), function (el) { return !el.disabled; });
+        var first = fields[0], last = fields[fields.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+      return;
+    }
     if (!$('confirmModal').hidden && e.key === 'Tab') {
       var a = $('cancelModal'), b = $('confirmModalButton');
       if (e.shiftKey && document.activeElement === a) { e.preventDefault(); b.focus(); }
@@ -475,16 +776,100 @@
     }
   });
 
-  cefOn('skr:lobby:settings:ready', function () {
+  cefOn('skr:lobby:settings:ready', function (json) {
+    if (typeof json === 'string') { hydrateFromSidecar(json); return; }
     fetch('settings.json', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.text() : '{}'; })
       .then(hydrateFromSidecar)
       .catch(function () {});
   });
+  cefOn('skr:lobby:settings:saved', function () {
+    clearTimeout(settingsTimer);
+    if (!pendingSettings) return;
+    saved = pendingSettings;
+    pendingSettings = null;
+    updateDirty();
+    toast('Preferințe salvate. Afișarea se aplică la următoarea pornire.');
+  });
+  cefOn('skr:lobby:settings:error', function () {
+    clearTimeout(settingsTimer);
+    pendingSettings = null;
+    updateDirty();
+    toast('Setările nu au fost salvate. Încearcă din nou.');
+  });
+  cefOn('skr:lobby:nickname:saved', function (name) {
+    clearTimeout(nicknameTimer);
+    setProfileOpen(false);
+    toast('Profil salvat pentru ' + String(name) + '.');
+  });
+  cefOn('skr:lobby:nickname:error', function () {
+    clearTimeout(nicknameTimer);
+    toast('Nickname-ul nu a putut fi salvat.');
+  });
+  cefOn('skr:lobby:connect:error', function (code) {
+    var timedOut = String(code || '') === 'timeout';
+    connectPending = timedOut;
+    updateNicknameState(false);
+    if (timedOut) {
+      showConnection('Conectarea durează mai mult…', 'Serverul nu a răspuns încă. Încercăm în continuare.');
+    } else {
+      hideConnection();
+      toast('Conectarea a eșuat. Verifică versiunea samp.dll și jurnalul SKR.');
+    }
+  });
+  cefOn('skr:lobby:connect:started', function () {
+    connectPending = true;
+    updateNicknameState(false);
+    setConnectionStep('world');
+    showConnection('Se încarcă lumea…', 'San Andreas se pregătește pentru sesiune.');
+  });
+  cefOn('skr:lobby:connect:phase', function (phase) {
+    var phases = {
+      server:   ['server', 'Conectare la server…', 'Așteptăm răspunsul serverului.'],
+      restart:  ['server', 'Serverul repornește…', 'Reconectarea pornește automat.'],
+      waitjoin: ['join', 'Serverul pregătește sesiunea…', 'Mai durează câteva momente.'],
+      join:     ['join', 'Intrare în joc…', 'Conectat. Se încarcă personajul.']
+    };
+    var p = phases[String(phase || '')];
+    if (!p) return;
+    setConnectionStep(p[0]);
+    showConnection(p[1], p[2]);
+  });
+  cefOn('skr:lobby:connect:download', function (json) {
+    var d;
+    try { d = typeof json === 'string' ? JSON.parse(json) : json; } catch (e) { return; }
+    if (!d) return;
+    var total = Number(d.total) || 0;
+    var received = Math.min(total, Number(d.received) || 0);
+    var percent = total > 0 ? Math.round(received / total * 100) : 100;
+    if (d.state === 'done') {
+      $('connectionDownload').textContent = ' · ' + formatMb(total) + ' MB';
+      setConnectionStep('join');
+      showConnection('Intrare în joc…', 'Resursele serverului sunt pregătite.');
+      return;
+    }
+    $('connectionDownload').textContent = ' · ' + formatMb(received) + ' / ' + formatMb(total) + ' MB (' + percent + '%)';
+    setConnectionStep('download');
+    showConnection('Descărcare resurse…', (Number(d.files) || 0) + ' fișier(e) de la server.');
+  });
+  cefOn('skr:lobby:connect:connected', function () {
+    connectPending = false;
+    setConnectionStep('join', true);
+    showConnection('Conectat', 'Bun venit pe server.');
+  });
   cefOn('skr:lobby:mode', function () {
     try { setMode(String(arguments[0] || 'lobby')); } catch (e) {}
   });
   cefOn('skr:lobby:servers', function (json) { loadServers(json); });
+  cefOn('skr:lobby:servers:personal', loadPersonalServers);
+  cefOn('skr:lobby:servers:info', loadServerInfo);
+  cefOn('skr:lobby:servers:error', function (code) {
+    pendingAddAddress = '';
+    pendingRemoveAddress = '';
+    updateAddServerState();
+    if (!$('addServerModal').hidden) setAddServerError(serverErrorText(code));
+    else toast(serverErrorText(code));
+  });
 
   // Public hook for the native adapter (Phase 2).
   window.skrLobby = { setMode: setMode };

@@ -1,0 +1,886 @@
+diff --git a/src/client/core/browser/app.hpp b/src/client/core/browser/app.hpp
+index b63efb2..8946db7 100644
+--- a/src/client/core/browser/app.hpp
++++ b/src/client/core/browser/app.hpp
+@@ -13,6 +13,7 @@ public:
+         command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
+         command_line->AppendSwitchWithValue("allow-browser-signin", "false");
+         command_line->AppendSwitch("enable-begin-frame-scheduling");
++        command_line->AppendSwitch("allow-file-access-from-files");
+     }
+ 
+ private:
+diff --git a/src/client/core/browser/client.cpp b/src/client/core/browser/client.cpp
+index e81417e..8bf5ac5 100644
+--- a/src/client/core/browser/client.cpp
++++ b/src/client/core/browser/client.cpp
+@@ -8,6 +8,8 @@
+ #include "browser/focus.hpp"
+ #include "browser/manager.hpp"
+ #include "network/network_manager.hpp"
++#define SKR_LOCAL_API_EXPORTS
++#include "skr_local_api.h"
+ 
+ static inline std::string ToLower(std::string s)
+ {
+@@ -171,7 +173,7 @@ void BrowserClient::UpdateDragCursor(CefRefPtr<CefBrowser> /*browser*/, DragOper
+ }
+ 
+ bool BrowserClient::OnProcessMessageReceived(CefRefPtr<CefBrowser> /*browser*/,
+-                                             CefRefPtr<CefFrame> /*frame*/,
++                                             CefRefPtr<CefFrame> frame,
+                                              CefProcessId /*source_process*/,
+                                              CefRefPtr<CefProcessMessage> message)
+ {
+@@ -233,6 +235,19 @@ bool BrowserClient::OnProcessMessageReceived(CefRefPtr<CefBrowser> /*browser*/,
+             return true;
+         }
+ 
++        {
++            // SKR handlers get the first string argument (JSON by convention).
++            std::string payload;
++            const bool hasPayload = args->GetSize() > 1 && args->GetType(1) == VTYPE_STRING;
++            if (hasPayload)
++                payload = args->GetString(1).ToString();
++            if (frame && frame->IsMain() && SkrDispatchLocalEvent(browserId_, frame->GetURL().ToString(), event_name, hasPayload ? &payload : nullptr))
++                return true;
++        }
++
++        // Local control events never fall through to a remote server.
++        if (event_name.rfind("skr:lobby:", 0) == 0) return true;
++
+         ClientEmitEventPacket event_packet;
+         event_packet.browserId = browserId_;
+         event_packet.name = event_name;
+diff --git a/src/client/core/browser/manager.cpp b/src/client/core/browser/manager.cpp
+index 845715b..59538fd 100644
+--- a/src/client/core/browser/manager.cpp
++++ b/src/client/core/browser/manager.cpp
+@@ -2293,7 +2293,7 @@ LRESULT BrowserManager::OnWndProcMessage(HWND hwnd, UINT msg, WPARAM wParam, LPA
+         case WM_CHAR:
+         {
+             const bool textInputFocused = (focus_ != nullptr) && focus_->IsTextInputFocused(focused_inst->id);
+-            if (!textInputFocused)
++            if (!textInputFocused && !forward_all_keys_.load())
+             {
+                 // T chat, TAB scoreboard, etc..
+                 return false;
+diff --git a/src/client/core/browser/manager.hpp b/src/client/core/browser/manager.hpp
+index 714366b..7ad5c0f 100644
+--- a/src/client/core/browser/manager.hpp
++++ b/src/client/core/browser/manager.hpp
+@@ -128,6 +128,7 @@ public:
+     }
+ 
+     bool Initialize();
++    bool IsInitialized() const { return initialized_; }
+     void Shutdown();
+ 
+     // Browser management
+@@ -208,6 +209,15 @@ public:
+     {
+         draw_enabled_ = enabled;
+     }
++    // Lobby (no SA-MP): the focused page gets every key, not only while a text field has focus.
++    void SetForwardAllKeys(bool enabled) { forward_all_keys_ = enabled; }
++    // Diagnostic accessors for SKR render pipeline
++    bool ShouldSkipBrowserRendering() const;
++    bool HasPendingPaint(int id) const {
++        auto it = pending_.find(id);
++        return it != pending_.end() && it->second.ready;
++    }
++    auto& GetBrowsersMap() const { return browsers_; }
+     void SetCursorType(cef_cursor_type_t type)
+     {
+         cursor_type_ = type;
+@@ -221,7 +231,6 @@ private:
+     void CreateWorldBrowserInternal(int id, const std::string& url, std::string textureName, float width, float height);
+     void CreateWorld2DBrowserInternal(int id, const std::string& url, float worldX, float worldY, float worldZ, float width, float height, float offsetZ, float pivotX, float pivotY);
+ 
+-    bool ShouldSkipBrowserRendering() const;
+     bool IsFocusedTextInputActive() const;
+     void UpdateNativeUiInput();
+     void DispatchNativeUiEvents();
+@@ -302,6 +311,7 @@ private:
+ 
+     // Keyboard capture / filtering (client -> server)
+     bool key_capture_enabled_ = false;
++    std::atomic<bool> forward_all_keys_{ false };
+     std::bitset<256> key_allowed_{};
+ 
+     std::unordered_map<int, PlayerStatsPollState> player_stats_poll_;
+diff --git a/src/client/core/main.cpp b/src/client/core/main.cpp
+index 5479c11..86cf984 100644
+--- a/src/client/core/main.cpp
++++ b/src/client/core/main.cpp
+@@ -3,7 +3,7 @@
+ 
+ #include "runtime.hpp"
+ 
+-static std::unique_ptr<Runtime> runtime;
++std::unique_ptr<Runtime> runtime;
+ 
+ DWORD WINAPI AppInitializationThread(LPVOID)
+ {
+@@ -12,7 +12,7 @@ DWORD WINAPI AppInitializationThread(LPVOID)
+ 	return 0;
+ }
+ 
+-BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
++BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
+ {
+     if (reason == DLL_PROCESS_ATTACH) {
+         DisableThreadLibraryCalls(hModule);
+@@ -26,6 +26,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
+         }
+     }
+     else if (reason == DLL_PROCESS_DETACH) {
++        // reserved != nullptr: the process is terminating and the other threads
++        // (CEF, network, audio) are already gone. Tearing them down under the
++        // loader lock crashes, so only clean up on a dynamic FreeLibrary.
++        if (reserved)
++            return TRUE;
+         if (runtime) {
+             runtime->Stop();
+             runtime.reset();
+diff --git a/src/client/core/rendering/view.hpp b/src/client/core/rendering/view.hpp
+index 4d45d26..39818bd 100644
+--- a/src/client/core/rendering/view.hpp
++++ b/src/client/core/rendering/view.hpp
+@@ -43,6 +43,8 @@ public:
+     void OnDeviceLost();
+     void OnDeviceReset(LPDIRECT3DDEVICE9 device);
+ 
++    bool HasDevice() const noexcept { return device_ != nullptr; }
++
+ private:
+     void InternalCreateTexture(int width, int height);
+ 
+diff --git a/src/client/core/rendering/view_texture.cpp b/src/client/core/rendering/view_texture.cpp
+index 229ac99..1fa8d37 100644
+--- a/src/client/core/rendering/view_texture.cpp
++++ b/src/client/core/rendering/view_texture.cpp
+@@ -193,9 +193,12 @@ void ViewTexture::UpdatePartial(const void* pixels, int bufferWidth, int bufferH
+ 
+ void ViewTexture::Draw(int x, int y)
+ {
+-    if (!device_ || !texture_) 
++    if (!device_ || !texture_)
+         return;
+ 
++    device_->SetVertexShader(nullptr);
++    device_->SetPixelShader(nullptr);
++
+     device_->SetTexture(0, texture_);
+     device_->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+     device_->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+@@ -204,9 +207,17 @@ void ViewTexture::Draw(int x, int y)
+     device_->SetRenderState(D3DRS_LIGHTING, FALSE);
+     device_->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+     device_->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
++    device_->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
++
++    device_->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
++    device_->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
++    device_->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
++    device_->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
++    device_->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
++    device_->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+ 
+-    device_->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+-    device_->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
++    device_->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
++    device_->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+ 
+     const float w = static_cast<float>(width_);
+     const float h = static_cast<float>(height_);
+diff --git a/src/client/core/runtime.cpp b/src/client/core/runtime.cpp
+index 383d7ec..02f8678 100644
+--- a/src/client/core/runtime.cpp
++++ b/src/client/core/runtime.cpp
+@@ -19,6 +19,8 @@
+ #include "samp/hooks/netgame.hpp"
+ #include "samp/hooks/chat.hpp"
+ #include "samp/hooks/scoreboard.hpp"
++#include "samp/common.hpp"
++#include "samp/components/netgame.hpp"
+ #include "system/config_manager.hpp"
+ #include "system/gta.hpp"
+ #include "system/logger.hpp"
+@@ -49,7 +51,7 @@ void Runtime::UpdateBrowserDrawState()
+     const bool window_active = hwnd && ::IsWindow(hwnd) && (::GetForegroundWindow() == hwnd);
+     const bool pause_menu_open = FrontEndMenuManager.m_bMenuActive && !FrontEndMenuManager.m_bDontDrawFrontEnd;
+ 
+-    browser_->SetDrawEnabled(window_active && !pause_menu_open);
++    browser_->SetDrawEnabled(force_draw_enabled_.load(std::memory_order_relaxed) || (window_active && !pause_menu_open));
+ }
+ 
+ bool Runtime::Start()
+@@ -154,8 +156,54 @@ bool Runtime::Start()
+         if (!RenderManager::Instance().GetDevice())
+             RenderManager::Instance().PollD3D();
+ 
+-        if (app_)
++        // samp.dll can be loaded late (from the lobby). App drives SA-MP's CGame
++        // (cursor mode, input), which faults until SA-MP's Samp_Init has run,
++        // and CNetGame is created right after it — keep the lobby path until then.
++        auto* netgame = app_ ? GetComponent<NetGameComponent>() : nullptr;
++        const bool samp_ready = netgame && netgame->GetState() != -1;
++        if (samp_ready) {
++            // In the world, pages only get keys while a text field is focused.
++            browser_->SetForwardAllKeys(false);
+             app_->Tick();
++        }
++        else if (browser_) {
++            // No SA-MP (lobby mode): FocusManager::Update needs GameComponent, so drive the cursor here.
++            browser_->SetForwardAllKeys(true);
++            static bool lobby_cursor_shown = false;
++            const bool focused = browser_->IsAnyBrowserFocused();
++            if (focused)
++            {
++                auto id = IDC_ARROW;
++                switch (browser_->GetCursorType()) {
++                    case CT_IBEAM: id = IDC_IBEAM; break;
++                    case CT_HAND:  id = IDC_HAND;  break;
++                    default: break;
++                }
++                HCURSOR hCursor = ::LoadCursor(nullptr, id);
++                CursorHook::Instance().SetForcedCursor(hCursor);
++                CursorHook::Instance().SetForced(true);
++                ::SetCursor(hCursor);
++                if (!lobby_cursor_shown)
++                {
++                    while (::ShowCursor(TRUE) < 0) {}
++                    lobby_cursor_shown = true;
++                }
++            }
++            else if (lobby_cursor_shown)
++            {
++                CursorHook::Instance().SetForced(false);
++                while (::ShowCursor(FALSE) >= 0) {}
++                ::SetCursor(nullptr);
++                lobby_cursor_shown = false;
++            }
++
++            bool drew = browser_->RenderAll();
++            static int logCount = 0;
++            if (logCount < 5) {
++                ++logCount;
++                LOG_INFO("[SKR_FALLBACK] RenderAll returned {}, browsers={}", drew, browser_->GetAllBrowsers().size());
++            }
++        }
+     };
+ 
+ 	// SA:MP version
+@@ -315,6 +363,11 @@ void Runtime::FinalizeInitialization(HWND hwnd)
+ 
+ void Runtime::Stop()
+ {
++	// ~Runtime calls Stop() again after an explicit Stop(); the second pass
++	// used to dereference the already-reset hooks_.
++	if (stopped_.exchange(true))
++		return;
++
+ 	if (app_)
+ 		app_->Shutdown();
+ 
+@@ -351,7 +404,8 @@ void Runtime::Stop()
+ 		wndproc_.reset();
+ 	}
+ 
+-	CursorHook::Instance().Shutdown(*hooks_);
++	if (hooks_)
++		CursorHook::Instance().Shutdown(*hooks_);
+ 	RenderManager::Instance().Shutdown();
+ 
+ 	if (hooks_)
+diff --git a/src/client/core/runtime.hpp b/src/client/core/runtime.hpp
+index 6542f5b..f0b450e 100644
+--- a/src/client/core/runtime.hpp
++++ b/src/client/core/runtime.hpp
+@@ -42,6 +42,9 @@ public:
+ 	void FinalizeInitialization(HWND hwnd);
+ 	void Stop();
+ 
++	BrowserManager* GetBrowserManager() { return browser_.get(); }
++	Gta* GetGta() { return gta_.get(); }
++
+ private:
+ 	void UpdateBrowserDrawState();
+ 
+@@ -52,6 +55,7 @@ private:
+ 	Runtime& operator=(Runtime&&) = delete;
+ 
+ 	std::atomic<bool> init_finalized_{ false };
++	std::atomic<bool> stopped_{ false };
+ 
+ 	std::unique_ptr<Logger> logger_;
+ 	std::unique_ptr<ConfigManager> config_;
+@@ -80,5 +84,10 @@ private:
+ 
+ 	std::unique_ptr<App> app_;
+ 	
++	std::atomic<bool> force_draw_enabled_{ false };
+ 	std::atomic<int> cursor_recenter_frames_{ 0 };
++
++public:
++	void SetForceDrawEnabled(bool enabled) { force_draw_enabled_.store(enabled); }
++	bool IsForceDrawEnabled() const { return force_draw_enabled_.load(); }
+ };
+\ No newline at end of file
+diff --git a/src/client/core/ui/download_dialog.cpp b/src/client/core/ui/download_dialog.cpp
+index 8a16035..fa923c0 100644
+--- a/src/client/core/ui/download_dialog.cpp
++++ b/src/client/core/ui/download_dialog.cpp
+@@ -14,6 +14,8 @@
+ 
+ #include "system/logger.hpp"
+ #include "shared/events.hpp"
++#define SKR_LOCAL_API_EXPORTS
++#include "skr_local_api.h"
+ 
+ // Internal loader browser (reserved id)
+ static constexpr int kLoaderBrowserId = 999999;
+@@ -50,6 +52,10 @@ void DownloadDialog::EnsureLoaderVisible()
+     if (!browser_)
+         return;
+ 
++    // The SKR lobby is still on screen and shows the progress itself.
++    if (SkrLobbyPageActive())
++        return;
++
+     if (browser_->GetBrowserInstance(kLoaderBrowserId))
+     {
+         loader_visible_ = true;
+@@ -123,6 +129,7 @@ void DownloadDialog::Start(std::vector<std::pair<std::string, size_t>> files)
+ 
+     last_ui_sent_ms_ = 0;
+ 
++    SkrNotifyDownload("start", 0, total_bytes_, files_.size());
+     EnsureLoaderVisible();
+ 
+     LOG_INFO("[DownloadDialog] Started ({} file(s), {} bytes).", (int)files_.size(), (uint64_t)total_bytes_);
+@@ -152,6 +159,8 @@ void DownloadDialog::Update(uint32_t index, uint64_t received)
+     for (auto v : received_by_file_)
+         overall_received += v;
+ 
++    SkrNotifyDownload("progress", overall_received, total_bytes_, files_.size());
++
+     const std::string& fileName = files_[index].first;
+     const uint64_t fileTotal = (uint64_t)files_[index].second;
+ 
+@@ -178,8 +187,8 @@ void DownloadDialog::Finish()
+         return;
+ 
+     active_ = false;
++    SkrNotifyDownload("done", total_bytes_, total_bytes_, files_.size());
+ 
+-    
+     ClientEmitEventPacket event;
+     event.name = CefEvent::Client::DownloadFinish;
+     network_->SendPacket(PacketType::ClientEmitEvent, event);
+diff --git a/src/client/core/skr_local_api.cpp b/src/client/core/skr_local_api.cpp
+new file mode 100644
+index 0000000..de18595
+--- /dev/null
++++ b/src/client/core/skr_local_api.cpp
+@@ -0,0 +1,373 @@
++// SKR Local Browser API — omp-cef patch
++// Exposes BrowserManager functionality to SKR.Client.dll via C exports.
++//
++// main.cpp supplies the runtime singleton in this local patch.
++
++#define SKR_LOCAL_API_EXPORTS
++#include "skr_local_api.h"
++
++#include "runtime.hpp"
++#include "browser/manager.hpp"
++#include "rendering/render_manager.hpp"
++#include "system/gta.hpp"
++#include "system/logger.hpp"
++
++#include <include/wrapper/cef_helpers.h>
++#include <include/cef_values.h>
++#include <include/cef_task.h>
++#include <include/cef_parser.h>
++#include <algorithm>
++#include <include/base/cef_callback.h>
++#include <include/wrapper/cef_closure_task.h>
++
++#include <atomic>
++#include <cmath>
++#include <cstdio>
++#include <mutex>
++#include <string>
++#include <unordered_map>
++#include <vector>
++
++// ── Access to Runtime singleton ───────────────────────────────────────────
++// main.cpp owns the runtime; this extern links to it once `static` is removed.
++extern std::unique_ptr<Runtime> runtime;
++
++static BrowserManager* GetBrowser()
++{
++    if (!runtime) return nullptr;
++    return runtime->GetBrowserManager();
++}
++
++// ── Local event system ────────────────────────────────────────────────────
++// Matches samp-cef's callback signature: int __cdecl(const char* event, void* args)
++using SkrEventCb = int(__cdecl*)(const char*, void*);
++
++static std::mutex g_eventMtx;
++static std::unordered_map<std::string, std::vector<SkrEventCb>> g_eventHandlers;
++static std::unordered_map<int, std::string> g_localPages;
++
++static std::string LocalPageUrl(const std::string& url) {
++    return CefURIDecode(url, true, static_cast<cef_uri_unescape_rule_t>(UU_NORMAL | UU_SPACES)).ToString();
++}
++
++// ── C API implementation ──────────────────────────────────────────────────
++
++SKR_API bool skr_cef_ready()
++{
++    auto* bm = GetBrowser();
++    return bm && bm->IsInitialized();
++}
++
++SKR_API void skr_cef_create_browser(uint32_t id, const char* url, bool hidden, bool focused)
++{
++    auto* bm = GetBrowser();
++    if (!bm || !url) return;
++
++    {
++        std::lock_guard<std::mutex> lock(g_eventMtx);
++        // Only the native-created local lobby may invoke SKR handlers.
++        if (id == 100 && std::string(url).rfind("file:///", 0) == 0)
++            g_localPages[static_cast<int>(id)] = LocalPageUrl(url);
++    }
++
++    // RenderManager may not have captured the device yet (it falls back to
++    // 1280x720), so size the page to the game window explicitly.
++    float width = 0.f, height = 0.f;
++    HWND hwnd = runtime && runtime->GetGta() ? runtime->GetGta()->GetHwnd() : nullptr;
++    RECT rc{};
++    if (hwnd && ::GetClientRect(hwnd, &rc) && rc.right > 0 && rc.bottom > 0)
++    {
++        width = static_cast<float>(rc.right);
++        height = static_cast<float>(rc.bottom);
++    }
++    LOG_INFO("[SKR] create_browser id={} size={}x{}", id, width, height);
++    bm->CreateBrowser(static_cast<int>(id), url, focused, false, width, height);
++    if (!hidden)
++        bm->SetBrowserVisible(static_cast<int>(id), true);
++}
++
++SKR_API void skr_cef_destroy_browser(uint32_t id)
++{
++    auto* bm = GetBrowser();
++    if (!bm) return;
++    {
++        std::lock_guard<std::mutex> lock(g_eventMtx);
++        g_localPages.erase(static_cast<int>(id));
++    }
++    bm->DestroyBrowser(static_cast<int>(id));
++}
++
++SKR_API void skr_cef_hide_browser(uint32_t id, bool hide)
++{
++    auto* bm = GetBrowser();
++    if (!bm) return;
++    bm->SetBrowserVisible(static_cast<int>(id), !hide);
++}
++
++SKR_API void skr_cef_focus_browser(uint32_t id, bool focus)
++{
++    auto* bm = GetBrowser();
++    if (!bm) return;
++    bm->FocusBrowser(static_cast<int>(id), focus);
++}
++
++SKR_API bool skr_cef_browser_exists(uint32_t id)
++{
++    auto* bm = GetBrowser();
++    if (!bm) return false;
++    return bm->GetBrowserInstance(static_cast<int>(id)) != nullptr;
++}
++
++SKR_API bool skr_cef_browser_ready(uint32_t id)
++{
++    auto* bm = GetBrowser();
++    if (!bm) return false;
++    auto* inst = bm->GetBrowserInstance(static_cast<int>(id));
++    return inst && inst->browser && inst->browser->IsValid();
++}
++
++SKR_API bool skr_cef_try_focus_browser(uint32_t id)
++{
++    auto* bm = GetBrowser();
++    if (!bm) return false;
++    auto* inst = bm->GetBrowserInstance(static_cast<int>(id));
++    if (!inst) return false;
++    bm->FocusBrowser(static_cast<int>(id), true);
++    return true;
++}
++
++SKR_API bool skr_cef_input_available(uint32_t id)
++{
++    auto* bm = GetBrowser();
++    if (!bm) return false;
++    auto* inst = bm->GetBrowserInstance(static_cast<int>(id));
++    return inst && inst->visible && inst->view.IsFocused();
++}
++
++SKR_API bool skr_cef_foreign_browser_focused(uint32_t ownId)
++{
++    auto* bm = GetBrowser();
++    if (!bm) return false;
++    for (const auto& [id, inst] : bm->GetBrowsersMap())
++    {
++        if (inst && id != static_cast<int>(ownId) && inst->visible && inst->view.IsFocused())
++            return true;
++    }
++    return false;
++}
++
++SKR_API bool skr_cef_gta_window_active()
++{
++    if (!runtime) return false;
++    HWND hwnd = runtime->GetGta() ? runtime->GetGta()->GetHwnd() : nullptr;
++    return hwnd && ::IsWindow(hwnd) && ::GetForegroundWindow() == hwnd;
++}
++
++static void EmitToAllBrowsers(const char* event, const char* arg)
++{
++    if (!event) return;
++    if (!CefCurrentlyOn(TID_UI)) {
++        const std::string name(event);
++        const bool hasArg = arg != nullptr;
++        const std::string data = hasArg ? arg : "";
++        CefPostTask(TID_UI, base::BindOnce([](std::string name, std::string data, bool hasArg) {
++            EmitToAllBrowsers(name.c_str(), hasArg ? data.c_str() : nullptr);
++        }, name, data, hasArg));
++        return;
++    }
++    auto* bm = GetBrowser();
++    if (!bm) return;
++
++    std::unordered_map<int, std::string> pages;
++    {
++        std::lock_guard<std::mutex> lock(g_eventMtx);
++        pages = g_localPages;
++    }
++    // Same message the renderer's cef.on() listens for (see renderer/main.cpp).
++    for (const auto& [id, inst] : bm->GetBrowsersMap())
++    {
++        if (!inst || !inst->browser || !inst->browser->IsValid())
++            continue;
++        CefRefPtr<CefFrame> frame = inst->browser->GetMainFrame();
++        if (!frame || !frame->IsValid())
++            continue;
++        auto page = pages.find(id);
++        if (page == pages.end() || LocalPageUrl(frame->GetURL().ToString()) != page->second)
++            continue;
++        CefRefPtr<CefProcessMessage> msg = CefProcessMessage::Create("emit_event");
++        msg->GetArgumentList()->SetString(0, event);
++        if (arg)
++            msg->GetArgumentList()->SetString(1, CefString(std::string(arg)));
++        frame->SendProcessMessage(PID_RENDERER, msg);
++    }
++    LOG_DEBUG("[SKR] emit_event -> JS: {} (arg: {})", event, arg ? "string" : "none");
++}
++
++// ── Resource download progress → SKR lobby ─────────────────────────────────
++static std::atomic<bool> g_downloadActive{ false };
++
++bool SkrLobbyPageActive()
++{
++    std::lock_guard<std::mutex> lock(g_eventMtx);
++    return !g_localPages.empty();
++}
++
++void SkrNotifyDownload(const char* state, uint64_t received, uint64_t total, size_t files)
++{
++    const std::string s = state ? state : "";
++    g_downloadActive.store(s == "start" || s == "progress");
++    char json[192];
++    snprintf(json, sizeof(json), "{\"state\":\"%s\",\"received\":%llu,\"total\":%llu,\"files\":%u}",
++             s.c_str(), static_cast<unsigned long long>(received),
++             static_cast<unsigned long long>(total), static_cast<unsigned>(files));
++    EmitToAllBrowsers("skr:lobby:connect:download", json);
++}
++
++SKR_API bool skr_cef_resources_pending()
++{
++    return g_downloadActive.load();
++}
++
++SKR_API void skr_cef_emit_event(const char* event, void* /*args*/)
++{
++    EmitToAllBrowsers(event, nullptr);
++}
++
++SKR_API void skr_cef_emit_event_str(const char* event, const char* arg)
++{
++    EmitToAllBrowsers(event, arg);
++}
++
++bool SkrDispatchLocalEvent(int browserId, const std::string& frameUrl, const std::string& name, const std::string* payload)
++{
++    std::vector<SkrEventCb> handlers;
++    {
++        std::lock_guard<std::mutex> lk(g_eventMtx);
++        auto page = g_localPages.find(browserId);
++        if (page == g_localPages.end() || LocalPageUrl(frameUrl) != page->second)
++            return false;
++        if (payload && payload->size() > 4096) return false;
++        auto it = g_eventHandlers.find(name);
++        if (it == g_eventHandlers.end() || it->second.empty())
++            return false;
++        handlers = it->second;
++    }
++
++    // Called on the CEF UI thread; SKR handlers expect the game thread.
++    // The payload is copied so it outlives this call.
++    const bool hasPayload = payload != nullptr;
++    std::string data = hasPayload ? *payload : std::string();
++    auto run = [name, handlers, hasPayload, data]() {
++        for (auto cb : handlers)
++            cb(name.c_str(), hasPayload ? const_cast<char*>(data.c_str()) : nullptr);
++    };
++    Gta* gta = runtime ? runtime->GetGta() : nullptr;
++    if (!gta) return false;
++    gta->PostToMainThread(run);
++    LOG_INFO("[SKR] JS event dispatched to SKR: {}", name);
++    return true;
++}
++
++SKR_API void skr_cef_subscribe(const char* event, void* callback)
++{
++    if (!event || !callback) return;
++    std::lock_guard<std::mutex> lk(g_eventMtx);
++    auto& callbacks = g_eventHandlers[event];
++    auto cb = reinterpret_cast<SkrEventCb>(callback);
++    if (std::find(callbacks.begin(), callbacks.end(), cb) == callbacks.end())
++        callbacks.push_back(cb);
++    LOG_DEBUG("[SKR] subscribe: {}", event);
++}
++
++SKR_API void* skr_cef_create_list()
++{
++    // CefListValue::Create returns a ref-counted object.
++    // For the local API we return nullptr; the lobby doesn't need
++    // CefListValue readers yet (Phase 2 scope).
++    return nullptr;
++}
++
++SKR_API void skr_cef_on_browser_ready(uint32_t /*id*/, void* /*callback*/)
++{
++    // Stub — browser readiness is polled via skr_cef_browser_ready.
++}
++
++SKR_API void skr_cef_pump_render()
++{
++    auto& rm = RenderManager::Instance();
++
++    if (!rm.GetDevice())
++        rm.PollD3D();
++
++    if (rm.OnPresent)
++        rm.OnPresent();
++
++    static bool loggedOnce = false;
++    if (!loggedOnce) {
++        loggedOnce = true;
++        auto* bm = GetBrowser();
++        LOG_INFO("[SKR_PUMP] First pump: device={}, browserMgr={}, force_draw={}",
++                 (void*)rm.GetDevice(), (void*)bm,
++                 runtime ? runtime->IsForceDrawEnabled() : false);
++    }
++}
++
++static void ApplyZoomOnUiThread(int id, double level)
++{
++    auto* bm = GetBrowser();
++    auto* inst = bm ? bm->GetBrowserInstance(id) : nullptr;
++    if (!inst || !inst->browser || !inst->browser->IsValid())
++        return;
++    auto host = inst->browser->GetHost();
++    if (host && std::abs(host->GetZoomLevel() - level) > 0.01)
++    {
++        host->SetZoomLevel(level);
++        LOG_INFO("[SKR] browser {} zoom level set to {:.3f}", id, level);
++    }
++}
++
++// factor 1.0 = 100%. Chromium may reset zoom on navigation, so callers re-apply it periodically.
++SKR_API void skr_cef_set_zoom(uint32_t id, double factor)
++{
++    if (!std::isfinite(factor) || factor <= 0.0) return;
++    const double level = std::log(factor) / std::log(1.2);
++    CefPostTask(TID_UI, base::BindOnce(&ApplyZoomOnUiThread, static_cast<int>(id), level));
++}
++
++SKR_API void skr_cef_set_force_draw(bool enabled)
++{
++    if (runtime)
++        runtime->SetForceDrawEnabled(enabled);
++}
++
++SKR_API void skr_cef_get_render_diag(SkrRenderDiag* out)
++{
++    if (!out) return;
++    memset(out, 0, sizeof(*out));
++
++    auto& rm = RenderManager::Instance();
++    out->has_device     = rm.GetDevice() != nullptr;
++    out->has_on_present = static_cast<bool>(rm.OnPresent);
++    out->force_draw     = runtime ? runtime->IsForceDrawEnabled() : false;
++
++    auto* bm = GetBrowser();
++    if (!bm) return;
++
++    out->draw_enabled = !bm->ShouldSkipBrowserRendering();
++    out->hwnd_found   = runtime && runtime->GetGta() && runtime->GetGta()->GetHwnd() != nullptr;
++
++    // Walk browsers
++    for (auto& [id, inst] : bm->GetBrowsersMap()) {
++        if (!inst) continue;
++        out->browser_count++;
++        if (inst->visible) {
++            out->visible_count++;
++            if (out->visible_count == 1) {
++                out->view_has_device  = inst->view.GetTexture() != nullptr || inst->view.HasDevice();
++                out->view_has_texture = inst->view.GetTexture() != nullptr;
++            }
++        }
++        if (bm->HasPendingPaint(id))
++            out->pending_count++;
++    }
++}
+diff --git a/src/client/core/skr_local_api.h b/src/client/core/skr_local_api.h
+new file mode 100644
+index 0000000..b2fdc82
+--- /dev/null
++++ b/src/client/core/skr_local_api.h
+@@ -0,0 +1,86 @@
++#pragma once
++// SKR Local Browser API — C exports for omp-cef client.dll
++// SKR.Client.dll resolves these via GetProcAddress to drive the lobby
++// browser independently of the SA-MP network layer.
++//
++// BUILD: core/CMakeLists.txt includes this file via CONFIGURE_DEPENDS glob.
++
++#include <cstdint>
++
++#ifdef SKR_LOCAL_API_EXPORTS
++#  define SKR_API extern "C" __declspec(dllexport)
++#else
++#  define SKR_API extern "C" __declspec(dllimport)
++#endif
++
++// Browser management
++SKR_API bool    skr_cef_ready();
++SKR_API void    skr_cef_create_browser(uint32_t id, const char* url, bool hidden, bool focused);
++SKR_API void    skr_cef_destroy_browser(uint32_t id);
++SKR_API void    skr_cef_hide_browser(uint32_t id, bool hide);
++SKR_API void    skr_cef_focus_browser(uint32_t id, bool focus);
++SKR_API bool    skr_cef_browser_exists(uint32_t id);
++SKR_API bool    skr_cef_browser_ready(uint32_t id);
++SKR_API bool    skr_cef_try_focus_browser(uint32_t id);
++SKR_API bool    skr_cef_input_available(uint32_t id);
++SKR_API bool    skr_cef_gta_window_active();
++// True when a visible browser other than `ownId` (e.g. a server's intro) has focus.
++SKR_API bool    skr_cef_foreign_browser_focused(uint32_t ownId);
++// True while server CEF resources are downloading.
++SKR_API bool    skr_cef_resources_pending();
++
++// Event system (local only — does not go through the network)
++SKR_API void    skr_cef_emit_event(const char* event, void* args);
++SKR_API void    skr_cef_subscribe(const char* event, void* callback);
++// Same as skr_cef_emit_event, but delivers `arg` (UTF-8, may be null) to the
++// JS cef.on() handler as its first string argument.
++SKR_API void    skr_cef_emit_event_str(const char* event, const char* arg);
++
++// Compatibility placeholder: returns nullptr. Local event payloads are UTF-8
++// strings, not samp-cef CefListValue instances.
++SKR_API void*   skr_cef_create_list();
++
++// Browser ready callback
++SKR_API void    skr_cef_on_browser_ready(uint32_t id, void* callback);
++
++// Render pipeline pump — called from SKR's EndScene hook when bootstrap
++// hooks failed. Feeds the D3D9 device to RenderManager and fires the
++// render tick so CEF browsers draw to the screen.
++SKR_API void    skr_cef_pump_render();
++
++// Force draw_enabled_ on regardless of window focus / menu state.
++// Call with true before lobby rendering; false when entering game.
++SKR_API void    skr_cef_set_force_draw(bool enabled);
++
++// Page zoom for a browser (1.0 = 100%), applied on the CEF UI thread.
++SKR_API void    skr_cef_set_zoom(uint32_t id, double factor);
++
++// Diagnostic: fill a fixed-size struct with render pipeline state.
++struct SkrRenderDiag {
++    bool has_device;
++    bool has_on_present;
++    bool draw_enabled;
++    bool force_draw;
++    int  browser_count;
++    int  visible_count;
++    int  pending_count;       // browsers with pending paint data
++    bool view_has_device;     // first visible browser's view
++    bool view_has_texture;    // first visible browser's view
++    bool hwnd_found;
++};
++SKR_API void    skr_cef_get_render_diag(SkrRenderDiag* out);
++
++#ifdef __cplusplus
++#include <string>
++// Internal (not exported): delivers a JS cef.emit() to SKR subscribers on the
++// GTA main thread. Only the registered local lobby main frame is accepted.
++// Returns false for an untrusted page or when nobody subscribed to `name`.
++// SKR callbacks receive `payload` (the first JS string argument, or nullptr)
++// as their `void* args` parameter, i.e. a NUL-terminated UTF-8 const char*.
++// Internal: resource download progress (DownloadDialog) for the SKR lobby.
++// state: "start" | "progress" | "done". Forwarded as "skr:lobby:connect:download".
++void SkrNotifyDownload(const char* state, uint64_t received, uint64_t total, size_t files);
++// Internal: true while the SKR lobby page exists (it shows download progress itself).
++bool SkrLobbyPageActive();
++bool SkrDispatchLocalEvent(int browserId, const std::string& frameUrl, const std::string& name, const std::string* payload);
++#endif
+diff --git a/src/client/core/std_rotate_stub.cpp b/src/client/core/std_rotate_stub.cpp
+new file mode 100644
+index 0000000..6f39b9a
+--- /dev/null
++++ b/src/client/core/std_rotate_stub.cpp
+@@ -0,0 +1,28 @@
++// ABI compatibility stub: OpenAL (vcpkg) references __std_rotate from a newer
++// MSVC STL than the one shipping with this toolset. Provide a minimal byte-
++// level rotate so the linker is satisfied.
++// Symbol decoration ___std_rotate@12 → __stdcall, 3 pointer args (x86).
++
++#include <cstring>
++
++extern "C" void* __stdcall __std_rotate(void* _First, void* _Mid, void* _Last)
++{
++    auto* first = static_cast<unsigned char*>(_First);
++    auto* mid   = static_cast<unsigned char*>(_Mid);
++    auto* last  = static_cast<unsigned char*>(_Last);
++
++    if (first == mid)  return last;
++    if (mid   == last) return first;
++
++    auto* ret = first + (last - mid);
++
++    // Triple-reverse algorithm
++    auto reverse = [](unsigned char* a, unsigned char* b) {
++        while (a < --b) { unsigned char t = *a; *a++ = *b; *b = t; }
++    };
++    reverse(first, mid);
++    reverse(mid, last);
++    reverse(first, last);
++
++    return ret;
++}

@@ -13,9 +13,18 @@ void CefBridge::Initialize(InternalApi* api) {
     state_ = BridgeState::Ready;
 }
 
+void CefBridge::InitializeLocal(InternalApi* api, EmitEventStrFn emitStr) {
+    if (!api || state_ != BridgeState::Uninitialized) return;
+    Initialize(api);
+    emitStr_ = emitStr;
+    localMode_ = true;
+}
+
 void CefBridge::Shutdown() {
     state_ = BridgeState::ShuttingDown;
     api_ = nullptr;
+    emitStr_ = nullptr;
+    localMode_ = false;
     state_ = BridgeState::Uninitialized;
 }
 
@@ -52,6 +61,17 @@ void CefBridge::EmitEvent(const char* event, CefListValue* args) {
 void CefBridge::Subscribe(const char* event, EventHandler callback) {
     if (!IsReady() || !event) return;
     api_->cef_subscribe(event, reinterpret_cast<void*>(callback));
+}
+
+bool CefBridge::EmitEventString(const char* event, const char* arg) {
+    if (!IsReady() || !event || !emitStr_) return false;
+    emitStr_(event, arg);
+    return true;
+}
+
+const char* CefBridge::LocalPayload(CefListValue* args) const {
+    if (!localMode_) return nullptr;
+    return static_cast<const char*>(args);
 }
 
 bool CefBridge::IsCefReady() const {
