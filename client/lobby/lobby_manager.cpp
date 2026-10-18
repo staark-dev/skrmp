@@ -8,6 +8,7 @@
 #include "cef-local/cef_local_loader.h"
 #include "intro/urban_intro.h"
 #include "samp-loader/samp_loader.h"
+#include "escape-menu/escape_menu.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -949,6 +950,12 @@ void OnGameplayConfirmed(const char* reason) {
     g_gameInputReleased.store(false);
     g_connecting.store(false);
     Log("connect -> %s; lobby browser destroyed and game input restored", reason);
+
+    // On SKR servers, replace the native GTA pause menu with our custom ESC menu.
+    if (IsSkrSession()) {
+        skr::escape_menu::Enable();
+        Log("escape menu enabled (SKR server)");
+    }
 }
 
 void OnEndSceneAfterIntro(IDirect3DDevice9* device) {

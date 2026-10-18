@@ -9,6 +9,11 @@
 #include <mutex>
 #include <string>
 
+using SetEscapeMenuModeFn = void(__cdecl*)(int);
+using SetCustomMenuOpenFn = void(__cdecl*)(bool);
+static SetEscapeMenuModeFn g_setEscapeMenuMode = nullptr;
+static SetCustomMenuOpenFn g_setCustomMenuOpen = nullptr;
+
 namespace skr::cef_local {
 
 namespace {
@@ -123,6 +128,15 @@ bool TryLoad() {
         GetProcAddress(mod, "skr_cef_emit_event_str"));
     if (!emitStr) Log("skr_cef_emit_event_str missing — C++ -> JS events carry no args");
 
+    // Optional: escape menu mode control.
+    g_setEscapeMenuMode = reinterpret_cast<SetEscapeMenuModeFn>(
+        GetProcAddress(mod, "skr_cef_set_escape_menu_mode"));
+    if (!g_setEscapeMenuMode) Log("skr_cef_set_escape_menu_mode missing — ESC menu hook unavailable");
+
+    g_setCustomMenuOpen = reinterpret_cast<SetCustomMenuOpenFn>(
+        GetProcAddress(mod, "skr_cef_set_custom_menu_open"));
+    if (!g_setCustomMenuOpen) Log("skr_cef_set_custom_menu_open missing");
+
     // Wire it up to CefBridge — exactly as samp-cef would via cef_initialize().
     skr::cef::CefBridge::Instance().InitializeLocal(&g_api, emitStr);
     g_loaded.store(true);
@@ -132,6 +146,14 @@ bool TryLoad() {
 
 bool IsLoaded() {
     return g_loaded.load();
+}
+
+void SetEscapeMenuMode(int mode) {
+    if (g_setEscapeMenuMode) g_setEscapeMenuMode(mode);
+}
+
+void SetCustomMenuOpen(bool open) {
+    if (g_setCustomMenuOpen) g_setCustomMenuOpen(open);
 }
 
 } // namespace skr::cef_local

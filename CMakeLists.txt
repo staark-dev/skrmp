@@ -72,6 +72,7 @@ add_library(SKRClient SHARED
   client/samp-hooks/samp_hooks.cpp
   client/game-state/game_state.cpp
   client/gta-fixes/gta_fixes.cpp
+  client/escape-menu/escape_menu.cpp
 )
 set_target_properties(SKRClient PROPERTIES
   OUTPUT_NAME "SKR.Client" PREFIX ""
@@ -96,6 +97,7 @@ set(SKR_LOBBY_WEB_FILES
 # Always stage web assets, including builds where no C++ file changed.
 add_custom_target(SKRLobbyAssets
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/assets"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SKRClient>/SKR/escape_menu"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${SKR_LOBBY_WEB_FILES}
           "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/"
@@ -103,6 +105,9 @@ add_custom_target(SKRLobbyAssets
           "${CMAKE_SOURCE_DIR}/client/lobby/assets/background.png"
           "${CMAKE_SOURCE_DIR}/client/lobby/assets/logo.png"
           "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/assets/"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_SOURCE_DIR}/client/hud/escape_menu/escape_menu.html"
+          "$<TARGET_FILE_DIR:SKRClient>/SKR/escape_menu/"
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   VERBATIM)
 add_dependencies(SKRClient SKRLobbyAssets)

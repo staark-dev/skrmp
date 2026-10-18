@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ro"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SKR Menu</title>
+<style>
+:root {
+  --panel: rgba(18,23,30,.88);
+  --panel-border: rgba(210,225,233,.15);
+  --text: #f0f4f7;
+  --secondary: #a7b4c0;
+  --muted: #84939f;
+  --accent: #d4b475;
+  --accent-hover: #e0c48a;
+  --danger: #e85b68;
+  --danger-hover: #f07078;
+  --btn-bg: rgba(255,255,255,.06);
+  --btn-hover: rgba(255,255,255,.12);
+  --btn-border: rgba(210,225,233,.18);
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; }
+body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; display:flex; align-items:center; justify-content:center; }
+
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 150ms ease-out;
+}
+.overlay.is-visible {
+  opacity: 1; pointer-events: auto;
+}
+
+.menu {
+  width: 340px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 32px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  transform: scale(.96) translateY(8px);
+  transition: transform 180ms ease-out, opacity 180ms ease-out;
+  opacity: 0;
+}
+.overlay.is-visible .menu {
+  transform: scale(1) translateY(0);
+  opacity: 1;
+}
+
+.menu__logo {
+  font-family: 'Bahnschrift Condensed', 'Bahnschrift', 'Arial Narrow', sans-serif;
+  font-stretch: condensed;
+  font-size: 42px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 2px;
+  line-height: 1;
+  margin-bottom: 4px;
+  user-select: none;
+}
+
+.menu__subtitle {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  user-select: none;
+}
+
+.menu__btn {
+  width: 100%;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
+  outline: none;
+  user-select: none;
+}
+.menu__btn:hover {
+  background: var(--btn-hover);
+  border-color: rgba(210,225,233,.28);
+}
+.menu__btn:active {
+  background: rgba(255,255,255,.16);
+}
+.menu__btn svg {
+  width: 18px; height: 18px;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+
+.menu__btn--primary {
+  background: rgba(212,180,117,.12);
+  border-color: rgba(212,180,117,.25);
+  color: var(--accent);
+}
+.menu__btn--primary:hover {
+  background: rgba(212,180,117,.22);
+  border-color: rgba(212,180,117,.4);
+  color: var(--accent-hover);
+}
+
+.menu__btn--danger {
+  color: var(--danger);
+  border-color: rgba(232,91,104,.2);
+}
+.menu__btn--danger:hover {
+  background: rgba(232,91,104,.12);
+  border-color: rgba(232,91,104,.35);
+  color: var(--danger-hover);
+}
+
+.menu__sep {
+  width: 100%;
+  height: 1px;
+  background: var(--panel-border);
+  margin: 8px 0;
+}
+
+.menu__version {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 8px;
+  user-select: none;
+}
+</style>
+</head>
+<body>
+
+<div class="overlay" id="overlay">
+  <div class="menu">
+    <div class="menu__logo">SKR</div>
+    <div class="menu__subtitle">Roleplay</div>
+
+    <button class="menu__btn menu__btn--primary" id="btn-resume">
+      <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+      Continua
+    </button>
+
+    <button class="menu__btn" id="btn-settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Setari
+    </button>
+
+    <div class="menu__sep"></div>
+
+    <button class="menu__btn menu__btn--danger" id="btn-disconnect">
+      <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Deconecteaza-te
+    </button>
+
+    <div class="menu__version">SKR Client v0.1.0</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var overlay = document.getElementById('overlay');
+
+  // omp-cef emits "cef:escape_menu" with a boolean when ESC is pressed in Custom mode.
+  if (window.cef && typeof cef.on === 'function') {
+    cef.on('cef:escape_menu', function(visible) {
+      if (visible) {
+        overlay.classList.add('is-visible');
+      } else {
+        overlay.classList.remove('is-visible');
+      }
+    });
+  }
+
+  function resume() {
+    overlay.classList.remove('is-visible');
+    if (window.cef && typeof cef.emit === 'function') {
+      cef.emit('skr:esc:resume');
+    }
+  }
+
+  document.getElementById('btn-resume').addEventListener('click', resume);
+
+  document.getElementById('btn-settings').addEventListener('click', function() {
+    if (window.cef && typeof cef.emit === 'function') {
+      cef.emit('skr:esc:settings');
+    }
+  });
+
+  document.getElementById('btn-disconnect').addEventListener('click', function() {
+    if (window.cef && typeof cef.emit === 'function') {
+      cef.emit('skr:esc:disconnect');
+    }
+  });
+})();
+</script>
+</body></html>

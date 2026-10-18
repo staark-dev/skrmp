@@ -70,6 +70,7 @@ namespace BrowserId {
     constexpr uint32_t kHud         = 101;
     constexpr uint32_t kSettings    = 102;
     constexpr uint32_t kAuth        = 103;
+    constexpr uint32_t kEscMenu     = 104;
 }
 
 } // namespace skr::cef

@@ -2,6 +2,7 @@
 #include "protocol/client_state.h"
 #include "protocol/session_info.h"
 #include "lobby/lobby_manager.h"
+#include "escape-menu/escape_menu.h"
 #include <windows.h>
 #include <cmath>
 #include <cstdint>
@@ -326,6 +327,7 @@ void Tick() {
     // ticking after SA-MP proxies the D3D device; the lobby decides when to
     // hand over based on the server's session info (RPC 241).
     skr::lobby::OnInWorldTick();
+    skr::escape_menu::Tick();
 
     // RPC 240 is SKR-private: never sent to servers without the SKR Gate.
     if (!skr::lobby::IsSkrSession()) { LogStage(14, "non-SKR server: rpc 240 disabled"); return; }
