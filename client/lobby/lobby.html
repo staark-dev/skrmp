@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SKR — Meniu în joc</title>
+<link rel="stylesheet" href="lobby.css">
+<script src="lobby.js" defer></script>
+</head>
+<!--
+  SKR Lobby — Phase 1. Design ported from the launcher-ui session's
+  ingame-menu preview. Two modes exist in the markup:
+    - "lobby" (pre-connect):  Servere / Setări / Ieșire       (active in Phase 1)
+    - "pause" (in-game):      Continuă / Hartă / Setări / Deconectare / Ieșire
+  Phase 1 defaults to lobby mode. Pause mode is a stub — the DOM is here so
+  Phase 2's native adapter can call window.skrLobby.setMode('pause').
+-->
+<body class="in-game">
+<div class="shell">
+  <header class="header">
+    <a class="brand" href="#" id="brandLink">
+      <strong>SKR</strong>
+      <span>ROLEPLAY<br><small>SAN ANDREAS</small></span>
+    </a>
+    <nav id="navigation" aria-label="Meniul jocului"></nav>
+    <span class="mode-label" id="modeLabel">ÎNAINTE DE CONECTARE</span>
+  </header>
+
+  <main>
+    <!-- Settings -->
+    <section class="page" data-page="settings" hidden>
+      <div class="page-heading">
+        <div>
+          <span class="eyebrow">CONFIGUREAZĂ EXPERIENȚA</span>
+          <h1>Setări</h1>
+        </div>
+        <p>Jocul tău. În ritmul tău.</p>
+      </div>
+      <div class="settings-layout">
+        <aside class="categories" aria-label="Categorii setări">
+          <button data-tab="graphics"  class="category active"><span class="category__number">01</span><span>Grafică<small>Imagine și afișare</small></span><i>›</i></button>
+          <button data-tab="audio"     class="category"><span class="category__number">02</span><span>Audio<small>Sunet și radio</small></span><i>›</i></button>
+          <button data-tab="controls"  class="category"><span class="category__number">03</span><span>Controale<small>Tastatură și mouse</small></span><i>›</i></button>
+          <button data-tab="interface" class="category"><span class="category__number">04</span><span>Interfață SKR<small>HUD, chat și radar</small></span><i>›</i></button>
+          <div class="category-note">SETĂRI JOC<span>Phase 1: valorile se aplică doar la nivelul UI. Persistența reală vine în Phase 2.</span></div>
+        </aside>
+        <div class="settings-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow" id="tabEyebrow">AFIȘARE ȘI PERFORMANȚĂ</span>
+              <h2 id="tabTitle">Grafică</h2>
+            </div>
+            <span class="panel-index" id="tabIndex">01 / 04</span>
+          </div>
+          <div id="settingsFields"></div>
+          <div class="panel-actions">
+            <span class="change-status" id="changeStatus" role="status">Nicio modificare</span>
+            <button class="button button--secondary" id="resetChanges">Anulează</button>
+            <button class="button button--gold" id="applyChanges" disabled>Aplică modificările <span>↗</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Servers (pre-connect mode landing page) -->
+    <section class="page" data-page="servers" hidden>
+      <div class="page-heading">
+        <div>
+          <span class="eyebrow">ALEGE UNDE ÎNCEPE POVESTEA</span>
+          <h1>Servere</h1>
+        </div>
+        <p>SKR / multiplayer</p>
+      </div>
+      <div class="server-intro">
+        <span class="eyebrow">SAN ANDREAS. O ALTĂ PERSPECTIVĂ.</span>
+        <h2>ORAȘUL TE<br><em>AȘTEAPTĂ.</em></h2>
+        <p>Alege un server pentru a continua.</p>
+      </div>
+      <div class="server-list">
+        <article class="server">
+          <div class="server-mark">SKR</div>
+          <div>
+            <h3>SKR Roleplay — Public</h3>
+            <p>127.0.0.1:7777 · date demonstrative</p>
+          </div>
+          <span class="server-state">Status indisponibil</span>
+          <button class="button button--gold" data-action="connect" data-addr="127.0.0.1:7777">Conectează ↗</button>
+        </article>
+        <article class="server">
+          <div class="server-mark">DEV</div>
+          <div>
+            <h3>SKR Roleplay — Dev</h3>
+            <p>127.0.0.1:7778 · date demonstrative</p>
+          </div>
+          <span class="server-state">Status indisponibil</span>
+          <button class="button button--secondary" data-action="connect" data-addr="127.0.0.1:7778">Conectează ↗</button>
+        </article>
+      </div>
+    </section>
+
+    <!-- Map (pause mode stub) -->
+    <section class="page" data-page="map" hidden>
+      <div class="page-heading">
+        <div>
+          <span class="eyebrow">ORIENTARE</span>
+          <h1>Hartă</h1>
+        </div>
+        <p>San Andreas</p>
+      </div>
+      <div class="map-placeholder">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><path d="m5 15 18-8 18 8 18-8v42l-18 8-18-8-18 8Zm18-8v42m18-34v42"/></svg>
+        <h2>Harta jocului</h2>
+        <p>Aici se deschide harta reală GTA prin adaptorul clientului.</p>
+        <span>Phase 1: harta nu este conectată.</span>
+      </div>
+    </section>
+
+    <!-- Resume (pause mode) -->
+    <section class="page resume" data-page="resume" hidden>
+      <span class="eyebrow">SKR ROLEPLAY</span>
+      <h1>ÎNAPOI ÎN<br><em>POVESTE.</em></h1>
+      <p>În joc, „Continuă” închide meniul și restabilește controlul.</p>
+      <button class="button button--gold" data-action="open-settings">Înapoi la setări</button>
+    </section>
+  </main>
+
+  <footer>
+    <span><kbd>ESC</kbd> <span id="escapeLabel">Ieși din joc</span></span>
+    <span>SKR CLIENT <b>PROTOTIP · PHASE 1</b></span>
+  </footer>
+</div>
+
+<div class="modal-backdrop" id="confirmModal" hidden>
+  <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <span class="eyebrow">CONFIRMARE</span>
+    <h2 id="modalTitle"></h2>
+    <p id="modalText"></p>
+    <div>
+      <button class="button button--secondary" id="cancelModal">Anulează</button>
+      <button class="button button--gold" id="confirmModalButton">Confirmă</button>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast" hidden role="status"></div>
+</body>
+</html>

@@ -60,6 +60,9 @@ add_library(SKRClient SHARED
   client/render-d3d9/chat_box.cpp
   client/cef-bridge/cef_bridge.cpp
   client/cef-bridge/cef_plugin_exports.cpp
+  client/lobby/lobby_manager.cpp
+  client/lobby/menu_patch.cpp
+  client/lobby/settings_io.cpp
   client/compatibility/compat_profile.cpp
   client/transport/auth_client.cpp
   client/samp-hooks/samp_hooks.cpp
@@ -73,9 +76,33 @@ target_include_directories(SKRClient PRIVATE
   ${CMAKE_SOURCE_DIR}/shared
   ${CMAKE_SOURCE_DIR}/deps/miniaudio-0.11.23
 )
-target_link_libraries(SKRClient PRIVATE d3d9 version bcrypt windowscodecs ole32 SKRShared)
+target_link_libraries(SKRClient PRIVATE d3d9 version bcrypt windowscodecs ole32 shell32 SKRShared)
 # Third-party single-header implementation; keep its warnings out of the /W4 build.
 set_source_files_properties(client/intro/miniaudio_impl.cpp PROPERTIES COMPILE_OPTIONS "/W0")
+
+# --- Stage lobby web assets next to SKR.Client.dll under SKR\lobby\ ---
+# samp-cef loads the lobby via file:///<dll_dir>/SKR/lobby/lobby.html, so the
+# HTML/CSS/JS/background must sit beside the DLL at run time.
+set(SKR_LOBBY_WEB_FILES
+  client/lobby/lobby.html
+  client/lobby/lobby.css
+  client/lobby/lobby.js
+)
+foreach(f ${SKR_LOBBY_WEB_FILES})
+  get_filename_component(_name "${f}" NAME)
+  add_custom_command(TARGET SKRClient POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/${f}"
+            "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/${_name}"
+    VERBATIM)
+endforeach()
+add_custom_command(TARGET SKRClient POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/assets"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_SOURCE_DIR}/client/lobby/assets/background.png"
+          "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/assets/background.png"
+  VERBATIM)
 
 # --- Intro timeline/transport tests (no GTA, no device) ---
 add_executable(SKRIntroTests

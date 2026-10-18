@@ -1,5 +1,6 @@
 #include "render-d3d9/d3d9_hook.h"
 #include "intro/urban_intro.h"
+#include "lobby/lobby_manager.h"
 #include <atomic>
 #include <algorithm>
 
@@ -108,29 +109,40 @@ HRESULT WINAPI HookedEndScene(IDirect3DDevice9* device) {
         if (!introActive) QueryPerformanceCounter(&g_transLastTime);
     }
 
-    // Transition overlay: covers SA-MP's rendering until player is in-game
-    if (!introActive && g_transState != TransitionState::Done) {
-        LARGE_INTEGER now;
-        QueryPerformanceCounter(&now);
-        float dt = static_cast<float>(now.QuadPart - g_transLastTime.QuadPart)
-                   / static_cast<float>(g_freq.QuadPart);
-        g_transLastTime = now;
-        if (dt > 0.1f) dt = 0.1f;
+    // Lobby ENABLED (SKR\lobby.on present): Phase 1 lobby path draws its own
+    // cover and runs the CEF tick, replacing the old transition overlay.
+    //
+    // Lobby DISABLED (default): behavior is identical to pre-Phase-1 — the
+    // Covering → FadingOut → Done transition hides SA-MP's connect frames
+    // and then yields to vanilla GTA. Restored verbatim from 35e30e1 so
+    // "lobby off" means the exact pre-lobby experience.
+    if (!introActive) {
+        if (skr::lobby::IsEnabled()) {
+            skr::lobby::OnEndSceneAfterIntro(device);
+            g_transState = TransitionState::Done;
+        } else if (g_transState != TransitionState::Done) {
+            LARGE_INTEGER now;
+            QueryPerformanceCounter(&now);
+            float dt = static_cast<float>(now.QuadPart - g_transLastTime.QuadPart)
+                       / static_cast<float>(g_freq.QuadPart);
+            g_transLastTime = now;
+            if (dt > 0.1f) dt = 0.1f;
 
-        if (g_transState == TransitionState::Covering) {
-            DrawFullscreenQuad(device, 0xFF000000);
-            if (IsPlayerInGame())
-                g_transState = TransitionState::FadingOut;
-        } else if (g_transState == TransitionState::FadingOut) {
-            g_transFadeElapsed += dt;
-            float alpha = 1.0f - (g_transFadeElapsed / kTransitionFadeSec);
-            alpha = (std::max)(0.0f, (std::min)(1.0f, alpha));
-            if (alpha > 0.001f) {
-                DWORD a = static_cast<DWORD>(alpha * 255.0f);
-                DrawFullscreenQuad(device, (a << 24) | 0x000000);
+            if (g_transState == TransitionState::Covering) {
+                DrawFullscreenQuad(device, 0xFF000000);
+                if (IsPlayerInGame())
+                    g_transState = TransitionState::FadingOut;
+            } else if (g_transState == TransitionState::FadingOut) {
+                g_transFadeElapsed += dt;
+                float alpha = 1.0f - (g_transFadeElapsed / kTransitionFadeSec);
+                alpha = (std::max)(0.0f, (std::min)(1.0f, alpha));
+                if (alpha > 0.001f) {
+                    DWORD a = static_cast<DWORD>(alpha * 255.0f);
+                    DrawFullscreenQuad(device, (a << 24) | 0x000000);
+                }
+                if (g_transFadeElapsed >= kTransitionFadeSec)
+                    g_transState = TransitionState::Done;
             }
-            if (g_transFadeElapsed >= kTransitionFadeSec)
-                g_transState = TransitionState::Done;
         }
     }
 
