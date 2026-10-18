@@ -31,7 +31,9 @@ const char* LaunchResultToString(LaunchResult r);
 
 // Launches GTA SA in suspended state, injects SKR.Client.dll, then resumes.
 // The DLL is responsible for connecting to the open.mp server.
-LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut);
+// On success, hProcessOut receives an open handle the caller must CloseHandle.
+LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
+                        HANDLE& hProcessOut);
 
 // Injects a DLL into a target process using CreateRemoteThread + LoadLibraryW.
 // Returns the remote HMODULE, or nullptr on failure.

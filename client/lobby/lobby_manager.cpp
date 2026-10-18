@@ -775,18 +775,20 @@ DIGetStateFn g_origDIGetState = nullptr;
 // sets gGameState to 8 (initialization_flow.md §4.3); from then on the game
 // gets its devices back. Checked here because SKR's EndScene hook stops being
 // called once SA-MP installs its device proxy.
-bool LobbyOwnsInput() {
+bool OverlayOwnsInput() {
     constexpr uintptr_t kGtaGameState = 0x00C8D4C0;   // plugin-sdk CGame.cpp:18
-    return g_gameInputReleased.load() && *reinterpret_cast<volatile int*>(kGtaGameState) <= 7;
+    if (g_gameInputReleased.load() && *reinterpret_cast<volatile int*>(kGtaGameState) <= 7)
+        return true;
+    return skr::escape_menu::IsOpen();
 }
 
 HRESULT WINAPI HookedDIAcquire(IDirectInputDevice8A* dev) {
-    if (LobbyOwnsInput()) return DI_OK;
+    if (OverlayOwnsInput()) return DI_OK;
     return g_origDIAcquire(dev);
 }
 
 HRESULT WINAPI HookedDIGetDeviceState(IDirectInputDevice8A* dev, DWORD size, LPVOID data) {
-    if (LobbyOwnsInput()) {
+    if (OverlayOwnsInput()) {
         dev->Unacquire();
         if (data) memset(data, 0, size);
         return DI_OK;

@@ -14,6 +14,7 @@
   --btn-bg: rgba(255,255,255,.06);
   --btn-hover: rgba(255,255,255,.12);
   --btn-border: rgba(210,225,233,.18);
+  --input-bg: rgba(255,255,255,.04);
 }
 *, *::before, *::after { box-sizing: border-box; }
 html, body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; }
@@ -31,15 +32,12 @@ body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-f
 }
 
 .menu {
-  width: 340px;
+  width: 420px; max-height: 85vh;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 12px;
-  padding: 32px 28px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  padding: 24px;
+  display: flex; flex-direction: column;
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   transform: scale(.96) translateY(8px);
@@ -51,59 +49,80 @@ body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-f
   opacity: 1;
 }
 
+/* ── Header ─────────────────────────────────────── */
+.menu__header {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 16px;
+}
 .menu__logo {
   font-family: 'Bahnschrift Condensed', 'Bahnschrift', 'Arial Narrow', sans-serif;
   font-stretch: condensed;
-  font-size: 42px;
-  font-weight: 700;
+  font-size: 32px; font-weight: 700;
   color: var(--accent);
-  letter-spacing: 2px;
-  line-height: 1;
-  margin-bottom: 4px;
+  letter-spacing: 2px; line-height: 1;
   user-select: none;
 }
-
 .menu__subtitle {
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 10px; font-weight: 500;
   color: var(--muted);
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  margin-bottom: 20px;
+  letter-spacing: 3px; text-transform: uppercase;
   user-select: none;
 }
 
+/* ── Tab bar ────────────────────────────────────── */
+.tab-bar {
+  display: flex; gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--panel-border);
+  padding-bottom: 12px;
+}
+.tab-btn {
+  flex: 1;
+  height: 36px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+  outline: none; user-select: none;
+}
+.tab-btn:hover { background: var(--btn-bg); color: var(--secondary); }
+.tab-btn.active {
+  background: var(--btn-bg);
+  border-color: var(--btn-border);
+  color: var(--text);
+}
+.tab-btn svg {
+  width: 16px; height: 16px;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* ── Tab panels ─────────────────────────────────── */
+.tab-panel { display: none; flex: 1; overflow-y: auto; min-height: 0; }
+.tab-panel.active { display: flex; flex-direction: column; gap: 8px; }
+
+/* ── Buttons (shared) ───────────────────────────── */
 .menu__btn {
-  width: 100%;
-  height: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
+  width: 100%; height: 46px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
   background: var(--btn-bg);
   border: 1px solid var(--btn-border);
   border-radius: 8px;
   color: var(--text);
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 600;
+  font-family: inherit; font-size: 15px; font-weight: 600;
   cursor: pointer;
   transition: background 120ms, border-color 120ms, color 120ms;
-  outline: none;
-  user-select: none;
+  outline: none; user-select: none;
 }
-.menu__btn:hover {
-  background: var(--btn-hover);
-  border-color: rgba(210,225,233,.28);
-}
-.menu__btn:active {
-  background: rgba(255,255,255,.16);
-}
+.menu__btn:hover { background: var(--btn-hover); border-color: rgba(210,225,233,.28); }
+.menu__btn:active { background: rgba(255,255,255,.16); }
 .menu__btn svg {
   width: 18px; height: 18px;
   fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
-
 .menu__btn--primary {
   background: rgba(212,180,117,.12);
   border-color: rgba(212,180,117,.25);
@@ -114,7 +133,6 @@ body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-f
   border-color: rgba(212,180,117,.4);
   color: var(--accent-hover);
 }
-
 .menu__btn--danger {
   color: var(--danger);
   border-color: rgba(232,91,104,.2);
@@ -125,18 +143,136 @@ body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-f
   color: var(--danger-hover);
 }
 
-.menu__sep {
-  width: 100%;
-  height: 1px;
-  background: var(--panel-border);
-  margin: 8px 0;
+.menu__sep { width: 100%; height: 1px; background: var(--panel-border); margin: 8px 0; }
+.menu__version { font-size: 11px; color: var(--muted); margin-top: 8px; user-select: none; text-align: center; }
+
+/* ── Settings panel ─────────────────────────────── */
+.setting-group {
+  margin-bottom: 4px;
+}
+.setting-group__title {
+  font-size: 10px; font-weight: 700; color: var(--muted);
+  letter-spacing: 2px; text-transform: uppercase;
+  margin-bottom: 8px; user-select: none;
+}
+.setting-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(210,225,233,.06);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-label { font-size: 13px; font-weight: 500; color: var(--secondary); }
+.setting-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.setting-select, .setting-range {
+  background: var(--input-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit; font-size: 13px;
+  height: 32px; padding: 0 10px;
+  outline: none;
+}
+.setting-select:focus { border-color: var(--accent); }
+.setting-select option { background: #1a1f28; color: var(--text); }
+
+.range-wrap {
+  display: flex; align-items: center; gap: 8px;
+}
+.range-wrap input[type="range"] {
+  width: 100px;
+  accent-color: var(--accent);
+}
+.range-wrap output {
+  font-size: 13px; font-weight: 600; color: var(--accent);
+  min-width: 36px; text-align: right;
 }
 
-.menu__version {
-  font-size: 11px;
-  color: var(--muted);
-  margin-top: 8px;
-  user-select: none;
+.setting-toggle {
+  position: relative; display: inline-block;
+  width: 40px; height: 22px;
+}
+.setting-toggle input {
+  opacity: 0; width: 0; height: 0;
+}
+.setting-toggle .slider {
+  position: absolute; cursor: pointer; inset: 0;
+  background: rgba(255,255,255,.1);
+  border-radius: 11px;
+  transition: background 200ms;
+}
+.setting-toggle .slider::before {
+  content: '';
+  position: absolute; left: 3px; bottom: 3px;
+  width: 16px; height: 16px;
+  background: var(--secondary);
+  border-radius: 50%;
+  transition: transform 200ms, background 200ms;
+}
+.setting-toggle input:checked + .slider { background: rgba(212,180,117,.3); }
+.setting-toggle input:checked + .slider::before {
+  transform: translateX(18px);
+  background: var(--accent);
+}
+
+.settings-actions {
+  display: flex; gap: 8px; margin-top: 8px;
+}
+.settings-actions .menu__btn { height: 38px; font-size: 13px; }
+
+/* ── Server list panel ──────────────────────────── */
+.server-status {
+  font-size: 11px; color: var(--muted);
+  letter-spacing: 1px; margin-bottom: 4px; user-select: none;
+}
+.server-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--input-bg);
+  border: 1px solid rgba(210,225,233,.06);
+  border-radius: 8px;
+  cursor: default;
+  transition: background 120ms;
+}
+.server-row:hover { background: var(--btn-bg); }
+.server-mark {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(212,180,117,.1);
+  border-radius: 6px;
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  letter-spacing: 1px; flex-shrink: 0;
+}
+.server-info { flex: 1; min-width: 0; }
+.server-name { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.server-meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.server-players { font-size: 12px; font-weight: 600; color: var(--secondary); white-space: nowrap; }
+.server-connect-btn {
+  height: 30px; padding: 0 12px;
+  background: rgba(212,180,117,.12);
+  border: 1px solid rgba(212,180,117,.25);
+  border-radius: 6px;
+  color: var(--accent);
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+  outline: none; white-space: nowrap;
+}
+.server-connect-btn:hover {
+  background: rgba(212,180,117,.22);
+  border-color: rgba(212,180,117,.4);
+}
+.server-empty {
+  text-align: center; padding: 20px 0;
+  font-size: 13px; color: var(--muted);
+}
+
+.skr-badge {
+  display: inline-block;
+  font-size: 9px; font-weight: 700;
+  padding: 2px 5px; border-radius: 3px;
+  letter-spacing: 1px; vertical-align: middle; margin-left: 6px;
+  background: rgba(212,180,117,.15); color: var(--accent);
 }
 </style>
 </head>
@@ -144,27 +280,110 @@ body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-f
 
 <div class="overlay" id="overlay">
   <div class="menu">
-    <div class="menu__logo">SKR</div>
-    <div class="menu__subtitle">Roleplay</div>
 
-    <button class="menu__btn menu__btn--primary" id="btn-resume">
-      <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
-      Continua
-    </button>
+    <div class="menu__header">
+      <div class="menu__logo">SKR</div>
+      <div class="menu__subtitle">Roleplay</div>
+    </div>
 
-    <button class="menu__btn" id="btn-settings">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      Setari
-    </button>
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="main">
+        <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+        Meniu
+      </button>
+      <button class="tab-btn" data-tab="settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Setari
+      </button>
+      <button class="tab-btn" data-tab="servers">
+        <svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
+        Servere
+      </button>
+    </div>
 
-    <div class="menu__sep"></div>
+    <!-- ── Main tab ─────────────────────────────── -->
+    <div class="tab-panel active" data-panel="main">
+      <button class="menu__btn menu__btn--primary" id="btn-resume">
+        <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+        Continua
+      </button>
 
-    <button class="menu__btn menu__btn--danger" id="btn-disconnect">
-      <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-      Deconecteaza-te
-    </button>
+      <div class="menu__sep"></div>
 
-    <div class="menu__version">SKR Client v0.1.0</div>
+      <button class="menu__btn menu__btn--danger" id="btn-disconnect">
+        <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Deconecteaza-te
+      </button>
+      <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:4px;">Vei fi dus inapoi in lobby.</div>
+
+      <div class="menu__version">SKR Client v0.1.0</div>
+    </div>
+
+    <!-- ── Settings tab ─────────────────────────── -->
+    <div class="tab-panel" data-panel="settings">
+      <div class="setting-group">
+        <div class="setting-group__title">Afisare</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Rezolutie</div>
+            <div class="setting-hint">Se aplica la urmatoarea pornire.</div>
+          </div>
+          <select class="setting-select" id="set-resolution">
+            <option value="auto">Automat</option>
+            <option value="800x600">800 x 600</option>
+            <option value="1024x768">1024 x 768</option>
+            <option value="1280x720">1280 x 720</option>
+            <option value="1366x768">1366 x 768</option>
+            <option value="1600x900">1600 x 900</option>
+            <option value="1920x1080">1920 x 1080</option>
+            <option value="2560x1440">2560 x 1440</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Mod ecran</div>
+            <div class="setting-hint">Fullscreen sau fereastra.</div>
+          </div>
+          <label class="setting-toggle">
+            <input type="checkbox" id="set-windowed">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-group__title">Audio</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Volum</div>
+          </div>
+          <div class="range-wrap">
+            <input type="range" id="set-volume" min="0" max="100" value="80">
+            <output id="set-volume-val">80%</output>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-actions">
+        <button class="menu__btn" id="btn-settings-reset" style="flex:1;">Reseteaza</button>
+        <button class="menu__btn menu__btn--primary" id="btn-settings-save" style="flex:1;">Salveaza</button>
+      </div>
+
+      <div class="menu__sep"></div>
+
+      <button class="menu__btn" id="btn-native-settings" style="font-size:13px;height:38px;">
+        <svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        Setari GTA (nativ)
+      </button>
+      <div id="settings-toast" style="font-size:11px;color:var(--muted);text-align:center;min-height:16px;margin-top:4px;"></div>
+    </div>
+
+    <!-- ── Servers tab ──────────────────────────── -->
+    <div class="tab-panel" data-panel="servers">
+      <div class="server-status" id="server-status">Se incarca lista de servere...</div>
+      <div id="server-list"></div>
+    </div>
+
   </div>
 </div>
 
@@ -172,36 +391,210 @@ body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-f
 (function() {
   var overlay = document.getElementById('overlay');
 
-  // omp-cef emits "cef:escape_menu" with a boolean when ESC is pressed in Custom mode.
-  if (window.cef && typeof cef.on === 'function') {
-    cef.on('cef:escape_menu', function(visible) {
-      if (visible) {
-        overlay.classList.add('is-visible');
-      } else {
-        overlay.classList.remove('is-visible');
-      }
-    });
+  // ── CEF helpers ──────────────────────────────────────────────
+  function cefOn(event, fn) {
+    if (window.cef && typeof cef.on === 'function') cef.on(event, fn);
   }
-
-  function resume() {
-    overlay.classList.remove('is-visible');
+  function cefEmit(event, data) {
     if (window.cef && typeof cef.emit === 'function') {
-      cef.emit('skr:esc:resume');
+      if (data !== undefined) cef.emit(event, data);
+      else cef.emit(event);
+      return true;
     }
+    return false;
   }
+  function html(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-  document.getElementById('btn-resume').addEventListener('click', resume);
-
-  document.getElementById('btn-settings').addEventListener('click', function() {
-    if (window.cef && typeof cef.emit === 'function') {
-      cef.emit('skr:esc:settings');
+  // ── Escape menu visibility ──────────────────────────────────
+  cefOn('cef:escape_menu', function(visible) {
+    if (visible) {
+      overlay.classList.add('is-visible');
+      showTab('main');
+      cefEmit('skr:esc:opened');
+    } else {
+      overlay.classList.remove('is-visible');
+      cefEmit('skr:esc:closed');
     }
   });
 
+  // ── Tab switching ───────────────────────────────────────────
+  function showTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.tab === name);
+    });
+    document.querySelectorAll('.tab-panel').forEach(function(p) {
+      p.classList.toggle('active', p.dataset.panel === name);
+    });
+    if (name === 'settings') requestSettings();
+    if (name === 'servers') requestServers();
+  }
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() { showTab(btn.dataset.tab); });
+  });
+
+  // ── Main tab actions ────────────────────────────────────────
+  document.getElementById('btn-resume').addEventListener('click', function() {
+    overlay.classList.remove('is-visible');
+    cefEmit('skr:esc:resume');
+  });
   document.getElementById('btn-disconnect').addEventListener('click', function() {
-    if (window.cef && typeof cef.emit === 'function') {
-      cef.emit('skr:esc:disconnect');
+    cefEmit('skr:esc:disconnect');
+  });
+  document.getElementById('btn-native-settings').addEventListener('click', function() {
+    overlay.classList.remove('is-visible');
+    cefEmit('skr:esc:native_settings');
+  });
+
+  // ── Settings tab ────────────────────────────────────────────
+  var savedSettings = { resolution: 'auto', windowed: false, volume: 80 };
+  var settingsLoaded = false;
+
+  function requestSettings() {
+    cefEmit('skr:lobby:settings:get');
+  }
+
+  function hydrateSettings(json) {
+    try {
+      var data = typeof json === 'string' ? JSON.parse(json) : (json || {});
+      if (typeof data.resolution === 'string' && data.resolution) {
+        savedSettings.resolution = data.resolution;
+      }
+      if (typeof data.windowed === 'boolean') {
+        savedSettings.windowed = data.windowed;
+      }
+      if (typeof data.volume === 'number') {
+        savedSettings.volume = Math.max(0, Math.min(100, data.volume));
+      }
+      settingsLoaded = true;
+      applySettingsToUI(savedSettings);
+    } catch(e) {}
+  }
+
+  function applySettingsToUI(s) {
+    document.getElementById('set-resolution').value = s.resolution;
+    document.getElementById('set-windowed').checked = s.windowed;
+    document.getElementById('set-volume').value = s.volume;
+    document.getElementById('set-volume-val').textContent = s.volume + '%';
+  }
+
+  document.getElementById('set-volume').addEventListener('input', function() {
+    document.getElementById('set-volume-val').textContent = this.value + '%';
+  });
+
+  document.getElementById('btn-settings-reset').addEventListener('click', function() {
+    applySettingsToUI(savedSettings);
+    settingsToast('Modificarile au fost anulate.');
+  });
+
+  document.getElementById('btn-settings-save').addEventListener('click', function() {
+    var payload = {
+      resolution: document.getElementById('set-resolution').value,
+      windowed: document.getElementById('set-windowed').checked,
+      volume: Number(document.getElementById('set-volume').value)
+    };
+    if (!cefEmit('skr:lobby:settings:save', JSON.stringify(payload))) {
+      settingsToast('Bridge-ul CEF nu este disponibil.');
+      return;
     }
+    settingsToast('Se salveaza...');
+  });
+
+  var toastTimer = null;
+  function settingsToast(msg) {
+    var el = document.getElementById('settings-toast');
+    el.textContent = msg;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function() { el.textContent = ''; }, 4000);
+  }
+
+  cefOn('skr:lobby:settings:ready', function(json) {
+    hydrateSettings(json);
+  });
+  cefOn('skr:lobby:settings:saved', function(json) {
+    hydrateSettings(json);
+    settingsToast('Preferinte salvate. Se aplica la urmatoarea pornire.');
+  });
+  cefOn('skr:lobby:settings:error', function() {
+    settingsToast('Setarile nu au putut fi salvate.');
+  });
+
+  // ── Server list tab ─────────────────────────────────────────
+  var servers = [];
+
+  function requestServers() {
+    cefEmit('skr:lobby:servers:request');
+  }
+
+  function renderServers() {
+    var list = document.getElementById('server-list');
+    var status = document.getElementById('server-status');
+    list.textContent = '';
+    if (!servers.length) {
+      status.textContent = 'Niciun server disponibil.';
+      list.innerHTML = '<div class="server-empty">Lista de servere este goala.</div>';
+      return;
+    }
+    status.textContent = servers.length + (servers.length === 1 ? ' server' : ' servere');
+    servers.forEach(function(s) {
+      var row = document.createElement('div');
+      row.className = 'server-row';
+      var mark = s.shortName || (s.name || '?').slice(0, 3).toUpperCase();
+      var playersText = (s.players != null ? s.players : '—') + ' / ' + (s.maxPlayers != null ? s.maxPlayers : '—');
+      var meta = (s.mode || 'Multiplayer') + (s.language ? ' · ' + s.language.toUpperCase() : '');
+      var skrBadge = s.skr === true ? '<span class="skr-badge">SKR</span>' : '';
+      row.innerHTML =
+        '<div class="server-mark">' + html(mark) + '</div>' +
+        '<div class="server-info"><div class="server-name">' + html(s.name) + skrBadge + '</div><div class="server-meta">' + html(meta) + '</div></div>' +
+        '<div class="server-players">' + html(playersText) + '</div>' +
+        '<button class="server-connect-btn" data-address="' + html(s.address || '') + '">Conecteaza</button>';
+      list.appendChild(row);
+    });
+    list.querySelectorAll('.server-connect-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var addr = btn.dataset.address;
+        if (!addr) { settingsToast('Serverul nu are adresa.'); return; }
+        cefEmit('skr:esc:disconnect');
+      });
+    });
+  }
+
+  cefOn('skr:lobby:servers', function(json) {
+    try {
+      var data = typeof json === 'string' ? JSON.parse(json) : json;
+      var incoming = Array.isArray(data) ? data : (data && data.servers) || [];
+      servers = incoming.map(function(s) {
+        if (!s || typeof s !== 'object') return null;
+        return {
+          id: String(s.id || ''),
+          name: String(s.name || ''),
+          shortName: String(s.shortName || (s.name || '').slice(0,3)).slice(0,4).toUpperCase(),
+          mode: String(s.mode || 'Multiplayer'),
+          language: String(s.language || '').slice(0,12),
+          players: s.players != null ? Math.max(0, Number(s.players) || 0) : null,
+          maxPlayers: s.maxPlayers != null ? Math.max(1, Number(s.maxPlayers) || 1) : null,
+          address: s.address || '',
+          skr: s.skr,
+          description: String(s.description || '')
+        };
+      }).filter(Boolean);
+      renderServers();
+    } catch(e) {}
+  });
+  cefOn('skr:lobby:servers:info', function(json) {
+    try {
+      var data = typeof json === 'string' ? JSON.parse(json) : json;
+      var list = Array.isArray(data) ? data : [];
+      list.forEach(function(info) {
+        if (!info || !info.id) return;
+        for (var i = 0; i < servers.length; i++) {
+          if (servers[i].id === info.id) {
+            if (info.players != null) servers[i].players = Number(info.players) || 0;
+            if (info.maxPlayers != null) servers[i].maxPlayers = Number(info.maxPlayers) || 1;
+          }
+        }
+      });
+      renderServers();
+    } catch(e) {}
   });
 })();
 </script>

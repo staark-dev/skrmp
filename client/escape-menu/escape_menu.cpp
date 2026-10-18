@@ -1,6 +1,8 @@
 #include "escape-menu/escape_menu.h"
 #include "cef-bridge/cef_bridge.h"
 #include "cef-local/cef_local_loader.h"
+#include "lobby/menu_patch.h"
+#include "../../shared/exit_codes.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -48,10 +50,17 @@ constexpr uint32_t kBrowserId = skr::cef::BrowserId::kEscMenu;
 constexpr int kEscapeModeCustom = 2;
 constexpr int kEscapeModeGta    = 0;
 
+// GTA SA 1.0 US CMenuManager addresses (plugin-sdk / gta-reversed-modern).
+constexpr uintptr_t kFrontEndMenuManager     = 0x00BA6748;
+constexpr uintptr_t kMenuActive              = kFrontEndMenuManager + 0x5C;
+constexpr uintptr_t kDontDrawFrontEnd        = kFrontEndMenuManager + 0x32;
+constexpr uintptr_t kActivateMenuNextFrame   = kFrontEndMenuManager + 0x33;
+
 std::atomic<bool> g_enabled{false};
 std::atomic<bool> g_browserCreated{false};
 std::atomic<bool> g_menuOpen{false};
 std::atomic<bool> g_eventsSubscribed{false};
+std::atomic<bool> g_nativeMenuActive{false};
 
 std::string MenuUrl() {
     std::wstring dir = DllDir();
@@ -65,34 +74,66 @@ std::string MenuUrl() {
     return s;
 }
 
+// JS notifies us when omp-cef opens/closes the custom menu overlay.
+int __cdecl OnOpened(const char*, skr::cef::CefListValue*) {
+    g_menuOpen.store(true);
+    auto& bridge = skr::cef::CefBridge::Instance();
+    if (g_browserCreated.load()) {
+        bridge.ShowBrowser(kBrowserId);
+        bridge.FocusBrowser(kBrowserId);
+    }
+    Log("menu opened -> browser shown and focused");
+    return 0;
+}
+
+void CloseMenu() {
+    g_menuOpen.store(false);
+    auto& bridge = skr::cef::CefBridge::Instance();
+    if (g_browserCreated.load()) {
+        bridge.UnfocusBrowser(kBrowserId);
+        bridge.HideBrowser(kBrowserId);
+    }
+}
+
+int __cdecl OnClosed(const char*, skr::cef::CefListValue*) {
+    CloseMenu();
+    Log("menu closed (ESC toggle)");
+    return 0;
+}
+
 // JS "Resume" button -> C++: hide browser, tell omp-cef the menu is closed.
 int __cdecl OnResume(const char*, skr::cef::CefListValue*) {
-    auto& bridge = skr::cef::CefBridge::Instance();
-    if (g_browserCreated.load()) bridge.HideBrowser(kBrowserId);
-    g_menuOpen.store(false);
+    CloseMenu();
     skr::cef_local::SetCustomMenuOpen(false);
     Log("resume from menu");
     return 0;
 }
 
-int __cdecl OnSettings(const char*, skr::cef::CefListValue*) {
-    Log("settings requested from escape menu");
+int __cdecl OnNativeSettings(const char*, skr::cef::CefListValue*) {
+    CloseMenu();
+    skr::cef_local::SetCustomMenuOpen(false);
+    skr::cef_local::SetEscapeMenuMode(kEscapeModeGta);
+    skr::lobby::RestoreGtaMainMenu();
+    *reinterpret_cast<bool*>(kDontDrawFrontEnd) = false;
+    *reinterpret_cast<bool*>(kActivateMenuNextFrame) = true;
+    g_nativeMenuActive.store(true);
+    Log("native GTA menu opened");
     return 0;
 }
 
 int __cdecl OnDisconnect(const char*, skr::cef::CefListValue*) {
-    Log("disconnect requested from escape menu");
-    HWND w = FindWindowW(L"Grand theft auto San Andreas", nullptr);
-    if (w) PostMessageW(w, WM_CLOSE, 0, 0);
-    ExitProcess(0);  // [[noreturn]]
+    Log("disconnect -> restart to lobby (exit code %u)", skr::kExitRestartLobby);
+    ExitProcess(skr::kExitRestartLobby);
 }
 
 void SubscribeOnce() {
     if (g_eventsSubscribed.exchange(true)) return;
     auto& bridge = skr::cef::CefBridge::Instance();
-    bridge.Subscribe("skr:esc:resume",      &OnResume);
-    bridge.Subscribe("skr:esc:settings",    &OnSettings);
-    bridge.Subscribe("skr:esc:disconnect",  &OnDisconnect);
+    bridge.Subscribe("skr:esc:opened",      &OnOpened);
+    bridge.Subscribe("skr:esc:closed",      &OnClosed);
+    bridge.Subscribe("skr:esc:resume",          &OnResume);
+    bridge.Subscribe("skr:esc:native_settings", &OnNativeSettings);
+    bridge.Subscribe("skr:esc:disconnect",      &OnDisconnect);
     Log("escape menu event handlers subscribed");
 }
 
@@ -143,6 +184,19 @@ void Tick() {
             bridge.CreateBrowser(kBrowserId, url.c_str(), true, false);
             g_browserCreated.store(true);
             Log("escape menu browser created (deferred): %s", url.c_str());
+        }
+    }
+
+    // Detect when the native GTA menu closes and re-enable custom mode.
+    if (g_nativeMenuActive.load()) {
+        bool menuActive = *reinterpret_cast<volatile bool*>(kMenuActive);
+        if (!menuActive) {
+            g_nativeMenuActive.store(false);
+            *reinterpret_cast<bool*>(kDontDrawFrontEnd) = false;
+            skr::lobby::MenuPatchStatus status{};
+            skr::lobby::PatchGtaMainMenu(status);
+            skr::cef_local::SetEscapeMenuMode(kEscapeModeCustom);
+            Log("native GTA menu closed -> custom mode restored");
         }
     }
 

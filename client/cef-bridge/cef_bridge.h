@@ -36,6 +36,7 @@ public:
     void ShowBrowser(uint32_t id);
     void HideBrowser(uint32_t id);
     void FocusBrowser(uint32_t id);
+    void UnfocusBrowser(uint32_t id);
 
     // Events
     void EmitEvent(const char* event, CefListValue* args);

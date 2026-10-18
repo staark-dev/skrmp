@@ -70,8 +70,10 @@ LPTHREAD_START_ROUTINE FindRemoteExport(HMODULE remoteBase,
         reinterpret_cast<uintptr_t>(remoteBase) + rva);
 }
 
-LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
+LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
+                        HANDLE& hProcessOut) {
     pidOut = 0;
+    hProcessOut = nullptr;
 
     // Validate paths
     if (GetFileAttributesW(config.gtaSaPath.c_str()) == INVALID_FILE_ATTRIBUTES)
@@ -208,7 +210,7 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
     }
 
     CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
+    hProcessOut = pi.hProcess;
     return LaunchResult::Success;
 }
 

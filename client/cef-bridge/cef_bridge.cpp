@@ -53,6 +53,11 @@ void CefBridge::FocusBrowser(uint32_t id) {
     api_->cef_focus_browser(id, true);
 }
 
+void CefBridge::UnfocusBrowser(uint32_t id) {
+    if (!IsReady()) return;
+    api_->cef_focus_browser(id, false);
+}
+
 void CefBridge::EmitEvent(const char* event, CefListValue* args) {
     if (!IsReady() || !event) return;
     api_->cef_emit_event(event, args);

@@ -3,6 +3,7 @@
 #include "updater.h"
 #include "inventory.h"
 #include "game_launcher.h"
+#include "../../shared/exit_codes.h"
 #include <cstdio>
 #include <string>
 
@@ -119,17 +120,27 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     // TODO: read server address and player name from config / UI
     // TODO: pass auth ticket to client DLL via named pipe before resume
 
-    DWORD gamePid = 0;
-    auto result = skr::launcher::LaunchGame(config, gamePid);
+    for (;;) {
+        DWORD gamePid = 0;
+        HANDLE hGame = nullptr;
+        auto result = skr::launcher::LaunchGame(config, gamePid, hGame);
 
-    if (result != skr::launcher::LaunchResult::Success) {
-        wchar_t msg[512];
-        _snwprintf_s(msg, _TRUNCATE,
-                     L"Failed to launch game: %S",
-                     skr::launcher::LaunchResultToString(result));
-        MessageBoxW(nullptr, msg, L"SKR Client", MB_OK | MB_ICONERROR);
-        return 1;
+        if (result != skr::launcher::LaunchResult::Success) {
+            wchar_t msg[512];
+            _snwprintf_s(msg, _TRUNCATE,
+                         L"Failed to launch game: %S",
+                         skr::launcher::LaunchResultToString(result));
+            MessageBoxW(nullptr, msg, L"SKR Client", MB_OK | MB_ICONERROR);
+            return 1;
+        }
+
+        WaitForSingleObject(hGame, INFINITE);
+
+        DWORD exitCode = 0;
+        GetExitCodeProcess(hGame, &exitCode);
+        CloseHandle(hGame);
+
+        if (exitCode != skr::kExitRestartLobby)
+            return 0;
     }
-
-    return 0;
 }
