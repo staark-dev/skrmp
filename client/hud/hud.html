@@ -194,11 +194,11 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 
 <section class="money hud-group">
   <div class="money__row money__cash">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 8V5H4a2 2 0 0 0-2 2v12h18v-5M4 5V3h14v2M15 8h7v6h-7Z"/><path d="M18 11h1"/></svg>
+    <svg aria-hidden="true"><use href="icons/icons.svg#hud-wallet"/></svg>
     <span class="money__amount" id="moneyCash">$ 0</span>
   </div>
   <div class="money__row money__bank">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m2 8 10-6 10 6ZM3 21h18M4 18h16M6 10v6m6-6v6m6-6v6"/></svg>
+    <svg aria-hidden="true"><use href="icons/icons.svg#hud-bank"/></svg>
     <span class="money__amount" id="moneyBank">$ 0</span>
   </div>
 </section>
@@ -216,7 +216,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
     <div class="radar__surface" id="radarSurface">
       <div class="radar__tiles" id="radarTiles"></div>
       <div class="radar__pin" id="radarPin" hidden>
-        <svg viewBox="0 0 26 34"><path d="M13 1C6.4 1 1 6.3 1 12.9 1 21.7 13 33 13 33s12-11.3 12-20.1C25 6.3 19.6 1 13 1Z"/></svg>
+        <svg aria-hidden="true"><use href="icons/icons.svg#hud-pin"/></svg>
       </div>
       <div class="radar__player" id="radarPlayer">
         <svg viewBox="0 0 14 14" style="fill:#74dce8;stroke:none" xmlns="http://www.w3.org/2000/svg"><polygon points="7,0 12,12 7,9 2,12"/></svg>
@@ -235,13 +235,13 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
   <span class="vitals__card vitals__card--armour" aria-hidden="true"></span>
   <span class="vitals__card vitals__card--food" aria-hidden="true"></span>
   <span class="vitals__card vitals__card--water" aria-hidden="true"></span>
-  <svg class="vitals__heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg>
+  <svg class="vitals__heart" aria-hidden="true"><use href="icons/icons.svg#hud-heart"/></svg>
   <div class="track vitals__health"><span class="track__fill" id="healthBar" style="width:100%"></span></div>
-  <svg class="vitals__shield" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9S4 17 4 12V6Z"/></svg>
+  <svg class="vitals__shield" aria-hidden="true"><use href="icons/icons.svg#hud-shield"/></svg>
   <div class="track vitals__armour"><span class="track__fill" id="armourBar" style="width:0%"></span></div>
-  <svg class="vitals__food" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10h18M4 14h16M5 18h14M3 10c0-8 18-8 18 0M4 14l-1 4v2h18v-2l-1-4"/></svg>
+  <svg class="vitals__food" aria-hidden="true"><use href="icons/icons.svg#hud-food"/></svg>
   <span class="vitals__food-value" id="needHunger">100%</span>
-  <svg class="vitals__water" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2S5 11 5 15a7 7 0 0 0 14 0c0-4-7-13-7-13Z"/></svg>
+  <svg class="vitals__water" aria-hidden="true"><use href="icons/icons.svg#hud-water"/></svg>
   <span class="vitals__water-value" id="needThirst">100%</span>
 </section>
 
@@ -252,12 +252,12 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
   <span class="vehicle__gear" id="vehGear">N</span>
   <span class="vehicle__gear-label">GEAR</span>
   <i class="vehicle__divider vehicle__divider--second"></i>
-  <svg class="vehicle__fuel-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h10M5 21V4h7v17M5 9h7m3-14 4 4v10a2 2 0 0 0 4 0v-5l-4-4" transform="translate(0 3) scale(.85)"/></svg>
+  <svg class="vehicle__fuel-icon" aria-hidden="true"><use href="icons/icons.svg#hud-fuel"/></svg>
   <span class="vehicle__fuel-value" id="vehFuelText">0%</span>
   <div class="track vehicle__fuel-track"><span class="track__fill" id="vehFuelBar" style="width:0%"></span></div>
-  <svg class="vehicle__belt" id="vehSeatbelt" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="m8 10 2-3h4l3 8M9 9l-2 8h11M10 17l-2 5m7-5 2 5M4 19 20 6"/></svg>
-  <svg class="vehicle__engine" id="vehEngine" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10H1v8h2m1-9h4l2-3h6l3 4h3v9h-4l-3 2H8l-4-4ZM9 3h7m-4 0v3"/></svg>
-  <svg class="vehicle__lights" id="vehLights" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5C8.5 5 6 8.1 6 12s2.5 7 7 7c1.7 0 3-3.1 3-7s-1.3-7-3-7Z"/><path d="M2 8h3M2 12h3M2 16h3"/></svg>
+  <svg class="vehicle__belt" id="vehSeatbelt" aria-hidden="true"><use href="icons/icons.svg#hud-seatbelt"/></svg>
+  <svg class="vehicle__engine" id="vehEngine" aria-hidden="true"><use href="icons/icons.svg#hud-engine"/></svg>
+  <svg class="vehicle__lights" id="vehLights" aria-hidden="true"><use href="icons/icons.svg#hud-lights"/></svg>
 </section>
 
 <div class="voice hud-group" id="voice" aria-label="Voce"><i class="voice__bar"></i><i class="voice__bar"></i><i class="voice__bar"></i></div>

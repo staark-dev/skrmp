@@ -1,0 +1,1633 @@
+{
+  "version": 1,
+  "hud": [
+    {
+      "name": "wallet",
+      "file": "hud/wallet.svg",
+      "symbol": "hud-wallet",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "bank",
+      "file": "hud/bank.svg",
+      "symbol": "hud-bank",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "heart",
+      "file": "hud/heart.svg",
+      "symbol": "hud-heart",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "shield",
+      "file": "hud/shield.svg",
+      "symbol": "hud-shield",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "food",
+      "file": "hud/food.svg",
+      "symbol": "hud-food",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "water",
+      "file": "hud/water.svg",
+      "symbol": "hud-water",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "fuel",
+      "file": "hud/fuel.svg",
+      "symbol": "hud-fuel",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "seatbelt",
+      "file": "hud/seatbelt.svg",
+      "symbol": "hud-seatbelt",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "engine",
+      "file": "hud/engine.svg",
+      "symbol": "hud-engine",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "pin",
+      "file": "hud/pin.svg",
+      "symbol": "hud-pin",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "nav-right",
+      "file": "hud/nav-right.svg",
+      "symbol": "hud-nav-right",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "nav-left",
+      "file": "hud/nav-left.svg",
+      "symbol": "hud-nav-left",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "nav-straight",
+      "file": "hud/nav-straight.svg",
+      "symbol": "hud-nav-straight",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "nav-uturn",
+      "file": "hud/nav-uturn.svg",
+      "symbol": "hud-nav-uturn",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "player-arrow",
+      "file": "hud/player-arrow.svg",
+      "symbol": "hud-player-arrow",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "north",
+      "file": "hud/north.svg",
+      "symbol": "hud-north",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "voice",
+      "file": "hud/voice.svg",
+      "symbol": "hud-voice",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "voice-muted",
+      "file": "hud/voice-muted.svg",
+      "symbol": "hud-voice-muted",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "voice-bars",
+      "file": "hud/voice-bars.svg",
+      "symbol": "hud-voice-bars",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "car",
+      "file": "hud/car.svg",
+      "symbol": "hud-car",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "lock",
+      "file": "hud/lock.svg",
+      "symbol": "hud-lock",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "unlock",
+      "file": "hud/unlock.svg",
+      "symbol": "hud-unlock",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "lights",
+      "file": "hud/lights.svg",
+      "symbol": "hud-lights",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "warning",
+      "file": "hud/warning.svg",
+      "symbol": "hud-warning",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "check",
+      "file": "hud/check.svg",
+      "symbol": "hud-check",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "close",
+      "file": "hud/close.svg",
+      "symbol": "hud-close",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "chevron-up",
+      "file": "hud/chevron-up.svg",
+      "symbol": "hud-chevron-up",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "chevron-down",
+      "file": "hud/chevron-down.svg",
+      "symbol": "hud-chevron-down",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "chevron-left",
+      "file": "hud/chevron-left.svg",
+      "symbol": "hud-chevron-left",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "chevron-right",
+      "file": "hud/chevron-right.svg",
+      "symbol": "hud-chevron-right",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "chat",
+      "file": "hud/chat.svg",
+      "symbol": "hud-chat",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "radio",
+      "file": "hud/radio.svg",
+      "symbol": "hud-radio",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "players",
+      "file": "hud/players.svg",
+      "symbol": "hud-players",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "clock",
+      "file": "hud/clock.svg",
+      "symbol": "hud-clock",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "settings",
+      "file": "hud/settings.svg",
+      "symbol": "hud-settings",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "home",
+      "file": "hud/home.svg",
+      "symbol": "hud-home",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "phone",
+      "file": "hud/phone.svg",
+      "symbol": "hud-phone",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "health-plus",
+      "file": "hud/health-plus.svg",
+      "symbol": "hud-health-plus",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "waypoint-target",
+      "file": "hud/waypoint-target.svg",
+      "symbol": "hud-waypoint-target",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "pause",
+      "file": "hud/pause.svg",
+      "symbol": "hud-pause",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "play",
+      "file": "hud/play.svg",
+      "symbol": "hud-play",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "info",
+      "file": "hud/info.svg",
+      "symbol": "hud-info",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "name": "logout",
+      "file": "hud/logout.svg",
+      "symbol": "hud-logout",
+      "viewBox": [
+        0,
+        0,
+        24,
+        24
+      ]
+    }
+  ],
+  "radar": [
+    {
+      "id": 0,
+      "name": "Colored Square/Triangle (Dynamic)",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon0.gif",
+      "sourceFile": "radar/default/source/00.gif",
+      "svg": "radar/default/svg/00.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/00.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-0",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 1,
+      "name": "White Square",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon1.gif",
+      "sourceFile": "radar/default/source/01.gif",
+      "svg": "radar/default/svg/01.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/01.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-1",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": true
+    },
+    {
+      "id": 2,
+      "name": "Player position",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon2.gif",
+      "sourceFile": "radar/default/source/02.gif",
+      "svg": "radar/default/svg/02.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/02.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-2",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": true
+    },
+    {
+      "id": 3,
+      "name": "Player (Menu Map)",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon3.gif",
+      "sourceFile": "radar/default/source/03.gif",
+      "svg": "radar/default/svg/03.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/03.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-3",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 4,
+      "name": "North",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon4.gif",
+      "sourceFile": "radar/default/source/04.gif",
+      "svg": "radar/default/svg/04.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/04.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-4",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": true
+    },
+    {
+      "id": 5,
+      "name": "Air Yard",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon5.gif",
+      "sourceFile": "radar/default/source/05.gif",
+      "svg": "radar/default/svg/05.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/05.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-5",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 6,
+      "name": "Ammu-Nation",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon6.gif",
+      "sourceFile": "radar/default/source/06.gif",
+      "svg": "radar/default/svg/06.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/06.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-6",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 7,
+      "name": "Barbers",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon7.gif",
+      "sourceFile": "radar/default/source/07.gif",
+      "svg": "radar/default/svg/07.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/07.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-7",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 8,
+      "name": "Big Smoke",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon8.gif",
+      "sourceFile": "radar/default/source/08.gif",
+      "svg": "radar/default/svg/08.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/08.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-8",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 9,
+      "name": "Boat Yard",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon9.gif",
+      "sourceFile": "radar/default/source/09.gif",
+      "svg": "radar/default/svg/09.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/09.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-9",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 10,
+      "name": "Burger Shot",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon10.gif",
+      "sourceFile": "radar/default/source/10.gif",
+      "svg": "radar/default/svg/10.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/10.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-10",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 11,
+      "name": "Quarry",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon11.gif",
+      "sourceFile": "radar/default/source/11.gif",
+      "svg": "radar/default/svg/11.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/11.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-11",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 12,
+      "name": "Catalina",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon12.gif",
+      "sourceFile": "radar/default/source/12.gif",
+      "svg": "radar/default/svg/12.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/12.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-12",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 13,
+      "name": "Cesar",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon13.gif",
+      "sourceFile": "radar/default/source/13.gif",
+      "svg": "radar/default/svg/13.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/13.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-13",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 14,
+      "name": "Cluckin' Bell",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon14.gif",
+      "sourceFile": "radar/default/source/14.gif",
+      "svg": "radar/default/svg/14.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/14.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-14",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 15,
+      "name": "Carl Johnson",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon15.gif",
+      "sourceFile": "radar/default/source/15.gif",
+      "svg": "radar/default/svg/15.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/15.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-15",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 16,
+      "name": "C.R.A.S.H",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon16.gif",
+      "sourceFile": "radar/default/source/16.gif",
+      "svg": "radar/default/svg/16.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/16.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-16",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 17,
+      "name": "Diner",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon17.gif",
+      "sourceFile": "radar/default/source/17.gif",
+      "svg": "radar/default/svg/17.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/17.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-17",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 18,
+      "name": "Emmet",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon18.gif",
+      "sourceFile": "radar/default/source/18.gif",
+      "svg": "radar/default/svg/18.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/18.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-18",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 19,
+      "name": "Enemy Attack",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon19.gif",
+      "sourceFile": "radar/default/source/19.gif",
+      "svg": "radar/default/svg/19.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/19.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-19",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 20,
+      "name": "Fire",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon20.gif",
+      "sourceFile": "radar/default/source/20.gif",
+      "svg": "radar/default/svg/20.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/20.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-20",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 21,
+      "name": "Girlfriend",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon21.gif",
+      "sourceFile": "radar/default/source/21.gif",
+      "svg": "radar/default/svg/21.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/21.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-21",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 22,
+      "name": "Hospital",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon22.gif",
+      "sourceFile": "radar/default/source/22.gif",
+      "svg": "radar/default/svg/22.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/22.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-22",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 23,
+      "name": "Loco",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon23.gif",
+      "sourceFile": "radar/default/source/23.gif",
+      "svg": "radar/default/svg/23.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/23.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-23",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 24,
+      "name": "Madd Dogg",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon24.gif",
+      "sourceFile": "radar/default/source/24.gif",
+      "svg": "radar/default/svg/24.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/24.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-24",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 25,
+      "name": "Caligula's",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon25.gif",
+      "sourceFile": "radar/default/source/25.gif",
+      "svg": "radar/default/svg/25.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/25.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-25",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 26,
+      "name": "MC Strap",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon26.gif",
+      "sourceFile": "radar/default/source/26.gif",
+      "svg": "radar/default/svg/26.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/26.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-26",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 27,
+      "name": "Mod Garage",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon27.gif",
+      "sourceFile": "radar/default/source/27.gif",
+      "svg": "radar/default/svg/27.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/27.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-27",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 28,
+      "name": "OG Loc",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon28.gif",
+      "sourceFile": "radar/default/source/28.gif",
+      "svg": "radar/default/svg/28.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/28.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-28",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 29,
+      "name": "Well Stacked Pizza Co",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon29.gif",
+      "sourceFile": "radar/default/source/29.gif",
+      "svg": "radar/default/svg/29.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/29.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-29",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 30,
+      "name": "Police",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon30.gif",
+      "sourceFile": "radar/default/source/30.gif",
+      "svg": "radar/default/svg/30.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/30.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-30",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 31,
+      "name": "Property for sale",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon31.gif",
+      "sourceFile": "radar/default/source/31.gif",
+      "svg": "radar/default/svg/31.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/31.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-31",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 32,
+      "name": "Property not for sale",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon32.gif",
+      "sourceFile": "radar/default/source/32.gif",
+      "svg": "radar/default/svg/32.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/32.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-32",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 33,
+      "name": "Race",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon33.gif",
+      "sourceFile": "radar/default/source/33.gif",
+      "svg": "radar/default/svg/33.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/33.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-33",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 34,
+      "name": "Ryder",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon34.gif",
+      "sourceFile": "radar/default/source/34.gif",
+      "svg": "radar/default/svg/34.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/34.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-34",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 35,
+      "name": "Save House",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon35.gif",
+      "sourceFile": "radar/default/source/35.gif",
+      "svg": "radar/default/svg/35.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/35.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-35",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 36,
+      "name": "School",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon36.gif",
+      "sourceFile": "radar/default/source/36.gif",
+      "svg": "radar/default/svg/36.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/36.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-36",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 37,
+      "name": "Mystery",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon37.gif",
+      "sourceFile": "radar/default/source/37.gif",
+      "svg": "radar/default/svg/37.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/37.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-37",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 38,
+      "name": "Sweet",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon38.gif",
+      "sourceFile": "radar/default/source/38.gif",
+      "svg": "radar/default/svg/38.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/38.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-38",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 39,
+      "name": "Tattoo",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon39.gif",
+      "sourceFile": "radar/default/source/39.gif",
+      "svg": "radar/default/svg/39.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/39.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-39",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 40,
+      "name": "The Truth",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon40.gif",
+      "sourceFile": "radar/default/source/40.gif",
+      "svg": "radar/default/svg/40.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/40.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-40",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 41,
+      "name": "Waypoint",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon41.gif",
+      "sourceFile": "radar/default/source/41.gif",
+      "svg": "radar/default/svg/41.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/41.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-41",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 42,
+      "name": "Toreno's Ranch",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon42.gif",
+      "sourceFile": "radar/default/source/42.gif",
+      "svg": "radar/default/svg/42.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/42.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-42",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 43,
+      "name": "Triads",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon43.gif",
+      "sourceFile": "radar/default/source/43.gif",
+      "svg": "radar/default/svg/43.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/43.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-43",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 44,
+      "name": "Triads Casino",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon44.gif",
+      "sourceFile": "radar/default/source/44.gif",
+      "svg": "radar/default/svg/44.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/44.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-44",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 45,
+      "name": "Clothes Shop",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon45.gif",
+      "sourceFile": "radar/default/source/45.gif",
+      "svg": "radar/default/svg/45.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/45.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-45",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 46,
+      "name": "Woozie",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon46.gif",
+      "sourceFile": "radar/default/source/46.gif",
+      "svg": "radar/default/svg/46.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/46.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-46",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 47,
+      "name": "Zero",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon47.gif",
+      "sourceFile": "radar/default/source/47.gif",
+      "svg": "radar/default/svg/47.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/47.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-47",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 48,
+      "name": "Disco Date",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon48.gif",
+      "sourceFile": "radar/default/source/48.gif",
+      "svg": "radar/default/svg/48.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/48.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-48",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 49,
+      "name": "Drinking Date",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon49.gif",
+      "sourceFile": "radar/default/source/49.gif",
+      "svg": "radar/default/svg/49.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/49.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-49",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 50,
+      "name": "Restaurant",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon50.gif",
+      "sourceFile": "radar/default/source/50.gif",
+      "svg": "radar/default/svg/50.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/50.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-50",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 51,
+      "name": "Trucking",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon51.gif",
+      "sourceFile": "radar/default/source/51.gif",
+      "svg": "radar/default/svg/51.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/51.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-51",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 52,
+      "name": "Robbery",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon52.gif",
+      "sourceFile": "radar/default/source/52.gif",
+      "svg": "radar/default/svg/52.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/52.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-52",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 53,
+      "name": "Race Tournament",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon53.gif",
+      "sourceFile": "radar/default/source/53.gif",
+      "svg": "radar/default/svg/53.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/53.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-53",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 54,
+      "name": "Gym",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon54.gif",
+      "sourceFile": "radar/default/source/54.gif",
+      "svg": "radar/default/svg/54.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/54.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-54",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 55,
+      "name": "Car impound",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon55.gif",
+      "sourceFile": "radar/default/source/55.gif",
+      "svg": "radar/default/svg/55.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/55.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-55",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 56,
+      "name": "Light",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon56.gif",
+      "sourceFile": "radar/default/source/56.gif",
+      "svg": "radar/default/svg/56.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/56.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-56",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": true
+    },
+    {
+      "id": 57,
+      "name": "Nearest air strip",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon57.gif",
+      "sourceFile": "radar/default/source/57.gif",
+      "svg": "radar/default/svg/57.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/57.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-57",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 58,
+      "name": "Varrios Los Aztecas",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon58.gif",
+      "sourceFile": "radar/default/source/58.gif",
+      "svg": "radar/default/svg/58.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/58.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-58",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 59,
+      "name": "Ballas",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon59.gif",
+      "sourceFile": "radar/default/source/59.gif",
+      "svg": "radar/default/svg/59.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/59.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-59",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 60,
+      "name": "Los Santos Vagos",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon60.gif",
+      "sourceFile": "radar/default/source/60.gif",
+      "svg": "radar/default/svg/60.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/60.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-60",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 61,
+      "name": "San Fierro Rifa",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon61.gif",
+      "sourceFile": "radar/default/source/61.gif",
+      "svg": "radar/default/svg/61.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/61.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-61",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 62,
+      "name": "Grove Street Families",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon62.gif",
+      "sourceFile": "radar/default/source/62.gif",
+      "svg": "radar/default/svg/62.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/62.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-62",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    },
+    {
+      "id": 63,
+      "name": "Pay 'n' Spray",
+      "sourceUrl": "https://assets.open.mp/assets/images/mapIcons/icon63.gif",
+      "sourceFile": "radar/default/source/63.gif",
+      "svg": "radar/default/svg/63.svg",
+      "frames": [
+        {
+          "file": "radar/default/svg/63.svg",
+          "durationMs": 0
+        }
+      ],
+      "symbol": "radar-63",
+      "width": 16,
+      "height": 16,
+      "representation": "pixel-faithful vector paths",
+      "nativeMapLegendUnsafe": false
+    }
+  ],
+  "source": "https://open.mp/docs/scripting/resources/mapicons"
+}
