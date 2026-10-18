@@ -2,6 +2,7 @@
 #include "lobby/menu_patch.h"
 #include "lobby/settings_io.h"
 #include "cef-bridge/cef_bridge.h"
+#include "cef-local/cef_local_loader.h"
 #include "intro/urban_intro.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -197,14 +198,20 @@ void Shutdown() {
 
 void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
     if (g_disabled.load()) return;   // vanilla menu path: do nothing
-    // One-shot "we got here" marker so the next failure mode is distinguishable
-    // from "post-intro frame never fires" in lobby.log.
     static std::atomic<bool> firstFrameLogged{false};
     if (!firstFrameLogged.exchange(true)) Log("first post-intro EndScene frame");
 
-    // Patch the vanilla menu now; retried each frame until it sticks. On
-    // success/failure we log the actual first byte seen so the next run tells
-    // us exactly why if the offset ever drifts.
+    // Drive the CEF tick every frame — this polls for omp-cef / samp-cef
+    // and creates the lobby browser once a CEF engine is available.
+    OnCefTick();
+
+    // Only take over the screen (patch menu + draw cover) once CEF is
+    // actually rendering the lobby. Without this gate, a missing CEF
+    // engine (omp-cef not deployed, samp-cef not loaded) would leave the
+    // user staring at an unrecoverable black screen.
+    auto& bridge = skr::cef::CefBridge::Instance();
+    if (!bridge.IsReady()) return;
+
     if (!g_menuPatched.load()) {
         MenuPatchStatus st{};
         bool ok = PatchGtaMainMenu(st);
@@ -217,8 +224,6 @@ void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
                 st.entries[1].name, st.entries[1].firstByte,
                 st.entries[1].alreadyPatched ? "(already 0xC3)" : "(we wrote 0xC3)");
         } else {
-            // Log once per distinct (byte0, byte1) tuple so a stuck repeat
-            // mode doesn't flood the file but a transient change is captured.
             int b0 = st.entries[0].firstByte, b1 = st.entries[1].firstByte;
             if (b0 != lastReportedByte0 || b1 != lastReportedByte1) {
                 lastReportedByte0 = b0; lastReportedByte1 = b1;
@@ -231,21 +236,17 @@ void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
         }
     }
 
-    // samp-cef has no `cef_samp_mainloop` plugin callback (verified by the
-    // launcher-ui session against deps/SAMPC-main). Drive the lobby's CEF
-    // tick from here instead — EndScene fires on the game thread at frame
-    // rate, which is exactly the cadence OnCefTick wants.
-    OnCefTick();
-
-    // Draw cover BEFORE SA-MP's UI overlays and the CEF plugin render pass so
-    // the lobby HTML (which carries its own background) appears on an opaque
-    // backdrop. CEF renders on top of this on the samp-present path.
     DrawCover(device);
 }
 
 void OnCefTick() {
     if (g_disabled.load()) return;
     auto& bridge = skr::cef::CefBridge::Instance();
+    // omp-cef path: if samp-cef hasn't called cef_initialize yet,
+    // try to resolve omp-cef's local exports directly.
+    if (!bridge.IsReady() && !skr::cef_local::IsLoaded()) {
+        skr::cef_local::TryLoad();
+    }
     if (!bridge.IsReady()) return;
     static bool loggedBridgeReady = false;
     if (!loggedBridgeReady) { loggedBridgeReady = true; Log("CefBridge: Ready (api_ installed)"); }

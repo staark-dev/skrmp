@@ -10,7 +10,6 @@ const char* LaunchResultToString(LaunchResult r) {
         case LaunchResult::Success:             return "Success";
         case LaunchResult::GtaNotFound:         return "gta_sa.exe not found";
         case LaunchResult::DllNotFound:         return "SKR.Client.dll not found";
-        case LaunchResult::SampNotFound:       return "samp.dll not found";
         case LaunchResult::ProcessCreateFailed: return "CreateProcessW failed";
         case LaunchResult::InjectionFailed:     return "DLL injection failed";
         case LaunchResult::PipeFailed:          return "Named pipe IPC failed";
@@ -79,8 +78,6 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
         return LaunchResult::GtaNotFound;
     if (GetFileAttributesW(config.clientDllPath.c_str()) == INVALID_FILE_ATTRIBUTES)
         return LaunchResult::DllNotFound;
-    if (GetFileAttributesW(config.sampDllPath.c_str()) == INVALID_FILE_ATTRIBUTES)
-        return LaunchResult::SampNotFound;
 
     // Extract working directory from gta_sa.exe path
     std::wstring workDir = config.gtaSaPath;
@@ -88,15 +85,33 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
     if (pos != std::wstring::npos)
         workDir.resize(pos);
 
-    // Lobby mode: -c -h -p are required for samp.dll to fully initialize its
-    // rendering pipeline (which samp-cef hooks into for CEF). Without -h/-p,
-    // SA-MP stays dormant and cef_initialize never fires. The lobby module
-    // patches CMenuManager so SA-MP's connect/failed screens never show;
-    // actual connection is driven by the lobby UI (Phase 2).
-    std::wstring cmdLine = L"\"" + config.gtaSaPath + L"\""
-        + L" -c -h " + config.serverAddress
-        + L" -p " + std::to_wstring(config.serverPort)
-        + L" -n " + config.playerName;
+    // FiveM-style: GTA starts clean — no SA-MP flags at all.
+    // omp-cef handles CEF independently. samp.dll is loaded dynamically
+    // by SKR.Client.dll when the user picks a server (Phase 2).
+    //
+    // Hide samp.dll AND the custom d3d9.dll proxy so neither the proxy
+    // nor any ASI loader can auto-load SA-MP at startup. The proxy
+    // crashes if samp.dll is missing, so both must go together.
+    // samp_loader restores them when the user picks a server (Phase 2).
+    // Hide the SA-MP loading chain so GTA starts clean:
+    //   vorbisHooked.dll — ASI loader that auto-loads samp.dll
+    //   samp.dll         — SA-MP client
+    //   d3d9.dll         — optional D3D9 proxy (samp-cef)
+    // samp_loader restores them when the user picks a server.
+    struct HideEntry { const wchar_t* orig; const wchar_t* hidden; };
+    HideEntry hideList[] = {
+        { L"\\vorbisHooked.dll", L"\\vorbisHooked.dll.skr" },
+        { L"\\samp.dll",         L"\\samp.dll.skr" },
+        { L"\\d3d9.dll",         L"\\d3d9.dll.skr" },
+    };
+    for (auto& e : hideList) {
+        std::wstring orig   = workDir + e.orig;
+        std::wstring hidden = workDir + e.hidden;
+        if (GetFileAttributesW(orig.c_str()) != INVALID_FILE_ATTRIBUTES)
+            MoveFileExW(orig.c_str(), hidden.c_str(), MOVEFILE_REPLACE_EXISTING);
+    }
+
+    std::wstring cmdLine = L"\"" + config.gtaSaPath + L"\"";
 
     // Create process in SUSPENDED state
     STARTUPINFOW si{};
@@ -119,16 +134,11 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
 
     pidOut = pi.dwProcessId;
 
-    // Inject samp.dll first — it provides RakNet networking to the open.mp server
-    HMODULE remoteSamp = InjectDll(pi.hProcess, config.sampDllPath.c_str());
-    if (!remoteSamp) {
-        TerminateProcess(pi.hProcess, 1);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-        return LaunchResult::SampNotFound;
-    }
+    // samp.dll is NO LONGER injected at launch. SKR.Client.dll loads it
+    // dynamically when the user connects from the lobby (samp_loader module).
+    // omp-cef (cef.asi + cef/client.dll) handles CEF independently.
 
-    // Inject SKR.Client.dll — our intro, AC, CEF overlay
+    // Inject SKR.Client.dll — lobby, AC, CEF overlay
     HMODULE remoteModule = InjectDll(pi.hProcess, config.clientDllPath.c_str());
     if (!remoteModule) {
         TerminateProcess(pi.hProcess, 1);
@@ -146,13 +156,12 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
         return LaunchResult::InjectionFailed;
     }
 
-    // Build IPC params
+    // Build IPC params — server address/port are no longer set at launch;
+    // samp_loader connects dynamically when the user picks a server (Phase 2).
     ipc::LaunchParams params{};
     params.magic   = ipc::kLaunchParamsMagic;
     params.version = ipc::kLaunchParamsVersion;
-    params.serverPort = config.serverPort;
-    WideCharToMultiByte(CP_UTF8, 0, config.serverAddress.c_str(), -1,
-                        params.serverAddress, sizeof(params.serverAddress), nullptr, nullptr);
+    params.serverPort = 0;
     WideCharToMultiByte(CP_UTF8, 0, config.playerName.c_str(), -1,
                         params.playerName, sizeof(params.playerName), nullptr, nullptr);
     if (config.joinTicket.size() == ipc::kJoinTicketSize) {

@@ -104,15 +104,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     };
 
     auto clientDll = findDll(L"SKR.Client.dll");
-    auto sampDll = findDll(L"samp.dll");
 
     if (clientDll.empty()) {
         MessageBoxW(nullptr, L"SKR.Client.dll not found.\nPlace it next to the launcher or in the GTA SA folder.",
-                    L"SKR Client", MB_OK | MB_ICONERROR);
-        return 1;
-    }
-    if (sampDll.empty()) {
-        MessageBoxW(nullptr, L"samp.dll not found.\nPlace it next to the launcher or in the GTA SA folder.",
                     L"SKR Client", MB_OK | MB_ICONERROR);
         return 1;
     }
@@ -120,9 +114,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     skr::launcher::LaunchConfig config;
     config.gtaSaPath = gtaPath;
     config.clientDllPath = clientDll;
-    config.sampDllPath = sampDll;
-    config.serverAddress = L"127.0.0.1";
-    config.serverPort = 7777;
     config.playerName = L"SKR_Player";
 
     // TODO: read server address and player name from config / UI

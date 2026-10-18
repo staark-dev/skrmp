@@ -63,6 +63,8 @@ add_library(SKRClient SHARED
   client/lobby/lobby_manager.cpp
   client/lobby/menu_patch.cpp
   client/lobby/settings_io.cpp
+  client/cef-local/cef_local_loader.cpp
+  client/samp-loader/samp_loader.cpp
   client/compatibility/compat_profile.cpp
   client/transport/auth_client.cpp
   client/samp-hooks/samp_hooks.cpp

@@ -13,9 +13,6 @@ namespace skr::launcher {
 struct LaunchConfig {
     std::wstring gtaSaPath;      // Full path to gta_sa.exe
     std::wstring clientDllPath;  // Full path to SKR.Client.dll
-    std::wstring sampDllPath;    // Full path to samp.dll (SA-MP networking)
-    std::wstring serverAddress;  // e.g. "127.0.0.1"
-    uint16_t serverPort = 7777;
     std::wstring playerName;
     std::vector<uint8_t> joinTicket; // 32 bytes join ticket from backend (empty = no ticket yet)
 };
@@ -24,7 +21,6 @@ enum class LaunchResult : uint8_t {
     Success,
     GtaNotFound,
     DllNotFound,
-    SampNotFound,
     ProcessCreateFailed,
     InjectionFailed,
     PipeFailed,

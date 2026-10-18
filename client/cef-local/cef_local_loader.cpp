@@ -1,0 +1,122 @@
+#include "cef-local/cef_local_loader.h"
+#include "cef-bridge/cef_bridge.h"
+#include "cef-bridge/cef_api_types.h"
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <atomic>
+#include <cstdio>
+#include <mutex>
+#include <string>
+
+namespace skr::cef_local {
+
+namespace {
+
+std::atomic<bool> g_loaded{false};
+std::mutex g_loadMutex;
+
+// Resolved InternalApi that bridges to omp-cef exports.
+// Must outlive CefBridge (static lifetime).
+skr::cef::InternalApi g_api{};
+
+std::wstring LogDir() {
+    HMODULE self = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(&LogDir), &self);
+    wchar_t p[MAX_PATH];
+    DWORD n = GetModuleFileNameW(self, p, MAX_PATH);
+    if (!n || n >= MAX_PATH) return {};
+    std::wstring s(p, n);
+    auto slash = s.find_last_of(L'\\');
+    if (slash == std::wstring::npos) return {};
+    return s.substr(0, slash + 1) + L"SKR\\";
+}
+
+void Log(const char* fmt, ...) {
+    std::wstring dir = LogDir();
+    if (dir.empty()) return;
+    CreateDirectoryW(dir.c_str(), nullptr);
+    FILE* f = _wfopen((dir + L"cef_local.log").c_str(), L"a");
+    if (!f) return;
+    fprintf(f, "[%lu] ", GetTickCount());
+    va_list ap; va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+    fclose(f);
+}
+
+template <typename T>
+bool Resolve(HMODULE mod, const char* name, T& out) {
+    auto* proc = GetProcAddress(mod, name);
+    if (!proc) {
+        Log("FAILED to resolve export: %s", name);
+        return false;
+    }
+    out = reinterpret_cast<T>(proc);
+    return true;
+}
+
+} // namespace
+
+bool TryLoad() {
+    std::lock_guard<std::mutex> lk(g_loadMutex);
+    if (g_loaded.load()) return true;
+
+    // omp-cef's client.dll lives in <gta_dir>/cef/client.dll.
+    // It's loaded by cef.asi before we get here; try GetModuleHandle first.
+    HMODULE mod = GetModuleHandleW(L"client.dll");
+    if (!mod) {
+        // Fallback: load relative to gta_sa.exe
+        wchar_t exe[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        std::wstring path(exe);
+        auto slash = path.rfind(L'\\');
+        if (slash != std::wstring::npos) path.resize(slash);
+        path += L"\\cef\\client.dll";
+        mod = LoadLibraryW(path.c_str());
+    }
+
+    if (!mod) {
+        Log("omp-cef client.dll not found");
+        return false;
+    }
+
+    Log("omp-cef client.dll found at 0x%p", mod);
+
+    bool ok = true;
+    ok &= Resolve(mod, "skr_cef_create_browser",   g_api.cef_create_browser);
+    ok &= Resolve(mod, "skr_cef_destroy_browser",   g_api.cef_destroy_browser);
+    ok &= Resolve(mod, "skr_cef_hide_browser",      g_api.cef_hide_browser);
+    ok &= Resolve(mod, "skr_cef_focus_browser",      g_api.cef_focus_browser);
+    ok &= Resolve(mod, "skr_cef_create_list",        g_api.cef_create_list);
+    ok &= Resolve(mod, "skr_cef_emit_event",         g_api.cef_emit_event);
+    ok &= Resolve(mod, "skr_cef_subscribe",          g_api.cef_subscribe);
+    ok &= Resolve(mod, "skr_cef_input_available",    g_api.cef_input_available);
+    ok &= Resolve(mod, "skr_cef_ready",              g_api.cef_ready);
+    ok &= Resolve(mod, "skr_cef_try_focus_browser",  g_api.cef_try_focus_browser);
+    ok &= Resolve(mod, "skr_cef_browser_exists",     g_api.cef_browser_exists);
+    ok &= Resolve(mod, "skr_cef_browser_ready",      g_api.cef_browser_ready);
+    ok &= Resolve(mod, "skr_cef_on_browser_ready",   g_api.cef_on_browser_ready);
+    ok &= Resolve(mod, "skr_cef_gta_window_active",  g_api.cef_gta_window_active);
+
+    if (!ok) {
+        Log("one or more omp-cef exports missing — falling back to samp-cef path");
+        memset(&g_api, 0, sizeof(g_api));
+        return false;
+    }
+
+    // Wire it up to CefBridge — exactly as samp-cef would via cef_initialize().
+    skr::cef::CefBridge::Instance().Initialize(&g_api);
+    g_loaded.store(true);
+    Log("CefBridge initialized via omp-cef local API");
+    return true;
+}
+
+bool IsLoaded() {
+    return g_loaded.load();
+}
+
+} // namespace skr::cef_local
