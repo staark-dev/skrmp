@@ -55,6 +55,9 @@ constexpr uintptr_t kFrontEndMenuManager     = 0x00BA6748;
 constexpr uintptr_t kMenuActive              = kFrontEndMenuManager + 0x5C;
 constexpr uintptr_t kDontDrawFrontEnd        = kFrontEndMenuManager + 0x32;
 constexpr uintptr_t kActivateMenuNextFrame   = kFrontEndMenuManager + 0x33;
+constexpr uintptr_t kCurrentMenuPage         = kFrontEndMenuManager + 0x15D;
+constexpr uint8_t   kMenuPageOptions         = 33;
+constexpr uint8_t   kMenuPageMap             = 5;
 
 std::atomic<bool> g_enabled{false};
 std::atomic<bool> g_browserCreated{false};
@@ -109,15 +112,25 @@ int __cdecl OnResume(const char*, skr::cef::CefListValue*) {
     return 0;
 }
 
-int __cdecl OnNativeSettings(const char*, skr::cef::CefListValue*) {
+void OpenNativeMenuAt(uint8_t page, const char* label) {
     CloseMenu();
     skr::cef_local::SetCustomMenuOpen(false);
     skr::cef_local::SetEscapeMenuMode(kEscapeModeGta);
     skr::lobby::RestoreGtaMainMenu();
     *reinterpret_cast<bool*>(kDontDrawFrontEnd) = false;
     *reinterpret_cast<bool*>(kActivateMenuNextFrame) = true;
+    *reinterpret_cast<uint8_t*>(kCurrentMenuPage) = page;
     g_nativeMenuActive.store(true);
-    Log("native GTA menu opened");
+    Log("native GTA menu opened (%s, page %u)", label, page);
+}
+
+int __cdecl OnNativeSettings(const char*, skr::cef::CefListValue*) {
+    OpenNativeMenuAt(kMenuPageOptions, "Options");
+    return 0;
+}
+
+int __cdecl OnNativeMap(const char*, skr::cef::CefListValue*) {
+    OpenNativeMenuAt(kMenuPageMap, "Map");
     return 0;
 }
 
@@ -133,6 +146,7 @@ void SubscribeOnce() {
     bridge.Subscribe("skr:esc:closed",      &OnClosed);
     bridge.Subscribe("skr:esc:resume",          &OnResume);
     bridge.Subscribe("skr:esc:native_settings", &OnNativeSettings);
+    bridge.Subscribe("skr:esc:native_map",      &OnNativeMap);
     bridge.Subscribe("skr:esc:disconnect",      &OnDisconnect);
     Log("escape menu event handlers subscribed");
 }
@@ -188,15 +202,23 @@ void Tick() {
     }
 
     // Detect when the native GTA menu closes and re-enable custom mode.
+    // Also prevent navigation to the pause page (Map/Stats/Quit) — if
+    // the user presses Back from Options, close the native menu entirely.
     if (g_nativeMenuActive.load()) {
         bool menuActive = *reinterpret_cast<volatile bool*>(kMenuActive);
-        if (!menuActive) {
+        uint8_t page = *reinterpret_cast<volatile uint8_t*>(kCurrentMenuPage);
+        constexpr uint8_t kMenuPagePause = 41;
+        if (!menuActive || page == kMenuPagePause) {
+            if (menuActive) {
+                *reinterpret_cast<bool*>(kMenuActive) = false;
+                *reinterpret_cast<bool*>(kActivateMenuNextFrame) = false;
+            }
             g_nativeMenuActive.store(false);
             *reinterpret_cast<bool*>(kDontDrawFrontEnd) = false;
             skr::lobby::MenuPatchStatus status{};
             skr::lobby::PatchGtaMainMenu(status);
             skr::cef_local::SetEscapeMenuMode(kEscapeModeCustom);
-            Log("native GTA menu closed -> custom mode restored");
+            Log("native GTA menu closed (page %u) -> custom mode restored", page);
         }
     }
 

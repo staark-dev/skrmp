@@ -308,6 +308,16 @@ body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-f
         Continua
       </button>
 
+      <button class="menu__btn" id="btn-native-map">
+        <svg viewBox="0 0 24 24"><polygon points="1,6 1,22 8,18 16,22 23,18 23,2 16,6 8,2"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+        Harta
+      </button>
+
+      <button class="menu__btn" id="btn-native-settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Setari GTA
+      </button>
+
       <div class="menu__sep"></div>
 
       <button class="menu__btn menu__btn--danger" id="btn-disconnect">
@@ -369,12 +379,6 @@ body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-f
         <button class="menu__btn menu__btn--primary" id="btn-settings-save" style="flex:1;">Salveaza</button>
       </div>
 
-      <div class="menu__sep"></div>
-
-      <button class="menu__btn" id="btn-native-settings" style="font-size:13px;height:38px;">
-        <svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-        Setari GTA (nativ)
-      </button>
       <div id="settings-toast" style="font-size:11px;color:var(--muted);text-align:center;min-height:16px;margin-top:4px;"></div>
     </div>
 
@@ -439,6 +443,10 @@ body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-f
   });
   document.getElementById('btn-disconnect').addEventListener('click', function() {
     cefEmit('skr:esc:disconnect');
+  });
+  document.getElementById('btn-native-map').addEventListener('click', function() {
+    overlay.classList.remove('is-visible');
+    cefEmit('skr:esc:native_map');
   });
   document.getElementById('btn-native-settings').addEventListener('click', function() {
     overlay.classList.remove('is-visible');
