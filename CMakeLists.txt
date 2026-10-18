@@ -60,6 +60,9 @@ add_library(SKRClient SHARED
   client/render-d3d9/chat_box.cpp
   client/cef-bridge/cef_bridge.cpp
   client/cef-bridge/cef_plugin_exports.cpp
+  client/lobby/lobby_manager.cpp
+  client/lobby/menu_patch.cpp
+  client/lobby/settings_io.cpp
   client/compatibility/compat_profile.cpp
   client/transport/auth_client.cpp
   client/samp-hooks/samp_hooks.cpp

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SKR Lobby</title>
+<link rel="stylesheet" href="lobby.css">
+</head>
+<body>
+<!--
+  SKR Lobby — Phase 1 (display + navigation only, no connect).
+  Palette and panel geometry mirror client/hud/hud.html; layout mirrors the
+  launcher-ui WPF pages (Home / Servere / Setări / Despre).
+-->
+<div class="app" id="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand__logo">SKR</span>
+      <span class="brand__sub">CLIENT</span>
+    </div>
+    <nav class="nav">
+      <button class="nav__item is-active" data-page="home">Acasă</button>
+      <button class="nav__item" data-page="servers">Servere</button>
+      <button class="nav__item" data-page="settings">Setări</button>
+      <button class="nav__item" data-page="about">Despre</button>
+    </nav>
+    <div class="sidebar__foot">
+      <button class="btn btn--ghost" id="quitBtn" title="Închide jocul (Esc)">Ieșire</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- Home -->
+    <section class="page is-active" data-page="home">
+      <header class="hero">
+        <div class="hero__eyebrow">SKR ROLEPLAY · PROTOTIP</div>
+        <h1 class="hero__title">Bine ai venit, <span id="homeNick">Jucător</span>.</h1>
+        <p class="hero__lead">Alege un server și apasă JOACĂ. Toate conturile sunt separate pe server.</p>
+        <div class="hero__row">
+          <button class="btn btn--primary btn--big" id="playBtn">JOACĂ</button>
+          <div class="hero__pill" id="homeServer">Server: <b>— nu este selectat —</b></div>
+          <div class="hero__pill" id="homeNickPill">Nickname: <b id="homeNickValue">Jucător</b></div>
+        </div>
+      </header>
+      <section class="news">
+        <h2 class="h2">Noutăți</h2>
+        <article class="news__card">
+          <h3>Phase 1 — Lobby în joc</h3>
+          <p>Meniul SKR înlocuiește meniul GTA. Navigația între pagini funcționează; conectarea la server vine în Phase 2.</p>
+        </article>
+        <article class="news__card">
+          <h3>Intro urban</h3>
+          <p>Secvența SKR urban rulează înainte de lobby. O poți dezactiva din Setări.</p>
+        </article>
+      </section>
+    </section>
+
+    <!-- Servers -->
+    <section class="page" data-page="servers">
+      <header class="page__head">
+        <h1 class="h1">Servere</h1>
+        <p class="page__sub">Lista serverelor SKR. Conectarea va fi disponibilă în Phase 2.</p>
+      </header>
+      <ul class="server-list" id="serverList"></ul>
+    </section>
+
+    <!-- Settings -->
+    <section class="page" data-page="settings">
+      <header class="page__head">
+        <h1 class="h1">Setări</h1>
+        <p class="page__sub">Valorile se păstrează în <code>%APPDATA%\SKR\launcher.ini</code>.</p>
+      </header>
+      <form class="settings" id="settingsForm">
+        <label class="field">
+          <span class="field__label">Nickname</span>
+          <input class="input" id="setNick" type="text" maxlength="24" autocomplete="off">
+          <span class="field__hint">1–24 caractere. Fără spații la margini.</span>
+        </label>
+        <label class="field">
+          <span class="field__label">Cale GTA SA (informativ)</span>
+          <input class="input" id="setGtaPath" type="text" readonly>
+          <span class="field__hint">Configurată din launcherul Windows la prima rulare.</span>
+        </label>
+        <div class="field field--row">
+          <label class="field__grow">
+            <span class="field__label">Rezoluție</span>
+            <select class="input" id="setResolution">
+              <option value="1920x1080">1920 x 1080</option>
+              <option value="1600x900">1600 x 900</option>
+              <option value="1366x768">1366 x 768</option>
+              <option value="1280x720">1280 x 720</option>
+              <option value="auto">Automat (desktop)</option>
+            </select>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="setWindowed">
+            <span>Fereastră (nu fullscreen)</span>
+          </label>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="setIntro" checked>
+          <span>Rulează intro-ul SKR înainte de lobby</span>
+        </label>
+        <label class="field">
+          <span class="field__label">Volum general <span class="field__value" id="volVal">80%</span></span>
+          <input class="input" id="setVolume" type="range" min="0" max="100" step="1" value="80">
+        </label>
+        <div class="settings__actions">
+          <button type="button" class="btn btn--primary" id="saveBtn">Salvează</button>
+          <button type="button" class="btn btn--ghost" id="reloadBtn">Reîncarcă</button>
+          <span class="settings__status" id="setStatus"></span>
+        </div>
+      </form>
+    </section>
+
+    <!-- About -->
+    <section class="page" data-page="about">
+      <header class="page__head">
+        <h1 class="h1">Despre</h1>
+      </header>
+      <div class="about">
+        <div class="about__row"><span>Versiune client</span><b id="aboutVersion">SKR Client R1 (Phase 1)</b></div>
+        <div class="about__row"><span>Status update</span><b id="aboutUpdate">la zi</b></div>
+        <div class="about__row"><span>Platformă</span><b>GTA SA 1.0 US · open.mp</b></div>
+        <div class="about__row"><span>Cod sursă</span><b>github.com/skr-platform</b></div>
+        <p class="about__legal">
+          SKR Client este software independent construit peste GTA San Andreas (Rockstar Games) și open.mp.
+          Nu redistribuim fișiere ale jocului. Vezi AGENTS.md pentru regulile de securitate și licențiere.
+        </p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="lobby.js"></script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 #include "cef-bridge/cef_plugin_exports.h"
 #include "cef-bridge/cef_bridge.h"
 #include "cef-bridge/cef_api_types.h"
+#include "lobby/lobby_manager.h"
 
 extern "C" {
 
@@ -13,7 +14,7 @@ __declspec(dllexport) void cef_initialize(void* api) {
 __declspec(dllexport) void cef_samp_mainloop() {
     auto& bridge = skr::cef::CefBridge::Instance();
     if (!bridge.IsReady()) return;
-    // Per-frame UI logic goes here (event dispatch, state sync, etc.)
+    skr::lobby::OnCefTick();
 }
 
 __declspec(dllexport) void cef_quit() {
