@@ -48,6 +48,7 @@ void Log(const char* fmt, ...) {
 
 // ── State ──────────────────────────────────────────────────────────
 std::atomic<bool> g_initialized{false};
+std::atomic<bool> g_disabled{true};   // default OFF until lobby.on exists (see Initialize)
 std::atomic<bool> g_browserCreated{false};
 std::atomic<bool> g_browserShown{false};
 std::atomic<bool> g_menuPatched{false};
@@ -180,8 +181,20 @@ void DrawCover(IDirect3DDevice9* device) {
 
 void Initialize() {
     if (g_initialized.exchange(true)) return;
-    Log("lobby manager initialize");
-    // Menu patch is retried in OnCefTick (needs GTA SA fully mapped).
+    // Phase 1 kill switch: the in-game lobby replaces the GTA main menu but
+    // the live test showed input/visibility issues we haven't solved yet, so
+    // the module ships disabled. Drop a file named `SKR\lobby.on` next to
+    // SKR.Client.dll to re-enable it for testing — mirrors the `intro.off`
+    // convention from urban_intro.cpp.
+    std::wstring dir = LogDir();
+    bool enabled = false;
+    if (!dir.empty()) {
+        enabled = GetFileAttributesW((dir + L"lobby.on").c_str()) != INVALID_FILE_ATTRIBUTES;
+    }
+    g_disabled.store(!enabled);
+    Log("lobby manager initialize (lobby.on %s -> %s)",
+        enabled ? "present" : "missing",
+        enabled ? "ENABLED" : "DISABLED (vanilla GTA menu will show)");
 }
 
 void Shutdown() {
@@ -195,6 +208,7 @@ void Shutdown() {
 }
 
 void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
+    if (g_disabled.load()) return;   // vanilla menu path: do nothing
     // One-shot "we got here" marker so the next failure mode is distinguishable
     // from "post-intro frame never fires" in lobby.log.
     static std::atomic<bool> firstFrameLogged{false};
@@ -242,6 +256,7 @@ void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
 }
 
 void OnCefTick() {
+    if (g_disabled.load()) return;
     auto& bridge = skr::cef::CefBridge::Instance();
     if (!bridge.IsReady()) return;
     static bool loggedBridgeReady = false;
