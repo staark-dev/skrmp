@@ -88,10 +88,12 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut) {
     if (pos != std::wstring::npos)
         workDir.resize(pos);
 
-    // Lobby mode: no SA-MP auto-connect flags (-c -h -p). The game starts in
-    // menu state; CMenuManager is patched by the lobby module and the CEF
-    // lobby overlay draws on top. Connection is driven by the lobby UI.
+    // Lobby mode: -c activates samp.dll (D3D9 proxy, samp-cef, networking)
+    // but without -h/-p SA-MP won't auto-connect to any server.
+    // CMenuManager is patched by the lobby module; connection is driven by
+    // the lobby UI (Phase 2).
     std::wstring cmdLine = L"\"" + config.gtaSaPath + L"\""
+        + L" -c"
         + L" -n " + config.playerName;
 
     // Create process in SUSPENDED state
