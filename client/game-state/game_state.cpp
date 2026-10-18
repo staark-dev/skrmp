@@ -296,7 +296,8 @@ void Tick() {
     // SA-MP restores it (e.g. on spawn/spectate). Note: this also hides the crosshair.
     // CHud::bScriptDontDisplayRadar is intentionally NOT forced: forcing it crashed the game
     // at startup (reported by the user); the native radar stays visible for now.
-    if (IsConnected()) *reinterpret_cast<bool*>(kDisplayHud) = false;
+    // Only on SKR servers (RPC 241 received): elsewhere the native HUD stays.
+    if (IsConnected() && skr::lobby::IsSkrSession()) *reinterpret_cast<bool*>(kDisplayHud) = false;
 
     DWORD now = GetTickCount();
     if (now - g_lastSend < kSendIntervalMs) return;
@@ -320,6 +321,14 @@ void Tick() {
     CVector pos{};
     float heading = 0.0f;
     if (!ReadPlayer(pos, heading)) { LogStage(4, "no player ped"); return; }
+
+    // Connected with a ped in the world. Runs from CGame::Process, which keeps
+    // ticking after SA-MP proxies the D3D device; the lobby decides when to
+    // hand over based on the server's session info (RPC 241).
+    skr::lobby::OnInWorldTick();
+
+    // RPC 240 is SKR-private: never sent to servers without the SKR Gate.
+    if (!skr::lobby::IsSkrSession()) { LogStage(14, "non-SKR server: rpc 240 disabled"); return; }
 
     char city[48], area[48];
     ResolveZones(pos, city, sizeof(city), area, sizeof(area));
@@ -360,10 +369,6 @@ void Tick() {
     st.gear = static_cast<int8_t>(gear);
     st.maxKmh = static_cast<uint16_t>(maxKmh);
     if (SendClientState(base, netGame, st, city, area)) {
-        // Connected with a ped in the world. Runs from CGame::Process, which keeps
-        // ticking after SA-MP proxies the D3D device; the lobby decides when to
-        // hand over based on the server's session info (RPC 241).
-        skr::lobby::OnInWorldTick();
         char m[128];
         snprintf(m, sizeof(m), "rpc %u sent: %.1f %.1f %.1f %s|%s", protocol::kRpcClientState,
                  pos.x, pos.y, pos.z, city, area);

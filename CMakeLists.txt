@@ -64,6 +64,7 @@ add_library(SKRClient SHARED
   client/lobby/menu_patch.cpp
   client/lobby/settings_io.cpp
   client/lobby/server_query.cpp
+  client/lobby/public_directory.cpp
   client/cef-local/cef_local_loader.cpp
   client/samp-loader/samp_loader.cpp
   client/compatibility/compat_profile.cpp
@@ -80,7 +81,7 @@ target_include_directories(SKRClient PRIVATE
   ${CMAKE_SOURCE_DIR}/shared
   ${CMAKE_SOURCE_DIR}/deps/miniaudio-0.11.23
 )
-target_link_libraries(SKRClient PRIVATE d3d9 dxguid version bcrypt windowscodecs ole32 shell32 ws2_32 SKRShared)
+target_link_libraries(SKRClient PRIVATE d3d9 dxguid version bcrypt windowscodecs ole32 shell32 ws2_32 winhttp SKRShared)
 # Third-party single-header implementation; keep its warnings out of the /W4 build.
 set_source_files_properties(client/intro/miniaudio_impl.cpp PROPERTIES COMPILE_OPTIONS "/W0")
 

@@ -318,6 +318,8 @@ footer b{color:#8e7e5e}
 .inline-ping.is-offline{color:#c4646e}
 .inline-ping.is-offline i{background:#c4646e;box-shadow:0 0 7px rgba(196,100,110,.5)}
 .personal-tag{flex:0 0 auto;padding:4px 6px;border:1px solid rgba(145,173,121,.3);border-radius:3px;background:rgba(145,173,121,.09);color:#a9c294;font-size:6px;font-style:normal;letter-spacing:1px}
+.skr-tag{flex:0 0 auto;padding:4px 6px;border:1px solid rgba(116,220,232,.32);border-radius:3px;background:rgba(116,220,232,.08);color:#74dce8;font-size:6px;font-style:normal;letter-spacing:1px}
+.skr-tag--missing{border-color:rgba(196,100,110,.32);background:rgba(196,100,110,.08);color:#d48a92}
 .inline-remove{display:grid;width:34px;height:34px;place-items:center;border:1px solid rgba(255,255,255,.08);border-radius:5px;background:transparent;color:#8d9699;font-size:15px}
 .inline-remove:hover{border-color:rgba(199,131,121,.45);color:#c78379}
 .add-server-form .field-label{display:block;margin:16px 0 7px;color:#aab6ba;font-size:10px;font-weight:600}

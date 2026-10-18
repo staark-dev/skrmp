@@ -31,6 +31,11 @@ void OnNetGameState(int sampState);
 // Server session info (RPC 241, shared/protocol/session_info.h). Game thread.
 void OnSessionInfo(uint8_t mode);
 
+// True once the server sent RPC 241, i.e. it runs the SKR Gate. SKR-only
+// behaviour (RPC 240, CEF HUD in place of the native one, chat panel) is
+// limited to such sessions; other servers get plain SA-MP.
+bool IsSkrSession();
+
 // Called on the game thread while connected with a ped in the world. Hands
 // over to the server: right away for SessionMode::None, once the server's own
 // CEF page takes focus for SessionMode::CefIntro, after a short grace period

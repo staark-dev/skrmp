@@ -1,4 +1,5 @@
 #include "render-d3d9/chat_box.h"
+#include "lobby/lobby_manager.h"
 #include <windows.h>
 #include <d3d9.h>
 #include <algorithm>
@@ -80,7 +81,8 @@ void __fastcall HookedDrawLine(void* chat, void*, const char* text,
     // Clip lines that would extend above the fixed-height panel. Uses the previous
     // frame's content bottom as the anchor so the cutoff tracks newly added lines.
     // Clipped lines are not drawn, so they do not count toward the panel size.
-    if (g_contentBottom > 0 && top < g_contentBottom + kPadY - static_cast<int>(kPanelMaxHeight))
+    if (skr::lobby::IsSkrSession() && g_contentBottom > 0 &&
+        top < g_contentBottom + kPadY - static_cast<int>(kPanelMaxHeight))
         return;
     g_origDrawLine(chat, text, left, top, right, bottom, colour);
     if (!text || !*text) return;
@@ -176,7 +178,8 @@ void __fastcall HookedChatDraw(void* chatPtr, void*) {
     auto* chat = static_cast<uint8_t*>(chatPtr);
     auto* dev = *reinterpret_cast<IDirect3DDevice9**>(chat + 0x63AE);
     uint32_t mode = *reinterpret_cast<uint32_t*>(chat + 0x8);
-    if (dev && mode != 0 && !*reinterpret_cast<bool*>(kMenuActive) &&
+    // SKR look only on SKR servers (RPC 241 received); other servers keep plain SA-MP chat.
+    if (dev && mode != 0 && skr::lobby::IsSkrSession() && !*reinterpret_cast<bool*>(kMenuActive) &&
         g_contentRight > kTextLeft && g_contentBottom > g_contentTop) {
         // Fit the panel to the lines drawn in the last pass.
         float l = float(kTextLeft - kPadX);

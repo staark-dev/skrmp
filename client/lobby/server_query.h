@@ -17,12 +17,15 @@ struct ServerInfo {
     std::string hostname;     // UTF-8
     std::string gamemode;     // UTF-8
     std::string language;     // UTF-8
+    bool rulesKnown = false;  // the 'r' (rules) reply arrived
+    std::string skrClient;    // value of the "skr_client" rule; empty = no native SKR support
 };
 
 // Blocking; call off the game thread. `timeoutMs` per server.
 ServerInfo QueryServer(const std::string& address, unsigned timeoutMs);
 
-// JSON array of {address, online, password, players, maxPlayers, ping, name, mode, language}.
+// JSON array of {address, online, password, players, maxPlayers, ping, name, mode, language,
+// skr: true | false | null (null = rules unknown)}.
 std::string ServerInfoToJson(const std::vector<ServerInfo>& list);
 
 } // namespace skr::lobby

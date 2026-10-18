@@ -1,4 +1,5 @@
 #include "lobby/server_query.h"
+#include "protocol/query_rules.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
@@ -18,6 +19,7 @@ namespace skr::lobby {
 namespace {
 
 constexpr size_t kHeader = 11;
+const std::string kSkrRule = protocol::kSkrQueryRule;
 
 bool SplitAddress(const std::string& address, std::string& host, uint16_t& port) {
     const size_t colon = address.rfind(':');
@@ -51,6 +53,32 @@ bool ReadString(const char* buf, size_t size, size_t& pos, std::string& out) {
     out = Cp1252ToUtf8(buf + pos, len);
     pos += len;
     return true;
+}
+
+bool ReadShortString(const char* buf, size_t size, size_t& pos, std::string& out) {
+    if (pos + 1 > size) return false;
+    const uint8_t len = static_cast<uint8_t>(buf[pos++]);
+    if (pos + len > size) return false;
+    out.assign(buf + pos, len);
+    pos += len;
+    return true;
+}
+
+// Sends one query packet and waits for the reply with the same 11-byte header.
+int Exchange(SOCKET s, const sockaddr_in& to, const char* packet, char* buf, size_t cap, unsigned timeoutMs) {
+    sendto(s, packet, static_cast<int>(kHeader), 0, reinterpret_cast<const sockaddr*>(&to), sizeof(to));
+    fd_set set;
+    FD_ZERO(&set);
+    FD_SET(s, &set);
+    timeval tv{static_cast<long>(timeoutMs / 1000), static_cast<long>((timeoutMs % 1000) * 1000)};
+    if (select(0, &set, nullptr, nullptr, &tv) <= 0) return 0;
+    sockaddr_in from{};
+    int fromLen = sizeof(from);
+    const int n = recvfrom(s, buf, static_cast<int>(cap), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
+    if (n < static_cast<int>(kHeader) || from.sin_addr.s_addr != to.sin_addr.s_addr ||
+        from.sin_port != to.sin_port || memcmp(buf, packet, kHeader) != 0)
+        return 0;
+    return n;
 }
 
 void AppendJsonString(std::string& out, const std::string& s) {
@@ -103,46 +131,53 @@ ServerInfo QueryServer(const std::string& address, unsigned timeoutMs) {
     memcpy(packet + 4, &to.sin_addr.s_addr, 4);
     packet[8] = static_cast<char>(port & 0xFF);
     packet[9] = static_cast<char>(port >> 8);
-    packet[10] = 'i';
 
+    char buf[4096];
     LARGE_INTEGER freq{}, start{}, end{};
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&start);
-    sendto(s, packet, sizeof(packet), 0, reinterpret_cast<sockaddr*>(&to), sizeof(to));
+    packet[10] = 'i';
+    int n = Exchange(s, to, packet, buf, sizeof(buf), timeoutMs);
+    QueryPerformanceCounter(&end);
 
-    char buf[2048];
-    fd_set set;
-    FD_ZERO(&set);
-    FD_SET(s, &set);
-    timeval tv{static_cast<long>(timeoutMs / 1000), static_cast<long>((timeoutMs % 1000) * 1000)};
-    int n = 0;
-    if (select(0, &set, nullptr, nullptr, &tv) > 0) {
-        sockaddr_in from{};
-        int fromLen = sizeof(from);
-        n = recvfrom(s, buf, sizeof(buf), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
-        QueryPerformanceCounter(&end);
-        if (from.sin_addr.s_addr != to.sin_addr.s_addr || from.sin_port != to.sin_port) n = 0;
+    if (n >= static_cast<int>(kHeader + 5)) {
+        size_t pos = kHeader;
+        const size_t size = static_cast<size_t>(n);
+        info.password = buf[pos++] != 0;
+        uint16_t players = 0, maxPlayers = 0;
+        memcpy(&players, buf + pos, 2); pos += 2;
+        memcpy(&maxPlayers, buf + pos, 2); pos += 2;
+        if (ReadString(buf, size, pos, info.hostname) &&
+            ReadString(buf, size, pos, info.gamemode) &&
+            ReadString(buf, size, pos, info.language)) {
+            info.players = players;
+            info.maxPlayers = maxPlayers;
+            info.pingMs = static_cast<int>((end.QuadPart - start.QuadPart) * 1000 / freq.QuadPart);
+            info.online = true;
+        }
     }
+
+    // Rules ('r'): uint16 count, then { uint8 len + name, uint8 len + value }.
+    if (info.online) {
+        packet[10] = 'r';
+        n = Exchange(s, to, packet, buf, sizeof(buf), timeoutMs);
+        if (n >= static_cast<int>(kHeader + 2)) {
+            size_t pos = kHeader;
+            const size_t size = static_cast<size_t>(n);
+            uint16_t count = 0;
+            memcpy(&count, buf + pos, 2); pos += 2;
+            bool ok = true;
+            for (uint16_t r = 0; r < count && ok; ++r) {
+                std::string name, value;
+                ok = ReadShortString(buf, size, pos, name) && ReadShortString(buf, size, pos, value);
+                if (ok && name == kSkrRule) info.skrClient = value;
+            }
+            info.rulesKnown = ok;
+        }
+    }
+
     closesocket(s);
     WSACleanup();
-
-    if (n < static_cast<int>(kHeader + 5) || memcmp(buf, packet, kHeader) != 0) return info;
-
-    size_t pos = kHeader;
-    const size_t size = static_cast<size_t>(n);
-    info.password = buf[pos++] != 0;
-    uint16_t players = 0, maxPlayers = 0;
-    memcpy(&players, buf + pos, 2); pos += 2;
-    memcpy(&maxPlayers, buf + pos, 2); pos += 2;
-    if (!ReadString(buf, size, pos, info.hostname) ||
-        !ReadString(buf, size, pos, info.gamemode) ||
-        !ReadString(buf, size, pos, info.language))
-        return info;
-
-    info.players = players;
-    info.maxPlayers = maxPlayers;
-    info.pingMs = static_cast<int>((end.QuadPart - start.QuadPart) * 1000 / freq.QuadPart);
-    info.online = true;
     return info;
 }
 
@@ -160,6 +195,7 @@ std::string ServerInfoToJson(const std::vector<ServerInfo>& list) {
         out += ",\"name\":";     AppendJsonString(out, s.hostname);
         out += ",\"mode\":";     AppendJsonString(out, s.gamemode);
         out += ",\"language\":"; AppendJsonString(out, s.language);
+        out += ",\"skr\":";      out += !s.rulesKnown ? "null" : s.skrClient.empty() ? "false" : "true";
         out += '}';
     }
     out += ']';

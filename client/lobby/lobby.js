@@ -221,6 +221,7 @@
       ping: online ? info.ping : null,
       offline: !!info && !online,
       locked: online && info.password,
+      skr: online ? info.skr : null,
       recommended: false,
       personal: true,
       address: entry.address,
@@ -236,6 +237,7 @@
     server.maxPlayers = info.maxPlayers;
     server.ping = info.ping;
     server.locked = info.password;
+    server.skr = info.skr;
     return server;
   }
 
@@ -252,7 +254,8 @@
           ping: Math.max(0, Number(s.ping) || 0),
           name: String(s.name || '').slice(0, 64),
           mode: String(s.mode || '').slice(0, 40),
-          language: String(s.language || '').slice(0, 20)
+          language: String(s.language || '').slice(0, 20),
+          skr: s.skr === true ? true : s.skr === false ? false : null
         };
       });
     } catch (e) {}
@@ -404,6 +407,13 @@
         '<div class="inline-ping' + (server.offline ? ' is-offline' : '') + '"><i></i><span>' + (server.offline ? 'Offline' : server.ping == null ? '—' : html(server.ping) + ' ms') + '</span></div>' +
         '<div class="inline-server-actions"><button class="inline-favorite" type="button" data-favorite-id="' + html(server.id) + '" aria-label="Favorite">' + (favoriteServers[server.id] ? '★' : '☆') + '</button><button class="button button--gold inline-connect" data-action="connect" data-server-id="' + html(server.id) + '" data-connectable="' + (server.address ? 'true' : 'false') + '"' + (nicknameIsValid(nicknameValue()) && server.address && !connectPending ? '' : ' disabled') + '>Conectează <span>→</span></button></div>';
       list.appendChild(row);
+      if (server.skr === true || server.skr === false) {
+        var skrTag = document.createElement('i');
+        skrTag.className = server.skr ? 'skr-tag' : 'skr-tag skr-tag--missing';
+        skrTag.textContent = server.skr ? 'SKR' : 'FĂRĂ SKR';
+        skrTag.title = server.skr ? 'Suport nativ pentru SKR Client' : 'Serverul nu are suport nativ pentru SKR Client';
+        row.querySelector('.server-name-line').appendChild(skrTag);
+      }
       if (server.personal) {
         var tag = document.createElement('i');
         tag.className = 'personal-tag';
@@ -434,10 +444,10 @@
           name: name,
           shortName: String(server.shortName || name.slice(0, 3)).slice(0, 4).toUpperCase(),
           mode: String(server.mode || 'Multiplayer'),
-          language: String(server.language || 'RO').slice(0, 5),
+          language: String(server.language || '').slice(0, 12),
           players: Math.max(0, Number(server.players) || 0),
           maxPlayers: Math.max(1, Number(server.maxPlayers) || 1),
-          ping: Math.max(0, Number(server.ping) || 0),
+          ping: server.ping == null ? null : Math.max(0, Number(server.ping) || 0),
           address: normalizeAddress(server.address),
           recommended: !!server.recommended,
           description: String(server.description || 'Server public din rețeaua SKR.'),
@@ -446,7 +456,7 @@
       }).filter(Boolean).sort(function (a, b) { return a.order - b.order; });
       $('refreshServers').classList.remove('refreshing');
       $('directoryStatus').textContent = publicServers.length
-        ? 'Catalog actualizat Â· ' + publicServers.length + (publicServers.length === 1 ? ' server' : ' servere')
+        ? 'Catalog open.mp · ' + publicServers.length + (publicServers.length === 1 ? ' server' : ' servere')
         : 'Catalogul nu conține servere';
       renderServerBrowser();
     } catch (e) {
@@ -553,10 +563,31 @@
     pendingAction = null;
     if (previousFocus) previousFocus.focus();
   }
+  function startConnect(selected) {
+    connectPending = true;
+    updateNicknameState(false);
+    setConnectionServer(selected);
+    setConnectionStep('launch');
+    showConnection('Se pornește sesiunea…', 'Pregătim jocul pentru ' + nicknameValue() + '.');
+    if (!cefEmit('skr:lobby:connect', JSON.stringify({
+      address: selected.address,
+      nickname: nicknameValue()
+    }))) {
+      connectPending = false;
+      updateNicknameState(false);
+      hideConnection();
+      toast('Clientul nativ nu este disponibil pentru conectare.');
+    }
+  }
+
   function confirmAction(action) {
     previousFocus = document.activeElement;
     pendingAction = action;
-    if (action === 'quit') {
+    if (action && action.type === 'connect') {
+      $('modalTitle').textContent = 'Server fără suport nativ SKR';
+      $('modalText').textContent  = (action.server.name || action.server.address) +
+        ' nu are suport nativ pentru SKR Client. Lobby-ul, intro-ul și resursele SKR pot lipsi. Continui conectarea?';
+    } else if (action === 'quit') {
       $('modalTitle').textContent = 'Ieși din joc?';
       $('modalText').textContent  = 'Jocul se va închide complet. Confirmă pentru a opri procesul.';
     } else {
@@ -650,20 +681,9 @@
           toast('Serverul nu are o adresă de conectare configurată.');
           return;
         }
-        connectPending = true;
-        updateNicknameState(false);
-        setConnectionServer(selected);
-        setConnectionStep('launch');
-        showConnection('Se pornește sesiunea…', 'Pregătim jocul pentru ' + nicknameValue() + '.');
-        if (!cefEmit('skr:lobby:connect', JSON.stringify({
-          address: selected.address,
-          nickname: nicknameValue()
-        }))) {
-          connectPending = false;
-          updateNicknameState(false);
-          hideConnection();
-          toast('Clientul nativ nu este disponibil pentru conectare.');
-        }
+        // Rules queried and no "skr_client" rule: ask before connecting.
+        if (selected.skr === false) confirmAction({ type: 'connect', server: selected });
+        else startConnect(selected);
       } else if (act.dataset.action === 'open-settings') {
         showPage('settings');
       }
@@ -748,7 +768,8 @@
   $('confirmModalButton').addEventListener('click', function () {
     var action = pendingAction;
     closeModal();
-    if (action === 'quit') cefEmit('skr:lobby:quit');
+    if (action && action.type === 'connect') startConnect(action.server);
+    else if (action === 'quit') cefEmit('skr:lobby:quit');
     else if (action === 'disconnect') { cefEmit('skr:lobby:disconnect'); toast('Phase 2: deconectarea nu este încă implementată.'); }
   });
 

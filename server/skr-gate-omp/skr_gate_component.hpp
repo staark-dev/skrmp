@@ -5,6 +5,7 @@
 #include "protocol/messages.h"
 #include "protocol/client_state.h"
 #include "protocol/session_info.h"
+#include "protocol/query_rules.h"
 #include "crypto/crypto.h"
 #include <bitstream.hpp>
 

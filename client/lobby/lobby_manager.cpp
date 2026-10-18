@@ -2,6 +2,7 @@
 #include "lobby/menu_patch.h"
 #include "lobby/settings_io.h"
 #include "lobby/server_query.h"
+#include "lobby/public_directory.h"
 #include "protocol/session_info.h"
 #include "cef-bridge/cef_bridge.h"
 #include "cef-local/cef_local_loader.h"
@@ -14,6 +15,7 @@
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include <wincodec.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <mutex>
@@ -221,32 +223,58 @@ void EmitServerError(const char* code) {
 // the game thread and sent to the page as one "skr:lobby:servers:info" array.
 std::atomic<bool> g_serverQueryRunning{false};
 constexpr unsigned kServerQueryTimeoutMs = 1000;
+constexpr size_t kPublicListMax = 300;      // rows sent to the page, most players first
+constexpr size_t kPublicPingMax = 40;       // public servers also pinged via query
+constexpr size_t kQueryBatch = 32;          // concurrent UDP queries
 
-void StartServerQueries() {
+std::vector<ServerInfo> QueryAll(const std::vector<std::string>& addresses) {
+    std::vector<ServerInfo> results(addresses.size());
+    for (size_t start = 0; start < addresses.size(); start += kQueryBatch) {
+        std::vector<std::thread> workers;
+        const size_t end = (std::min)(addresses.size(), start + kQueryBatch);
+        for (size_t i = start; i < end; ++i)
+            workers.emplace_back([&results, &addresses, i]() {
+                results[i] = QueryServer(addresses[i], kServerQueryTimeoutMs);
+            });
+        for (auto& w : workers) w.join();
+    }
+    return results;
+}
+
+// Public directory (open.mp) + live info for personal servers and the most
+// populated public ones. Off the game thread; one refresh at a time.
+void StartServerRefresh(bool includePublic) {
     if (g_serverQueryRunning.exchange(true)) return;
     std::vector<PersonalServer> list;
     LoadPersonalServers(list);
     std::vector<std::string> addresses;
     for (const auto& s : list) addresses.push_back(s.address);
-    std::thread([addresses]() {
-        std::vector<ServerInfo> results(addresses.size());
-        std::vector<std::thread> workers;
-        for (size_t i = 0; i < addresses.size(); ++i)
-            workers.emplace_back([&results, &addresses, i]() {
-                results[i] = QueryServer(addresses[i], kServerQueryTimeoutMs);
-            });
-        for (auto& w : workers) w.join();
-        const std::string json = ServerInfoToJson(results);
-        skr::cef::CefBridge::Instance().EmitEventString("skr:lobby:servers:info", json.c_str());
+    std::thread([addresses, includePublic]() mutable {
+        auto& bridge = skr::cef::CefBridge::Instance();
+        if (includePublic) {
+            std::vector<PublicServer> pub;
+            std::string error;
+            if (FetchOpenMpServers(pub, error)) {
+                std::stable_sort(pub.begin(), pub.end(),
+                    [](const PublicServer& a, const PublicServer& b) { return a.players > b.players; });
+                Log("public directory: %u servers from open.mp", static_cast<unsigned>(pub.size()));
+                if (pub.size() > kPublicListMax) pub.resize(kPublicListMax);
+                bridge.EmitEventString("skr:lobby:servers", PublicServersToLobbyJson(pub).c_str());
+                for (size_t i = 0; i < pub.size() && i < kPublicPingMax; ++i) addresses.push_back(pub[i].address);
+            } else {
+                Log("public directory: fetch failed (%s)", error.c_str());
+                bridge.EmitEventString("skr:lobby:servers", "[]");
+            }
+        }
+        const std::string json = ServerInfoToJson(QueryAll(addresses));
+        bridge.EmitEventString("skr:lobby:servers:info", json.c_str());
         g_serverQueryRunning.store(false);
     }).detach();
 }
 
 int __cdecl OnServersRequest(const char*, skr::cef::CefListValue*) {
     EmitPersonalServers();
-    StartServerQueries();
-    // No public directory provider is configured in this checkout.
-    skr::cef::CefBridge::Instance().EmitEventString("skr:lobby:servers", "[]");
+    StartServerRefresh(true);
     return 0;
 }
 
@@ -278,7 +306,7 @@ int __cdecl OnServerAdd(const char*, skr::cef::CefListValue* args) {
     }
     Log("servers:add -> %s (%s)", ps.address.c_str(), updated ? "updated" : "added");
     EmitPersonalServers();
-    StartServerQueries();
+    StartServerRefresh(false);
     return 0;
 }
 
@@ -863,6 +891,10 @@ bool ServerPageFocused() {
     static FocusFn fn = reinterpret_cast<FocusFn>(
         GetProcAddress(GetModuleHandleW(L"client.dll"), "skr_cef_foreign_browser_focused"));
     return fn && fn(kBrowserId);
+}
+
+bool IsSkrSession() {
+    return g_sessionMode.load() >= 0;
 }
 
 bool ResourcesPending() {

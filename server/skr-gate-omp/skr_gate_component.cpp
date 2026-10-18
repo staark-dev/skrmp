@@ -197,6 +197,16 @@ void SkrGateComponent::onInit(IComponentList* components) {
 
 void SkrGateComponent::onReady() {
     core_->printLn("SKR Gate: ready, enforcing ticket-based auth");
+
+    // Advertise native SKR support in the query rules (shared/protocol/query_rules.h).
+    bool published = false;
+    for (INetwork* network : core_->getNetworks()) {
+        if (auto* query = queryExtension<INetworkQueryExtension>(network)) {
+            published = query->addRule(protocol::kSkrQueryRule, protocol::kSkrQueryRuleValue) || published;
+        }
+    }
+    core_->printLn("SKR Gate: query rule %s=%s %s", protocol::kSkrQueryRule,
+                   protocol::kSkrQueryRuleValue, published ? "published" : "NOT published");
 }
 
 void SkrGateComponent::onFree(IComponent* component) {
