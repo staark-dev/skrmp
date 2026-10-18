@@ -23,7 +23,35 @@
       <span>ROLEPLAY<br><small>SAN ANDREAS</small></span>
     </a>
     <nav id="navigation" aria-label="Meniul jocului"></nav>
-    <span class="mode-label" id="modeLabel">ÎNAINTE DE CONECTARE</span>
+    <div class="player-profile">
+      <button class="player-profile__button" id="profileToggle" type="button" aria-expanded="false">
+        <span class="player-avatar" id="playerAvatar">?</span>
+        <span class="player-profile__copy">
+          <small>JUCĂTOR</small>
+          <strong id="playerName">Setează nickname</strong>
+        </span>
+        <span class="player-profile__status" id="playerStatus"></span>
+        <span class="player-profile__chevron">⌄</span>
+      </button>
+      <div class="profile-popover" id="profilePopover" hidden>
+        <span class="eyebrow">PROFIL LOCAL</span>
+        <h2>Identitatea ta</h2>
+        <p>Acest nickname va fi folosit când intri pe un server.</p>
+        <label for="nickname">Nickname</label>
+        <div class="profile-popover__field">
+          <input class="nickname-input" id="nickname" type="text" minlength="3" maxlength="24"
+                 autocomplete="off" spellcheck="false" placeholder="ex. Staark"
+                 aria-describedby="nicknameHint nicknameError">
+          <span class="nickname-check" id="nicknameValid" hidden>✓</span>
+        </div>
+        <div class="nickname-feedback">
+          <span id="nicknameHint">3–24 caractere: litere, cifre și _</span>
+          <span class="nickname-error" id="nicknameError" role="status"></span>
+        </div>
+        <button class="button button--gold profile-save" id="saveNickname" type="button" disabled>Salvează profilul</button>
+      </div>
+    </div>
+    <span class="mode-label" id="modeLabel">OFFLINE</span>
   </header>
 
   <main>
@@ -64,37 +92,32 @@
 
     <!-- Servers (pre-connect mode landing page) -->
     <section class="page" data-page="servers" hidden>
-      <div class="page-heading">
-        <div>
-          <span class="eyebrow">ALEGE UNDE ÎNCEPE POVESTEA</span>
-          <h1>Servere</h1>
+      <div class="server-toolbar">
+        <div class="server-toolbar__title">
+          <span class="eyebrow">SKR MULTIPLAYER</span>
+          <h1>Alege un server</h1>
+          <p><span class="catalog-dot"></span><span id="directoryStatus">Catalog public disponibil</span></p>
         </div>
-        <p>SKR / multiplayer</p>
+        <div class="server-tools">
+          <button class="server-filter active" type="button" data-server-filter="all">Toate</button>
+          <button class="server-filter" type="button" data-server-filter="recommended">Recomandate</button>
+          <button class="server-filter" type="button" data-server-filter="favorites">Favorite</button>
+          <label class="server-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
+            <input id="serverSearch" type="search" placeholder="Nume, mod sau limbă" aria-label="Caută un server">
+          </label>
+          <button class="directory-refresh" id="refreshServers" type="button" aria-label="Actualizează lista serverelor">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"></path><path d="M18.5 9A7 7 0 1 0 19 15"></path></svg>
+          </button>
+        </div>
       </div>
-      <div class="server-intro">
-        <span class="eyebrow">SAN ANDREAS. O ALTĂ PERSPECTIVĂ.</span>
-        <h2>ORAȘUL TE<br><em>AȘTEAPTĂ.</em></h2>
-        <p>Alege un server pentru a continua.</p>
-      </div>
-      <div class="server-list">
-        <article class="server">
-          <div class="server-mark">SKR</div>
-          <div>
-            <h3>SKR Roleplay — Public</h3>
-            <p>127.0.0.1:7777 · date demonstrative</p>
-          </div>
-          <span class="server-state">Status indisponibil</span>
-          <button class="button button--gold" data-action="connect" data-addr="127.0.0.1:7777">Conectează ↗</button>
-        </article>
-        <article class="server">
-          <div class="server-mark">DEV</div>
-          <div>
-            <h3>SKR Roleplay — Dev</h3>
-            <p>127.0.0.1:7778 · date demonstrative</p>
-          </div>
-          <span class="server-state">Status indisponibil</span>
-          <button class="button button--secondary" data-action="connect" data-addr="127.0.0.1:7778">Conectează ↗</button>
-        </article>
+      <div class="inline-server-panel">
+        <div class="inline-server-heading">
+          <span>SERVER</span><span>MOD</span><span>JUCĂTORI</span><span>PING</span><span id="serverCount">0 SERVERE</span>
+        </div>
+        <div class="public-server-list public-server-list--inline" id="publicServerList">
+          <div class="server-list-state">Se încarcă serverele publice…</div>
+        </div>
       </div>
     </section>
 
@@ -126,7 +149,7 @@
 
   <footer>
     <span><kbd>ESC</kbd> <span id="escapeLabel">Ieși din joc</span></span>
-    <span>SKR CLIENT <b>PROTOTIP · PHASE 1</b></span>
+    <span>SKR CLIENT <b>LOCAL · OFFLINE</b></span>
   </footer>
 </div>
 

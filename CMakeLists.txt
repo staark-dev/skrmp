@@ -104,6 +104,9 @@ add_custom_command(TARGET SKRClient POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           "${CMAKE_SOURCE_DIR}/client/lobby/assets/background.png"
           "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/assets/background.png"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_SOURCE_DIR}/client/lobby/assets/logo.png"
+          "$<TARGET_FILE_DIR:SKRClient>/SKR/lobby/assets/logo.png"
   VERBATIM)
 
 # --- Intro timeline/transport tests (no GTA, no device) ---
