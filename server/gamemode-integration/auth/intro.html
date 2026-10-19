@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ro"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SKR Intro</title>
+<style>
+:root {
+  --text: #f0f4f7;
+  --muted: #84939f;
+  --accent: #d4b475;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { width:100%; height:100%; margin:0; overflow:hidden; background: #000; }
+body { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; display:flex; align-items:center; justify-content:center; flex-direction: column; }
+
+.intro {
+  display: flex; flex-direction: column; align-items: center;
+  opacity: 0;
+  animation: fadeIn 800ms ease-out 200ms forwards;
+}
+@keyframes fadeIn { to { opacity: 1; } }
+
+.intro-logo {
+  font-family: 'Bahnschrift Condensed', 'Bahnschrift', 'Arial Narrow', sans-serif;
+  font-stretch: condensed;
+  font-size: 72px; font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 6px; line-height: 1;
+  user-select: none;
+}
+.intro-subtitle {
+  font-size: 13px; font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 6px; text-transform: uppercase;
+  margin-top: 8px;
+  user-select: none;
+}
+.intro-line {
+  width: 60px; height: 1px;
+  background: rgba(212,180,117,.3);
+  margin: 28px 0;
+}
+.intro-status {
+  font-size: 13px; color: var(--muted);
+  letter-spacing: 1px;
+  user-select: none;
+}
+.intro-dots::after {
+  content: '';
+  animation: dots 1.5s steps(3, end) infinite;
+}
+@keyframes dots {
+  0% { content: ''; }
+  33% { content: '.'; }
+  66% { content: '..'; }
+  100% { content: '...'; }
+}
+.intro-version {
+  position: fixed; bottom: 20px;
+  font-size: 11px; color: rgba(132,147,159,.5);
+  user-select: none;
+}
+</style>
+</head>
+<body>
+
+<div class="intro">
+  <div class="intro-logo">SKR</div>
+  <div class="intro-subtitle">Roleplay</div>
+  <div class="intro-line"></div>
+  <div class="intro-status" id="status">Se conecteaza<span class="intro-dots"></span></div>
+</div>
+<div class="intro-version">SKR Client v0.1.0</div>
+
+<script>
+(function() {
+  var statusEl = document.getElementById('status');
+
+  function cefOn(event, fn) {
+    if (window.cef && typeof cef.on === 'function') cef.on(event, fn);
+  }
+  function cefEmit(event, data) {
+    if (window.cef && typeof cef.emit === 'function') {
+      if (data !== undefined) cef.emit(event, data);
+      else cef.emit(event);
+    }
+  }
+
+  cefOn('skr:intro:status', function(msg) {
+    try {
+      var data = typeof msg === 'string' ? JSON.parse(msg) : (msg || {});
+      if (data.text) statusEl.innerHTML = data.text + (data.loading !== false ? '<span class="intro-dots"></span>' : '');
+    } catch(e) {}
+  });
+
+  cefOn('skr:intro:hide', function() {
+    document.body.style.transition = 'opacity 400ms ease-out';
+    document.body.style.opacity = '0';
+  });
+
+  cefEmit('skr:intro:ready');
+})();
+</script>
+</body></html>
