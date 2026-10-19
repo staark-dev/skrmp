@@ -7,6 +7,7 @@
 #include "protocol/session_info.h"
 #include "protocol/query_rules.h"
 #include "protocol/radar_style.h"
+#include "protocol/radar_rect.h"
 #include "crypto/crypto.h"
 #include <bitstream.hpp>
 
@@ -40,6 +41,11 @@ struct SkrPlayerData {
     protocol::RadarSizeMode radarSizeMode = protocol::RadarSizeMode::Default;
     float radarScale = 1.0f;
 
+    // Radar rect (RPC 243): last reported screen-space rectangle from the client.
+    float radarRectX = 0.0f, radarRectY = 0.0f;
+    float radarRectW = 0.0f, radarRectH = 0.0f;
+    bool radarRectReceived = false;
+
     // AC tracking
     uint32_t lastAcBeatSeq = 0;
     uint64_t lastAcBeatMs = 0;
@@ -54,6 +60,8 @@ struct SkrPlayerData {
         radarStyle = protocol::RadarStyle::Round;
         radarSizeMode = protocol::RadarSizeMode::Default;
         radarScale = 1.0f;
+        radarRectX = radarRectY = radarRectW = radarRectH = 0.0f;
+        radarRectReceived = false;
         lastAcBeatSeq = 0;
         lastAcBeatMs = 0;
         missedAcBeats = 0;
@@ -87,6 +95,18 @@ private:
     ICore* core_ = nullptr;
     std::unordered_map<int, uint64_t> lastAcceptMs_;
     std::unordered_map<int, int> seq_;
+};
+
+// RPC 243 (shared/protocol/radar_rect.h): client reports its radar's screen-space rectangle.
+class SkrRadarRectHandler final : public SingleNetworkInEventHandler {
+public:
+    bool onReceive(IPlayer& peer, NetworkBitStream& bs) override;
+    void setOwner(SkrGateComponent* gate, ICore* core) { gate_ = gate; core_ = core; }
+    void forget(int playerId) { lastAcceptMs_.erase(playerId); }
+private:
+    SkrGateComponent* gate_ = nullptr;
+    ICore* core_ = nullptr;
+    std::unordered_map<int, uint64_t> lastAcceptMs_;
 };
 
 class SkrGateComponent final
@@ -143,6 +163,10 @@ public:
     // Script natives. False when the player is unknown/rejected or arguments are invalid.
     bool SetRadarStyle(int playerId, protocol::RadarStyle style);
     bool SetRadarSize(int playerId, protocol::RadarSizeMode mode, float scale);
+    bool GetRadarRect(int playerId, float& x, float& y, float& w, float& h) const;
+
+    // Called by SkrRadarRectHandler when RPC 243 arrives.
+    void OnRadarRect(int playerId, float x, float y, float w, float h);
 
 private:
     // Sends the stored radar state if the player is authorized and has session info.
@@ -163,6 +187,7 @@ private:
 
     SkrJoinFilter joinFilter_;
     SkrClientStateHandler clientStateHandler_;
+    SkrRadarRectHandler radarRectHandler_;
     uint64_t tickAccumulatorMs_ = 0;
 };
 

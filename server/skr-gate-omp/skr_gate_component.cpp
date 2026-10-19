@@ -164,6 +164,73 @@ bool SkrJoinFilter::onReceive(IPlayer& peer, NetworkBitStream& bs) {
     return true;
 }
 
+// ── RPC 243: radar rect from SKRClient.dll ───────────────
+
+bool SkrRadarRectHandler::onReceive(IPlayer& peer, NetworkBitStream& bs) {
+    const int id = peer.getID();
+    if (!gate_ || !gate_->IsAuthorized(id)) return false;
+
+    const uint64_t now = NowMs();
+    auto it = lastAcceptMs_.find(id);
+    if (it != lastAcceptMs_.end() && now - it->second < kClientStateMinIntervalMs) return false;
+
+    uint8_t version = 0;
+    float x, y, w, h;
+    if (!bs.readUINT8(version) || version != protocol::kRadarRectVersion) return false;
+    if (!bs.readFLOAT(x) || !bs.readFLOAT(y) || !bs.readFLOAT(w) || !bs.readFLOAT(h)) return false;
+
+    if (!InRange(x, 0.f, 8192.f) || !InRange(y, 0.f, 8192.f) ||
+        !InRange(w, 1.f, 8192.f) || !InRange(h, 1.f, 8192.f)) return false;
+
+    lastAcceptMs_[id] = now;
+    gate_->OnRadarRect(id, x, y, w, h);
+    return false;
+}
+
+void SkrGateComponent::OnRadarRect(int playerId, float x, float y, float w, float h) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(playerId);
+        if (it == players_.end()) return;
+        it->second.radarRectX = x;
+        it->second.radarRectY = y;
+        it->second.radarRectW = w;
+        it->second.radarRectH = h;
+        it->second.radarRectReceived = true;
+    }
+
+    auto* vars = queryExtension<IPlayerVariableData>(*core_->getPlayers().get(playerId));
+    if (vars) {
+        vars->setFloat("skr_radar_x", x);
+        vars->setFloat("skr_radar_y", y);
+        vars->setFloat("skr_radar_w", w);
+        vars->setFloat("skr_radar_h", h);
+    }
+
+    if (pawn_) {
+        cell cx, cy, cw, ch;
+        std::memcpy(&cx, &x, sizeof(cell));
+        std::memcpy(&cy, &y, sizeof(cell));
+        std::memcpy(&cw, &w, sizeof(cell));
+        std::memcpy(&ch, &h, sizeof(cell));
+        if (IPawnScript* gm = pawn_->mainScript())
+            gm->Call("OnPlayerRadarRect", DefaultReturnValue_True, playerId, cx, cy, cw, ch);
+        for (IPawnScript* fs : pawn_->sideScripts())
+            if (fs) fs->Call("OnPlayerRadarRect", DefaultReturnValue_True, playerId, cx, cy, cw, ch);
+    }
+}
+
+bool SkrGateComponent::GetRadarRect(int playerId, float& x, float& y, float& w, float& h) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = players_.find(playerId);
+    if (it == players_.end() || !it->second.radarRectReceived) return false;
+    x = it->second.radarRectX;
+    y = it->second.radarRectY;
+    w = it->second.radarRectW;
+    h = it->second.radarRectH;
+    return true;
+}
+
 // ── Pawn natives: SKR_SetRadarStyle / SKR_SetRadarSize (skr_gate.inc) ──
 
 namespace {
@@ -193,9 +260,26 @@ cell AMX_NATIVE_CALL Native_SetRadarSize(AMX*, const cell* params) {
                                 CellToFloat(params[3])) ? 1 : 0;
 }
 
+// native SKR_GetRadarRect(playerid, &Float:x, &Float:y, &Float:w, &Float:h);
+cell AMX_NATIVE_CALL Native_GetRadarRect(AMX* amx, const cell* params) {
+    if (!g_gate || !HasArgs(params, 5)) return 0;
+    float x, y, w, h;
+    if (!g_gate->GetRadarRect(params[1], x, y, w, h)) return 0;
+    // Resolve AMX reference parameters via amx->data/amx->base.
+    unsigned char* data = (amx->data != nullptr) ? amx->data :
+        (reinterpret_cast<unsigned char*>(amx->base) + reinterpret_cast<AMX_HEADER*>(amx->base)->dat);
+    auto ref = [&](cell addr) -> cell* { return reinterpret_cast<cell*>(data + addr); };
+    std::memcpy(ref(params[2]), &x, sizeof(cell));
+    std::memcpy(ref(params[3]), &y, sizeof(cell));
+    std::memcpy(ref(params[4]), &w, sizeof(cell));
+    std::memcpy(ref(params[5]), &h, sizeof(cell));
+    return 1;
+}
+
 const AMX_NATIVE_INFO kNatives[] = {
     {"SKR_SetRadarStyle", &Native_SetRadarStyle},
     {"SKR_SetRadarSize", &Native_SetRadarSize},
+    {"SKR_GetRadarRect", &Native_GetRadarRect},
 };
 
 } // namespace
@@ -210,6 +294,7 @@ SkrGateComponent::~SkrGateComponent() {
     if (core_) {
         core_->removePerRPCInEventHandler<kRPC_ClientJoin>(&joinFilter_);
         core_->removePerRPCInEventHandler<protocol::kRpcClientState>(&clientStateHandler_);
+        core_->removePerRPCInEventHandler<protocol::kRpcRadarRect>(&radarRectHandler_);
         core_->getEventDispatcher().removeEventHandler(this);
         core_->getPlayers().getPlayerConnectDispatcher().removeEventHandler(this);
     }
@@ -240,8 +325,12 @@ void SkrGateComponent::onInit(IComponentList* components) {
 
     clientStateHandler_.setOwner(this, core_);
     core_->addPerRPCInEventHandler<protocol::kRpcClientState>(&clientStateHandler_);
-    core_->printLn("SKR Gate: registered player event handlers + RPC filter + client-state RPC %d",
-                   protocol::kRpcClientState);
+
+    radarRectHandler_.setOwner(this, core_);
+    core_->addPerRPCInEventHandler<protocol::kRpcRadarRect>(&radarRectHandler_);
+
+    core_->printLn("SKR Gate: registered player event handlers + RPC filter + client-state RPC %d + radar-rect RPC %d",
+                   protocol::kRpcClientState, protocol::kRpcRadarRect);
 }
 
 void SkrGateComponent::onReady() {
@@ -315,6 +404,7 @@ void SkrGateComponent::onPlayerDisconnect(IPlayer& player, PeerDisconnectReason 
         players_.erase(id);
     }
     clientStateHandler_.forget(id);
+    radarRectHandler_.forget(id);
     core_->printLn("SKR Gate: player %d disconnected (reason %d)",
                    id, static_cast<int>(reason));
 }

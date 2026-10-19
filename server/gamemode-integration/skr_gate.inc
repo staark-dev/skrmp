@@ -18,3 +18,12 @@ enum SKR_RADAR_SIZE {
 // client is ready. Return 0 for an unknown/rejected player or invalid arguments.
 native SKR_SetRadarStyle(playerid, SKR_RADAR_STYLE:style);
 native SKR_SetRadarSize(playerid, SKR_RADAR_SIZE:mode, Float:scale = 1.0);
+
+// Returns the radar's screen-space rectangle in pixels (origin top-left).
+// Only valid after the client has reported it (returns 0 before then).
+// The value comes from the client: use it only for UI alignment, never for logic.
+native SKR_GetRadarRect(playerid, &Float:x, &Float:y, &Float:w, &Float:h);
+
+// Fired whenever a player's radar screen-space rectangle changes (resolution,
+// scale, or aspect ratio change).  Use it to reposition CEF HUD elements.
+forward OnPlayerRadarRect(playerid, Float:x, Float:y, Float:w, Float:h);

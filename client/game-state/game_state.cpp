@@ -2,6 +2,7 @@
 #include "protocol/client_state.h"
 #include "protocol/session_info.h"
 #include "protocol/radar_style.h"
+#include "protocol/radar_rect.h"
 #include "lobby/lobby_manager.h"
 #include "escape-menu/escape_menu.h"
 #include <windows.h>
@@ -98,6 +99,14 @@ constexpr uintptr_t kHandlingMaxGearVel = 0x2C + 0x58;
 constexpr uintptr_t kPhysMoveSpeed  = 0x44;
 // plugin-sdk CTheScripts.cpp: bDisplayHud 0xA444A0 (script DISPLAY_HUD flag).
 constexpr uintptr_t kDisplayHud = 0xA444A0;
+// plugin-sdk RenderWare.h: RsGlobal.maximumWidth/Height — actual render resolution.
+constexpr uintptr_t kRsMaxWidth  = 0xC17044;
+constexpr uintptr_t kRsMaxHeight = 0xC17048;
+// HUD base resolution used by GTA's coordinate transform (640x448).
+constexpr float kHudBaseWidth  = 640.0f;
+constexpr float kHudBaseHeight = 448.0f;
+// Left margin of the radar in HUD units (CHud::DrawRadar hardcodes 40.0f).
+constexpr float kRadarLeftMargin = 40.0f;
 // GTA speed units are per 1/50 s frame: km/h = |v| * 50 * 3.6.
 constexpr float kSpeedToKmh = 180.0f;
 
@@ -288,6 +297,35 @@ bool SendClientState(uintptr_t sampBase, uint8_t* netGame, const ClientState& st
     return ok;
 }
 
+// ── Radar rect (RPC 243, shared/protocol/radar_rect.h) ──────────────────
+// Sent whenever the client's radar screen-space rectangle changes.
+struct RadarRect { float x, y, w, h; };
+RadarRect g_lastSentRect = {};
+bool g_radarRectDirty = false;
+
+bool SendRadarRect(uintptr_t sampBase, uint8_t* netGame, const RadarRect& r) {
+    void* rak = *reinterpret_cast<void**>(netGame);
+    if (!rak) return false;
+
+    alignas(16) uint8_t bs[0x100] = {};
+    auto ctor = reinterpret_cast<BsThisFn>(sampBase + kBsCtorRva);
+    auto dtor = reinterpret_cast<BsThisFn>(sampBase + kBsDtorRva);
+    auto bits = reinterpret_cast<BsWriteBitsFn>(sampBase + kBsWriteBitsRva);
+    ctor(bs);
+
+    auto put = [&](const void* p, int nbits) { bits(bs, static_cast<const uint8_t*>(p), nbits, true); };
+    const uint8_t version = protocol::kRadarRectVersion;
+    put(&version, 8);
+    put(&r.x, 32); put(&r.y, 32); put(&r.w, 32); put(&r.h, 32);
+
+    int rpcId = protocol::kRpcRadarRect;
+    auto vtbl = *reinterpret_cast<uint8_t**>(rak);
+    auto rpc = *reinterpret_cast<RakRpcFn*>(vtbl + kRakRpcVtableOffset);
+    bool ok = rpc(rak, &rpcId, bs, 1, 9, 0, false);
+    dtor(bs);
+    return ok;
+}
+
 // ── Radar style/size (RPC 242, shared/protocol/radar_style.h) ────────────
 // Patches are verified once (VerifyRadarPatchSites) and toggled at runtime:
 // Square = DrawRadarMask returns at entry + the 4 ring CALLs become `add esp, 8`;
@@ -298,6 +336,8 @@ bool g_radarRingOk = false;
 uint8_t g_radarRingOrig[4][5] = {};
 protocol::RadarStyle g_radarStyle = protocol::RadarStyle::Round;
 float g_radarScale = 1.0f;
+
+// Radar rect globals are defined above, near SendRadarRect.
 
 void WriteCode(uintptr_t addr, const void* src, size_t len) {
     DWORD old = 0;
@@ -340,11 +380,32 @@ void __cdecl HookedDrawRadar() {
         *h = h0 * s;
         *top = top0 + h0 * (s - 1.0f);
     }
+    // Capture the effective rect BEFORE the trampoline, while our scale is active.
+    // HUD-unit → screen-pixel: x * (screenW / 640), y * (screenH / 448).
+    const float screenW = static_cast<float>(*reinterpret_cast<int*>(kRsMaxWidth));
+    const float screenH = static_cast<float>(*reinterpret_cast<int*>(kRsMaxHeight));
+    const float sx = screenW / kHudBaseWidth;
+    const float sy = screenH / kHudBaseHeight;
+    RadarRect rect;
+    rect.w = *w * sx;
+    rect.h = *h * sy;
+    rect.x = kRadarLeftMargin * sx;
+    rect.y = screenH - *top * sy;   // top-from-bottom → top-from-top
+
     g_drawRadarTrampoline();
     if (s != 1.0f) {
         *w = w0;
         *h = h0;
         *top = top0;
+    }
+
+    // Flag dirty when the rect moves by more than 1 pixel.
+    if (std::abs(rect.x - g_lastSentRect.x) > 1.0f ||
+        std::abs(rect.y - g_lastSentRect.y) > 1.0f ||
+        std::abs(rect.w - g_lastSentRect.w) > 1.0f ||
+        std::abs(rect.h - g_lastSentRect.h) > 1.0f) {
+        g_lastSentRect = rect;
+        g_radarRectDirty = true;
     }
 }
 
@@ -561,6 +622,18 @@ void Tick() {
         LogStage(5, m);
     } else {
         LogStage(6, "rpc send failed (no RakClient)");
+    }
+
+    // RPC 243: radar screen-space rect, sent only when it changes.
+    if (g_radarRectDirty) {
+        if (SendRadarRect(base, netGame, g_lastSentRect)) {
+            g_radarRectDirty = false;
+            char m[96];
+            snprintf(m, sizeof(m), "rpc %u sent: %.0f %.0f %.0f %.0f",
+                     protocol::kRpcRadarRect, g_lastSentRect.x, g_lastSentRect.y,
+                     g_lastSentRect.w, g_lastSentRect.h);
+            LogStage(20, m);
+        }
     }
 }
 
