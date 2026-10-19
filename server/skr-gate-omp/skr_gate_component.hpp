@@ -32,6 +32,8 @@ struct SkrPlayerData {
     uint64_t challengeExpiresAt = 0;
     uint32_t accountId = 0;
 
+    bool sessionInfoSent = false;
+
     // AC tracking
     uint32_t lastAcBeatSeq = 0;
     uint64_t lastAcBeatMs = 0;
@@ -42,6 +44,7 @@ struct SkrPlayerData {
         generation = 0;
         challengeExpiresAt = 0;
         accountId = 0;
+        sessionInfoSent = false;
         lastAcBeatSeq = 0;
         lastAcBeatMs = 0;
         missedAcBeats = 0;

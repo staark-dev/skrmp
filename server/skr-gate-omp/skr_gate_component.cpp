@@ -253,6 +253,10 @@ void SkrGateComponent::onPlayerConnect(IPlayer& player) {
         "Authenticating... Please wait.");
     // TODO: verify launcher token here before calling AuthorizePlayer
     AuthorizePlayer(id, 0);
+
+    // Send session info early so the client knows about CefIntro before
+    // CEF initialization — the lobby can keep showing while auth loads.
+    SendSessionInfo(player);
 }
 
 void SkrGateComponent::onPlayerDisconnect(IPlayer& player, PeerDisconnectReason reason) {
@@ -289,6 +293,15 @@ bool SkrGateComponent::ScriptsHaveIntro() {
 // RPC 241 (shared/protocol/session_info.h). Runs after the scripts'
 // OnPlayerConnect, so OnGameModeIntro can depend on what they set up there.
 void SkrGateComponent::SendSessionInfo(IPlayer& player) {
+    int id = player.getID();
+
+    // Skip if already sent this session
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(id);
+        if (it != players_.end() && it->second.sessionInfoSent) return;
+    }
+
     const uint8_t mode = static_cast<uint8_t>(ScriptsHaveIntro()
         ? protocol::SessionMode::CefIntro : protocol::SessionMode::None);
 
@@ -297,8 +310,15 @@ void SkrGateComponent::SendSessionInfo(IPlayer& player) {
     bs.writeUINT8(mode);
     const bool sent = player.sendRPC(protocol::kRpcSessionInfo,
         Span<uint8_t>(bs.GetData(), bs.GetNumberOfBitsUsed()), OrderingChannel_SyncRPC);
+
+    if (sent) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(id);
+        if (it != players_.end()) it->second.sessionInfoSent = true;
+    }
+
     core_->printLn("SKR Gate: session info (mode %u) %s to player %d",
-                   mode, sent ? "sent" : "NOT sent", player.getID());
+                   mode, sent ? "sent" : "NOT sent", id);
 }
 
 // ── Tick: enforce auth timeout ───────────────────────────
