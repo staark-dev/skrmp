@@ -50,9 +50,9 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 .money__amount { flex:0 1 auto; min-width:0; max-width:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
 /* Radar group */
-.radar-group { left:calc(28px * var(--hud-scale)); bottom:calc(26px * var(--hud-scale)); width:254px; height:225px; padding:0; background:var(--hud-card); border:1px solid var(--hud-card-border); border-radius:10px; transform-origin:bottom left; }
+.radar-group { left:calc(28px * var(--hud-scale)); bottom:calc(26px * var(--hud-scale)); width:254px; height:225px; padding:0; background:transparent; border:1px solid var(--hud-card-border); border-radius:10px; transform-origin:bottom left; }
 .radar { position:relative; width:100%; max-width:100%; min-width:0; height:176px; }
-.radar__surface { position:absolute; inset:0; overflow:hidden; width:auto; max-width:100%; border:3px solid #202930; border-radius:11px; background:transparent; }
+.radar__surface { position:absolute; inset:0; overflow:hidden; width:auto; max-width:100%; border:none; border-radius:11px; background:transparent; }
 .radar__surface > canvas, .radar__surface > img { width:100%; max-width:100%; min-width:0; }
 .radar__tiles { display:none; }
 .location { width:100%; max-width:100%; min-width:0; }
@@ -65,7 +65,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 .radar__pin svg { width:100%; height:100%; display:block; fill:#e85b68; stroke:#fff; stroke-width:1.5; }
 
 /* Location */
-.location { height:49px; padding:5px 11px; background:transparent; }
+.location { height:49px; padding:5px 11px; background:var(--hud-card); border-radius:0 0 9px 9px; }
 .location__city { font-size:15px; font-weight:600; line-height:20px; letter-spacing:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .location__area { font-size:14px; line-height:18px; color:var(--hud-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
@@ -181,7 +181,7 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 }
 </style>
 </head><body>
-<main class="hud" id="hud" aria-label="SKR HUD">
+<main class="hud" id="hud" aria-label="SKR HUD" style="display:none">
 
 <section class="chat hud-group" id="chat"><div class="chat__history" id="chatHistory"></div></section>
 

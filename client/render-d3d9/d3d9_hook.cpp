@@ -10,10 +10,6 @@ namespace {
 
 constexpr uintptr_t kGtaDevicePtr = 0x00C97C28;
 
-// CRadar::DrawMap (static, cdecl, no params) — draws the full native radar:
-// mask, tile sections, water, blips.  Provenance: plugin-sdk CRadar.cpp / gta-reversed.
-constexpr uintptr_t kCRadarDrawMap = 0x586B00;
-
 EndSceneFn g_origEndScene = nullptr;
 ResetFn    g_origReset    = nullptr;
 void**     g_hookedVtable = nullptr;
@@ -148,19 +144,6 @@ HRESULT WINAPI HookedEndScene(IDirect3DDevice9* device) {
                     g_transState = TransitionState::Done;
             }
         }
-    }
-
-    // Native radar: render GTA's radar map before samp-cef composites the CEF
-    // overlay.  The CEF HUD has a transparent hole where the radar surface is,
-    // so the native tiles + water show through.  bDisplayHud stays false (set in
-    // game_state::Tick) to suppress health bars / money / weapon — only the radar
-    // draws here.  DrawMap is self-contained: it calls CalculateCachedSinCos,
-    // computes m_radarRange from player speed, sets up the stencil mask, and
-    // draws the tile sections + blips.
-    if (g_transState == TransitionState::Done
-        && skr::lobby::IsSkrSession()
-        && IsPlayerInGame()) {
-        reinterpret_cast<void(__cdecl*)()>(kCRadarDrawMap)();
     }
 
     return g_origEndScene(device);

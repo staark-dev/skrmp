@@ -243,6 +243,9 @@ DWORD WINAPI SampHookThread(LPVOID) {
     // Per-frame game-thread tick (chains whatever is already at the call site)
     skr::game_state::InstallProcessHook();
 
+    // Radar DrawMap inside CHud::Draw (RenderWare 2D state, not EndScene)
+    skr::game_state::InstallHudDrawHook();
+
     // Panel behind the native SA-MP chat (verified call site, skipped if bytes differ)
     skr::render::InstallChatBoxHook();
 

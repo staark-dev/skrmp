@@ -52,6 +52,20 @@ constexpr float kRadarMinSpeed = 0.3f, kRadarMaxSpeed = 0.9f;
 // plugin-sdk common.cpp: FindPlayerSpeed 0x56E090, FindPlayerVehicle 0x56E0D0 (cdecl).
 constexpr uintptr_t kFindPlayerSpeed   = 0x56E090;
 constexpr uintptr_t kFindPlayerVehicle = 0x56E0D0;
+
+// CRadar::StreamRadarSections(CVector const&) 0x5858D0 — requests tiles near the
+// player from the streaming system.  Must run during CGame::Process (the streaming
+// update phase), not EndScene, for tiles to actually load.
+// Provenance: plugin-sdk CRadar.cpp.
+constexpr uintptr_t kStreamRadarSections = 0x5858D0;
+// CRadar::DrawMap (static, cdecl, no params) — draws the full native radar:
+// mask, tile sections, water, blips.  Provenance: plugin-sdk CRadar.cpp / gta-reversed.
+constexpr uintptr_t kCRadarDrawMap = 0x586B00;
+// CHud::Draw (static, cdecl, no params) — 2D HUD entry point called from Idle's
+// render pass.  Provenance: plugin-sdk CHud.cpp / gta-reversed.
+constexpr uintptr_t kCHudDraw = 0x58FAE0;
+// gRadarTxdIds[12*12] at 0xBA8478 — TXD slot IDs for each radar tile (-1 = unregistered).
+constexpr uintptr_t kGRadarTxdIds = 0xBA8478;
 // plugin-sdk CVehicle.h: m_nCurrentGear @0x4B4; CPhysical m_vecMoveSpeed @0x44.
 constexpr uintptr_t kVehCurrentGear = 0x4B4;
 // plugin-sdk: CVehicle::m_pHandlingData @0x384; tHandlingData::m_transmissionData @0x2C;
@@ -292,6 +306,20 @@ bool IsConnected() {
     return netGame && netGame[kNetGameStateOff] == kStateConnected;
 }
 
+// ── CHud::Draw hook — radar rendering in RenderWare's 2D state ──────────
+// EndScene runs after SA-MP's D3D9 proxy has altered the render state,
+// leaving RW's internal cache stale; textures fail to draw.  CHud::Draw
+// is called from Idle's 2D rendering pass where RW is in the correct
+// state for RwIm2D textured quads — so DrawMap renders here instead.
+VoidFn g_origHudDraw = nullptr;
+
+void __cdecl HookedHudDraw() {
+    if (IsConnected() && skr::lobby::IsSkrSession()) {
+        reinterpret_cast<void(__cdecl*)()>(kCRadarDrawMap)();
+    }
+    if (g_origHudDraw) g_origHudDraw();
+}
+
 void Tick() {
     // The CEF HUD replaces the native one while connected. Re-applied every frame because
     // SA-MP restores it (e.g. on spawn/spectate). Note: this also hides the crosshair.
@@ -328,6 +356,21 @@ void Tick() {
     // hand over based on the server's session info (RPC 241).
     skr::lobby::OnInWorldTick();
     skr::escape_menu::Tick();
+
+    // Stream radar tiles during CGame::Process so the streaming system actually
+    // loads them.  DrawMap also calls this from EndScene, but by then the
+    // streaming update has already finished for this frame.
+    if (skr::lobby::IsSkrSession()) {
+        reinterpret_cast<void(__cdecl*)(const CVector&)>(kStreamRadarSections)(pos);
+
+        // Diagnostic: log tile registration once
+        auto* ids = reinterpret_cast<const int*>(kGRadarTxdIds);
+        int reg = 0;
+        for (int i = 0; i < 144; ++i) if (ids[i] != -1) ++reg;
+        char m[96];
+        snprintf(m, sizeof(m), "radar tiles: %d/144 registered, id[72]=%d", reg, ids[72]);
+        LogStage(15, m);
+    }
 
     // RPC 240 is SKR-private: never sent to servers without the SKR Gate.
     if (!skr::lobby::IsSkrSession()) { LogStage(14, "non-SKR server: rpc 240 disabled"); return; }
@@ -381,5 +424,35 @@ void Tick() {
 }
 
 } // namespace
+
+bool InstallHudDrawHook() {
+    // Idle's 2D render pass → CHud::Draw.  Provenance: plugin-sdk meta (H_CALL).
+    constexpr uintptr_t kSite = 0x53E4FF;
+    auto* site = reinterpret_cast<uint8_t*>(kSite);
+    if (site[0] != 0xE8) {
+        LogStage(16, "CHud::Draw call site: not a CALL instruction");
+        return false;
+    }
+    uintptr_t target = kSite + 5 + *reinterpret_cast<int32_t*>(site + 1);
+    if (target != kCHudDraw) {
+        char m[96];
+        snprintf(m, sizeof(m), "CHud::Draw call site target 0x%08X != 0x%08X",
+                 static_cast<unsigned>(target), static_cast<unsigned>(kCHudDraw));
+        LogStage(16, m);
+        return false;
+    }
+
+    g_origHudDraw = reinterpret_cast<VoidFn>(target);
+    int32_t newRel = static_cast<int32_t>(
+        reinterpret_cast<uintptr_t>(&HookedHudDraw) - (kSite + 5));
+    DWORD old = 0;
+    if (!VirtualProtect(site + 1, 4, PAGE_EXECUTE_READWRITE, &old)) return false;
+    *reinterpret_cast<int32_t*>(site + 1) = newRel;
+    VirtualProtect(site + 1, 4, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), site, 5);
+
+    LogStage(16, "CHud::Draw hooked — radar DrawMap moved from EndScene");
+    return true;
+}
 
 } // namespace skr::game_state
