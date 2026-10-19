@@ -52,8 +52,9 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
 /* Radar group */
 .radar-group { left:calc(28px * var(--hud-scale)); bottom:calc(26px * var(--hud-scale)); width:254px; height:225px; padding:0; background:var(--hud-card); border:1px solid var(--hud-card-border); border-radius:10px; transform-origin:bottom left; }
 .radar { position:relative; width:100%; max-width:100%; min-width:0; height:176px; }
-.radar__surface { position:absolute; inset:0; overflow:hidden; width:auto; max-width:100%; border:3px solid #202930; border-radius:11px; background:#6C8BA2; }
+.radar__surface { position:absolute; inset:0; overflow:hidden; width:auto; max-width:100%; border:3px solid #202930; border-radius:11px; background:transparent; }
 .radar__surface > canvas, .radar__surface > img { width:100%; max-width:100%; min-width:0; }
+.radar__tiles { display:none; }
 .location { width:100%; max-width:100%; min-width:0; }
 .radar__north { position:absolute; top:-13px; left:calc(50% - 13px); width:26px; height:26px; border:1px solid var(--hud-border); border-radius:50%; background:#11171d; text-align:center; font-size:17px; font-weight:700; line-height:24px; z-index:3; }
 .radar__tiles { position:absolute; }
@@ -351,46 +352,15 @@ body { font-family:Inter,"Segoe UI",sans-serif; color:var(--hud-text); font-vari
   requestAnimationFrame(frame);
 
   function renderMinimap(st) {
-    var k = RADIUS_PX / st.range;           // CSS px per world unit
-    var tilePx = TILE_WORLD * k;
-    var ox = (st.x - WORLD_MIN) * k;
-    var oy = (WORLD_MAX - st.y) * k;
+    // Native radar (CRadar::DrawMap called from EndScene) handles the tile
+    // sections and water; CEF only draws the UI overlays on top.
+    var k = RADIUS_PX / st.range;
     var cx = INNER_W / 2, cy = INNER_H / 2;
-
-    // Vanilla TransformRealWorldPointToRadarSpace == rotation by orient on screen.
-    tilesEl.style.left = (cx - ox) + 'px';
-    tilesEl.style.top = (cy - oy) + 'px';
-    tilesEl.style.transformOrigin = ox + 'px ' + oy + 'px';
-    tilesEl.style.transform = 'rotate(' + st.orient + 'deg)';
-
-    var worldX = st.x, worldY = st.y;
-    var centerCol = Math.floor((worldX - WORLD_MIN) / TILE_WORLD);
-    var centerRow = Math.floor((WORLD_MAX - worldY) / TILE_WORLD);
-    var nowVisible = {};
-
-    for (var dr = -2; dr <= 2; dr++) {
-      for (var dc = -2; dc <= 2; dc++) {
-        var r = centerRow + dr, c = centerCol + dc;
-        if (r < 0 || r >= GRID || c < 0 || c >= GRID) continue;
-        var idx = r * GRID + c;
-        nowVisible[idx] = true;
-        var img = getTileImg(idx);
-        img.style.left = (c * tilePx) + 'px';
-        img.style.top = (r * tilePx) + 'px';
-        img.style.width = tilePx + 'px';
-        img.style.height = tilePx + 'px';
-        img.style.display = 'block';
-      }
-    }
-    for (var key in visibleTiles) {
-      if (!nowVisible[key] && tileCache[key]) tileCache[key].style.display = 'none';
-    }
-    visibleTiles = nowVisible;
 
     // GTA heading is counter-clockwise; on screen the arrow turns by (orient - heading).
     $('radarPlayer').style.transform = 'rotate(' + (st.orient - st.heading) + 'deg)';
 
-    // Pin: same transform as the tiles; kept on the radar edge when out of range.
+    // Pin: kept on the radar edge when out of range.
     var rad = st.orient * Math.PI / 180;
     if (radarPin) {
       var dx = (radarPin.x - st.x) * k, dy = (st.y - radarPin.y) * k;
