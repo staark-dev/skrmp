@@ -6,6 +6,7 @@
 #include "protocol/client_state.h"
 #include "protocol/session_info.h"
 #include "protocol/query_rules.h"
+#include "protocol/radar_style.h"
 #include "crypto/crypto.h"
 #include <bitstream.hpp>
 
@@ -34,6 +35,11 @@ struct SkrPlayerData {
 
     bool sessionInfoSent = false;
 
+    // Radar (RPC 242): last values set by scripts; sent once session info is out.
+    protocol::RadarStyle radarStyle = protocol::RadarStyle::Round;
+    protocol::RadarSizeMode radarSizeMode = protocol::RadarSizeMode::Default;
+    float radarScale = 1.0f;
+
     // AC tracking
     uint32_t lastAcBeatSeq = 0;
     uint64_t lastAcBeatMs = 0;
@@ -45,6 +51,9 @@ struct SkrPlayerData {
         challengeExpiresAt = 0;
         accountId = 0;
         sessionInfoSent = false;
+        radarStyle = protocol::RadarStyle::Round;
+        radarSizeMode = protocol::RadarSizeMode::Default;
+        radarScale = 1.0f;
         lastAcBeatSeq = 0;
         lastAcBeatMs = 0;
         missedAcBeats = 0;
@@ -84,6 +93,7 @@ class SkrGateComponent final
     : public IComponent
     , public PlayerConnectEventHandler
     , public CoreEventHandler
+    , public PawnEventHandler
 {
 public:
     // Visit https://open.mp/uid to generate a new unique ID.
@@ -112,6 +122,10 @@ public:
     // CoreEventHandler
     void onTick(Microseconds elapsed, TimePoint now) override;
 
+    // PawnEventHandler: registers the SKR_* natives in every script
+    void onAmxLoad(IPawnScript& script) override;
+    void onAmxUnload(IPawnScript& script) override {}
+
     // SKR gate logic
     bool IssueChallenge(int playerId, protocol::ChallengeMessage& challengeOut);
     bool VerifyProof(int playerId, const protocol::ProofMessage& proof,
@@ -126,7 +140,14 @@ public:
     void SendSessionInfo(IPlayer& player);
     bool ScriptsHaveIntro();
 
+    // Script natives. False when the player is unknown/rejected or arguments are invalid.
+    bool SetRadarStyle(int playerId, protocol::RadarStyle style);
+    bool SetRadarSize(int playerId, protocol::RadarSizeMode mode, float scale);
+
 private:
+    // Sends the stored radar state if the player is authorized and has session info.
+    void SendRadarStyle(int playerId);
+
     ICore* core_ = nullptr;
     IPawnComponent* pawn_ = nullptr;
     crypto::MockSigningProvider crypto_;

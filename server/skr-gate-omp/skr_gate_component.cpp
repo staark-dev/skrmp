@@ -164,7 +164,49 @@ bool SkrJoinFilter::onReceive(IPlayer& peer, NetworkBitStream& bs) {
     return true;
 }
 
+// ── Pawn natives: SKR_SetRadarStyle / SKR_SetRadarSize (skr_gate.inc) ──
+
+namespace {
+
+SkrGateComponent* g_gate = nullptr;
+
+bool HasArgs(const cell* params, int count) {
+    return params[0] >= static_cast<cell>(count * sizeof(cell));
+}
+
+float CellToFloat(cell c) {
+    float f;
+    std::memcpy(&f, &c, sizeof(f));
+    return f;
+}
+
+// native SKR_SetRadarStyle(playerid, SKR_RADAR_STYLE:style);
+cell AMX_NATIVE_CALL Native_SetRadarStyle(AMX*, const cell* params) {
+    if (!g_gate || !HasArgs(params, 2) || params[2] < 0 || params[2] > 1) return 0;
+    return g_gate->SetRadarStyle(params[1], static_cast<protocol::RadarStyle>(params[2])) ? 1 : 0;
+}
+
+// native SKR_SetRadarSize(playerid, SKR_RADAR_SIZE:mode, Float:scale = 1.0);
+cell AMX_NATIVE_CALL Native_SetRadarSize(AMX*, const cell* params) {
+    if (!g_gate || !HasArgs(params, 3) || params[2] < 0 || params[2] > 1) return 0;
+    return g_gate->SetRadarSize(params[1], static_cast<protocol::RadarSizeMode>(params[2]),
+                                CellToFloat(params[3])) ? 1 : 0;
+}
+
+const AMX_NATIVE_INFO kNatives[] = {
+    {"SKR_SetRadarStyle", &Native_SetRadarStyle},
+    {"SKR_SetRadarSize", &Native_SetRadarSize},
+};
+
+} // namespace
+
+void SkrGateComponent::onAmxLoad(IPawnScript& script) {
+    script.Register(kNatives, static_cast<int>(sizeof(kNatives) / sizeof(kNatives[0])));
+}
+
 SkrGateComponent::~SkrGateComponent() {
+    if (g_gate == this) g_gate = nullptr;
+    if (pawn_) pawn_->getEventDispatcher().removeEventHandler(this);
     if (core_) {
         core_->removePerRPCInEventHandler<kRPC_ClientJoin>(&joinFilter_);
         core_->removePerRPCInEventHandler<protocol::kRpcClientState>(&clientStateHandler_);
@@ -177,11 +219,18 @@ SkrGateComponent::~SkrGateComponent() {
 
 void SkrGateComponent::onLoad(ICore* c) {
     core_ = c;
+    g_gate = this;
     core_->printLn("SKR Gate component loaded (v0.1.0)");
 }
 
 void SkrGateComponent::onInit(IComponentList* components) {
     pawn_ = components->queryComponent<IPawnComponent>();
+    if (pawn_) {
+        pawn_->getEventDispatcher().addEventHandler(this);
+        // Scripts loaded before this handler was added get the natives now.
+        if (IPawnScript* gm = pawn_->mainScript()) onAmxLoad(*gm);
+        for (IPawnScript* fs : pawn_->sideScripts()) if (fs) onAmxLoad(*fs);
+    }
     core_->getPlayers().getPlayerConnectDispatcher().addEventHandler(this);
     core_->getEventDispatcher().addEventHandler(this);
 
@@ -319,6 +368,67 @@ void SkrGateComponent::SendSessionInfo(IPlayer& player) {
 
     core_->printLn("SKR Gate: session info (mode %u) %s to player %d",
                    mode, sent ? "sent" : "NOT sent", id);
+
+    // Radar state set by scripts before session info went out (e.g. in OnPlayerConnect).
+    if (sent) SendRadarStyle(id);
+}
+
+// ── RPC 242: radar style/size (shared/protocol/radar_style.h) ──
+
+bool SkrGateComponent::SetRadarStyle(int playerId, protocol::RadarStyle style) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(playerId);
+        if (it == players_.end() || it->second.state == SkrPlayerState::Rejected) return false;
+        it->second.radarStyle = style;
+    }
+    SendRadarStyle(playerId);
+    return true;
+}
+
+bool SkrGateComponent::SetRadarSize(int playerId, protocol::RadarSizeMode mode, float scale) {
+    if (mode == protocol::RadarSizeMode::Default) {
+        scale = 1.0f;
+    } else if (!InRange(scale, protocol::kRadarMinScale, protocol::kRadarMaxScale)) {
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(playerId);
+        if (it == players_.end() || it->second.state == SkrPlayerState::Rejected) return false;
+        it->second.radarSizeMode = mode;
+        it->second.radarScale = scale;
+    }
+    SendRadarStyle(playerId);
+    return true;
+}
+
+void SkrGateComponent::SendRadarStyle(int playerId) {
+    protocol::RadarStyle style;
+    protocol::RadarSizeMode mode;
+    float scale;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(playerId);
+        if (it == players_.end() || it->second.state != SkrPlayerState::Authorized
+            || !it->second.sessionInfoSent) return;   // sent later from SendSessionInfo
+        style = it->second.radarStyle;
+        mode = it->second.radarSizeMode;
+        scale = it->second.radarScale;
+    }
+    IPlayer* player = core_->getPlayers().get(playerId);
+    if (!player) return;
+
+    NetworkBitStream bs;
+    bs.writeUINT8(protocol::kRadarStyleVersion);
+    bs.writeUINT8(static_cast<uint8_t>(style));
+    bs.writeUINT8(static_cast<uint8_t>(mode));
+    bs.writeFLOAT(scale);
+    const bool sent = player->sendRPC(protocol::kRpcRadarStyle,
+        Span<uint8_t>(bs.GetData(), bs.GetNumberOfBitsUsed()), OrderingChannel_SyncRPC);
+    core_->printLn("SKR Gate: radar style %u size %u scale %.2f %s to player %d",
+                   static_cast<unsigned>(style), static_cast<unsigned>(mode), scale,
+                   sent ? "sent" : "NOT sent", playerId);
 }
 
 // ── Tick: enforce auth timeout ───────────────────────────

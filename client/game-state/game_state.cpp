@@ -1,6 +1,7 @@
 #include "game-state/game_state.h"
 #include "protocol/client_state.h"
 #include "protocol/session_info.h"
+#include "protocol/radar_style.h"
 #include "lobby/lobby_manager.h"
 #include "escape-menu/escape_menu.h"
 #include <windows.h>
@@ -61,6 +62,26 @@ constexpr uintptr_t kStreamRadarSections = 0x5858D0;
 // CRadar::DrawMap (static, cdecl, no params) — draws the full native radar:
 // mask, tile sections, water, blips.  Provenance: plugin-sdk CRadar.cpp / gta-reversed.
 constexpr uintptr_t kCRadarDrawMap = 0x586B00;
+// CRadar::DrawRadarMask (cdecl, no params) — circular clip mask. Verified in
+// gta_sa.exe: sole caller is DrawRadarMap (0x586880) at 0x586887, frame prologue.
+// (0x586110 is DrawRadarSection(x, y), called 9x for the 3x3 tile grid — not the mask.)
+constexpr uintptr_t kDrawRadarMask = 0x585700;
+// CHud::DrawRadar (0x58A330): the black ring is 4x CSprite2d::Draw(rect, color)
+// (thiscall, ret 8, ecx = 0xBAB208) — one per quadrant.
+constexpr uintptr_t kRadarRingDrawCalls[] = {0x58A823, 0x58A8CD, 0x58A977, 0x58AA25};
+constexpr uintptr_t kSprite2dDraw = 0x728350;
+// Radar geometry in 640x448 HUD units (.rdata floats read by
+// TransformRadarPointToScreenSpace 0x583480 and CHud radar code only):
+// width 94, height 76, top edge 104 above the screen bottom.
+// samp.dll R5 wraps CHud::DrawRadar (RVA ~0xA2500: `mov edx, 0x58A330; call edx`) and
+// writes its own width/height before the call, restoring 94/76 after — so the scale is
+// applied inside DrawRadar (detour below), on top of SA-MP's values.
+constexpr uintptr_t kRadarWidth = 0x866B78;
+constexpr uintptr_t kRadarHeight = 0x866B74;
+constexpr uintptr_t kRadarTopFromBottom = 0x866B70;
+// CHud::DrawRadar (cdecl, no params; plugin-sdk CHud.cpp). Entry: mov eax, [0x96A7CC].
+constexpr uintptr_t kCHudDrawRadar = 0x58A330;
+constexpr uint8_t kDrawRadarEntry[5] = {0xA1, 0xCC, 0xA7, 0x96, 0x00};
 // CHud::Draw (static, cdecl, no params) — 2D HUD entry point called from Idle's
 // render pass.  Provenance: plugin-sdk CHud.cpp / gta-reversed.
 constexpr uintptr_t kCHudDraw = 0x58FAE0;
@@ -267,6 +288,117 @@ bool SendClientState(uintptr_t sampBase, uint8_t* netGame, const ClientState& st
     return ok;
 }
 
+// ── Radar style/size (RPC 242, shared/protocol/radar_style.h) ────────────
+// Patches are verified once (VerifyRadarPatchSites) and toggled at runtime:
+// Square = DrawRadarMask returns at entry + the 4 ring CALLs become `add esp, 8`;
+// the scale is applied per frame in HookedDrawRadar.
+// Everything runs on the game thread (RPC handlers and Tick).
+bool g_radarMaskOk = false;
+bool g_radarRingOk = false;
+uint8_t g_radarRingOrig[4][5] = {};
+protocol::RadarStyle g_radarStyle = protocol::RadarStyle::Round;
+float g_radarScale = 1.0f;
+
+void WriteCode(uintptr_t addr, const void* src, size_t len) {
+    DWORD old = 0;
+    if (!VirtualProtect(reinterpret_cast<void*>(addr), len, PAGE_EXECUTE_READWRITE, &old)) return;
+    memcpy(reinterpret_cast<void*>(addr), src, len);
+    VirtualProtect(reinterpret_cast<void*>(addr), len, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(addr), len);
+}
+
+void VerifyRadarPatchSites() {
+    auto* mask = reinterpret_cast<const uint8_t*>(kDrawRadarMask);
+    g_radarMaskOk = mask[0] == 0x55 && mask[1] == 0x8B && mask[2] == 0xEC;
+
+    g_radarRingOk = true;
+    for (int i = 0; i < 4; ++i) {
+        auto* p = reinterpret_cast<const uint8_t*>(kRadarRingDrawCalls[i]);
+        if (p[0] != 0xE8 || kRadarRingDrawCalls[i] + 5 + *reinterpret_cast<const int32_t*>(p + 1) != kSprite2dDraw)
+            g_radarRingOk = false;
+        else
+            memcpy(g_radarRingOrig[i], p, 5);
+    }
+
+    char m[80];
+    snprintf(m, sizeof(m), "radar patch sites: mask %d ring %d", g_radarMaskOk, g_radarRingOk);
+    LogStage(17, m);
+}
+
+VoidFn g_drawRadarTrampoline = nullptr;
+
+// Scales whatever width/height SA-MP set for this frame; the top edge is raised by
+// the extra height so the bottom margin stays. Restored so SA-MP's own restore matches.
+void __cdecl HookedDrawRadar() {
+    auto* w = reinterpret_cast<float*>(kRadarWidth);
+    auto* h = reinterpret_cast<float*>(kRadarHeight);
+    auto* top = reinterpret_cast<float*>(kRadarTopFromBottom);
+    const float s = g_radarScale;
+    const float w0 = *w, h0 = *h, top0 = *top;
+    if (s != 1.0f) {
+        *w = w0 * s;
+        *h = h0 * s;
+        *top = top0 + h0 * (s - 1.0f);
+    }
+    g_drawRadarTrampoline();
+    if (s != 1.0f) {
+        *w = w0;
+        *h = h0;
+        *top = top0;
+    }
+}
+
+void InstallDrawRadarDetour() {
+    auto* fn = reinterpret_cast<uint8_t*>(kCHudDrawRadar);
+    if (memcmp(fn, kDrawRadarEntry, sizeof(kDrawRadarEntry)) != 0) {
+        LogStage(19, "CHud::DrawRadar entry bytes differ: radar size disabled");
+        return;
+    }
+    // Trampoline: original 5-byte instruction, then jmp back to DrawRadar+5.
+    auto* tramp = static_cast<uint8_t*>(VirtualAlloc(nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if (!tramp) return;
+    memcpy(tramp, kDrawRadarEntry, 5);
+    tramp[5] = 0xE9;
+    *reinterpret_cast<int32_t*>(tramp + 6) =
+        static_cast<int32_t>((kCHudDrawRadar + 5) - (reinterpret_cast<uintptr_t>(tramp) + 10));
+    g_drawRadarTrampoline = reinterpret_cast<VoidFn>(tramp);
+
+    // The size floats live in .rdata; keep them writable (SA-MP writes them too).
+    DWORD old = 0;
+    if (!VirtualProtect(reinterpret_cast<void*>(kRadarTopFromBottom), 12, PAGE_READWRITE, &old)) return;
+
+    // 0x58A330 is 16-byte aligned: swap the first 8 bytes atomically while the game runs.
+    uint8_t patch[8];
+    memcpy(patch, fn, 8);
+    patch[0] = 0xE9;
+    *reinterpret_cast<int32_t*>(patch + 1) =
+        static_cast<int32_t>(reinterpret_cast<uintptr_t>(&HookedDrawRadar) - (kCHudDrawRadar + 5));
+    if (!VirtualProtect(fn, 8, PAGE_EXECUTE_READWRITE, &old)) return;
+    LONG64 value;
+    memcpy(&value, patch, 8);
+    InterlockedExchange64(reinterpret_cast<volatile LONG64*>(fn), value);
+    VirtualProtect(fn, 8, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), fn, 8);
+    LogStage(19, "CHud::DrawRadar detoured: radar scale active");
+}
+
+void ApplyRadar(protocol::RadarStyle style, float scale) {
+    if (style != g_radarStyle) {
+        const bool square = style == protocol::RadarStyle::Square;
+        if (g_radarMaskOk) {
+            const uint8_t entry = square ? 0xC3 : 0x55;   // ret / original push ebp
+            WriteCode(kDrawRadarMask, &entry, 1);
+        }
+        if (g_radarRingOk) {
+            static const uint8_t kAddEsp8[5] = {0x83, 0xC4, 0x08, 0x90, 0x90};
+            for (int i = 0; i < 4; ++i)
+                WriteCode(kRadarRingDrawCalls[i], square ? kAddEsp8 : g_radarRingOrig[i], 5);
+        }
+        g_radarStyle = style;
+    }
+    g_radarScale = scale;
+}
+
 // ── SKR session-info RPC 241 (shared/protocol/session_info.h) ────────────
 // RakClientInterface slot +0x58 (index 22) = RegisterAsRemoteProcedureCall(const int* id,
 // void(*)(RPCParameters*)) — how samp.dll R5 registers its own 141 RPCs
@@ -287,16 +419,33 @@ void __cdecl OnSessionInfoRpc(RpcParams* params) {
     skr::lobby::OnSessionInfo(params->input[1]);
 }
 
+const int g_radarStyleRpcId = protocol::kRpcRadarStyle;
+
+void __cdecl OnRadarStyleRpc(RpcParams* params) {
+    if (!params || !params->input || params->numberOfBitsOfData < 7 * 8) return;
+    if (!skr::lobby::IsSkrSession()) return;
+    const uint8_t* in = params->input;
+    if (in[0] != protocol::kRadarStyleVersion || in[1] > 1 || in[2] > 1) return;
+    float scale = 1.0f;
+    if (in[2] == static_cast<uint8_t>(protocol::RadarSizeMode::Custom)) {
+        memcpy(&scale, in + 3, sizeof(scale));
+        if (!std::isfinite(scale) || scale < protocol::kRadarMinScale || scale > protocol::kRadarMaxScale)
+            return;
+    }
+    ApplyRadar(static_cast<protocol::RadarStyle>(in[1]), scale);
+}
+
 // CNetGame (and its RakClient) is created once per session; register before
-// the connection completes so the server's RPC 241 is not dropped.
+// the connection completes so the server's RPCs 241/242 are not dropped.
 void RegisterSessionInfoRpc(uint8_t* netGame) {
     void* rak = *reinterpret_cast<void**>(netGame);
     if (!rak || rak == g_sessionRpcRakClient) return;
     auto vtbl = *reinterpret_cast<uint8_t**>(rak);
     auto reg = *reinterpret_cast<RakRegisterRpcFn*>(vtbl + kRakRegisterRpcVtableOffset);
     reg(rak, &g_sessionInfoRpcId, &OnSessionInfoRpc);
+    reg(rak, &g_radarStyleRpcId, &OnRadarStyleRpc);
     g_sessionRpcRakClient = rak;
-    LogStage(13, "rpc 241 (session info) handler registered");
+    LogStage(13, "rpc 241 (session info) + 242 (radar style) handlers registered");
 }
 
 bool IsConnected() {
@@ -306,32 +455,18 @@ bool IsConnected() {
     return netGame && netGame[kNetGameStateOff] == kStateConnected;
 }
 
-// ── CHud::Draw hook — full native radar in RenderWare's 2D state ────────
-// Tick() sets bDisplayHud = false every frame to suppress health/money/weapon
-// (the CEF HUD replaces them).  But that also kills the radar blips/sprites.
-// We temporarily re-enable it so the original CHud::Draw renders the complete
-// radar (tiles + blips + player arrow + waypoint).  The CEF overlay, composited
-// later in EndScene, covers the native health/money/weapon with its own elements.
+// ── CHud::Draw hook — passthrough, keeps the call-site for future use ──
 VoidFn g_origHudDraw = nullptr;
 
 void __cdecl HookedHudDraw() {
-    bool skrSession = IsConnected() && skr::lobby::IsSkrSession();
-    if (skrSession) {
-        *reinterpret_cast<bool*>(kDisplayHud) = true;
-    }
     if (g_origHudDraw) g_origHudDraw();
-    if (skrSession) {
-        *reinterpret_cast<bool*>(kDisplayHud) = false;
-    }
 }
 
 void Tick() {
-    // The CEF HUD replaces the native one while connected. Re-applied every frame because
-    // SA-MP restores it (e.g. on spawn/spectate). Note: this also hides the crosshair.
-    // CHud::bScriptDontDisplayRadar is intentionally NOT forced: forcing it crashed the game
-    // at startup (reported by the user); the native radar stays visible for now.
-    // Only on SKR servers (RPC 241 received): elsewhere the native HUD stays.
-    if (IsConnected() && skr::lobby::IsSkrSession()) *reinterpret_cast<bool*>(kDisplayHud) = false;
+    // Native HUD stays visible; the server hides individual components via
+    // CEF_ToggleHudComponent. Radar style/size come from the server (RPC 242);
+    // not gated on IsConnected: 241/242 can arrive before SA-MP reports connected.
+    if (!skr::lobby::IsSkrSession()) ApplyRadar(protocol::RadarStyle::Round, 1.0f);
 
     DWORD now = GetTickCount();
     if (now - g_lastSend < kSendIntervalMs) return;
@@ -375,6 +510,7 @@ void Tick() {
         char m[96];
         snprintf(m, sizeof(m), "radar tiles: %d/144 registered, id[72]=%d", reg, ids[72]);
         LogStage(15, m);
+
     }
 
     // RPC 240 is SKR-private: never sent to servers without the SKR Gate.
@@ -456,7 +592,10 @@ bool InstallHudDrawHook() {
     VirtualProtect(site + 1, 4, old, &old);
     FlushInstructionCache(GetCurrentProcess(), site, 5);
 
-    LogStage(16, "CHud::Draw hooked — radar DrawMap moved from EndScene");
+    LogStage(16, "CHud::Draw hooked — native radar with CEF mask overlay");
+
+    VerifyRadarPatchSites();
+    InstallDrawRadarDetour();
     return true;
 }
 
