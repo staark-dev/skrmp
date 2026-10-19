@@ -306,18 +306,23 @@ bool IsConnected() {
     return netGame && netGame[kNetGameStateOff] == kStateConnected;
 }
 
-// ── CHud::Draw hook — radar rendering in RenderWare's 2D state ──────────
-// EndScene runs after SA-MP's D3D9 proxy has altered the render state,
-// leaving RW's internal cache stale; textures fail to draw.  CHud::Draw
-// is called from Idle's 2D rendering pass where RW is in the correct
-// state for RwIm2D textured quads — so DrawMap renders here instead.
+// ── CHud::Draw hook — full native radar in RenderWare's 2D state ────────
+// Tick() sets bDisplayHud = false every frame to suppress health/money/weapon
+// (the CEF HUD replaces them).  But that also kills the radar blips/sprites.
+// We temporarily re-enable it so the original CHud::Draw renders the complete
+// radar (tiles + blips + player arrow + waypoint).  The CEF overlay, composited
+// later in EndScene, covers the native health/money/weapon with its own elements.
 VoidFn g_origHudDraw = nullptr;
 
 void __cdecl HookedHudDraw() {
-    if (IsConnected() && skr::lobby::IsSkrSession()) {
-        reinterpret_cast<void(__cdecl*)()>(kCRadarDrawMap)();
+    bool skrSession = IsConnected() && skr::lobby::IsSkrSession();
+    if (skrSession) {
+        *reinterpret_cast<bool*>(kDisplayHud) = true;
     }
     if (g_origHudDraw) g_origHudDraw();
+    if (skrSession) {
+        *reinterpret_cast<bool*>(kDisplayHud) = false;
+    }
 }
 
 void Tick() {
