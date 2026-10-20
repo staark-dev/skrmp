@@ -372,6 +372,8 @@ bool g_radarRingOk = false;
 uint8_t g_radarRingOrig[4][5] = {};
 protocol::RadarStyle g_radarStyle = protocol::RadarStyle::Round;
 float g_radarScale = 1.0f;
+bool g_detourActive = false;            // true while our JMP is live at 0x58A330
+bool g_radarFloatsUnlocked = false;     // VirtualProtect .rdata once
 
 // Radar rect globals are defined above, near SendRadarRect.
 
@@ -477,38 +479,80 @@ void __cdecl HookedDrawRadar() {
     }
 }
 
-void InstallDrawRadarDetour() {
+// -- DrawRadar detour -- survives SA-MP dynamic toggling ---------------
+// SA-MP hides the radar by writing 0xC3 (RET) to CHud::DrawRadar
+// (0x58A330) and restores the original bytes at OnPlayerSpawn.
+// Both operations overwrite our JMP.  MaintainDrawRadarDetour() is
+// called every CGame::Process frame and re-applies the JMP whenever
+// SA-MP restores the original entry bytes.
+
+// Create the trampoline once (copies original entry bytes + jmp back).
+void EnsureDrawRadarTrampoline() {
+    if (g_drawRadarTrampoline) return;
     auto* fn = reinterpret_cast<uint8_t*>(kCHudDrawRadar);
-    if (memcmp(fn, kDrawRadarEntry, sizeof(kDrawRadarEntry)) != 0) {
-        LogStage(19, "CHud::DrawRadar entry bytes differ: radar size disabled");
-        return;
-    }
-    // Trampoline: original 5-byte instruction, then jmp back to DrawRadar+5.
-    auto* tramp = static_cast<uint8_t*>(VirtualAlloc(nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if (memcmp(fn, kDrawRadarEntry, sizeof(kDrawRadarEntry)) != 0) return;
+
+    auto* tramp = static_cast<uint8_t*>(
+        VirtualAlloc(nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if (!tramp) return;
     memcpy(tramp, kDrawRadarEntry, 5);
     tramp[5] = 0xE9;
     *reinterpret_cast<int32_t*>(tramp + 6) =
         static_cast<int32_t>((kCHudDrawRadar + 5) - (reinterpret_cast<uintptr_t>(tramp) + 10));
     g_drawRadarTrampoline = reinterpret_cast<VoidFn>(tramp);
+    LogStage(19, "DrawRadar trampoline allocated");
+}
 
-    // The size floats live in .rdata; keep them writable (SA-MP writes them too).
-    DWORD old = 0;
-    if (!VirtualProtect(reinterpret_cast<void*>(kRadarTopFromBottom), 12, PAGE_READWRITE, &old)) return;
-
-    // 0x58A330 is 16-byte aligned: swap the first 8 bytes atomically while the game runs.
+// Write our E9 (JMP) over the first 5 bytes of 0x58A330.
+void WriteDrawRadarJmp() {
+    auto* fn = reinterpret_cast<uint8_t*>(kCHudDrawRadar);
     uint8_t patch[8];
     memcpy(patch, fn, 8);
     patch[0] = 0xE9;
     *reinterpret_cast<int32_t*>(patch + 1) =
         static_cast<int32_t>(reinterpret_cast<uintptr_t>(&HookedDrawRadar) - (kCHudDrawRadar + 5));
+    DWORD old = 0;
     if (!VirtualProtect(fn, 8, PAGE_EXECUTE_READWRITE, &old)) return;
     LONG64 value;
     memcpy(&value, patch, 8);
     InterlockedExchange64(reinterpret_cast<volatile LONG64*>(fn), value);
     VirtualProtect(fn, 8, old, &old);
     FlushInstructionCache(GetCurrentProcess(), fn, 8);
-    LogStage(19, "CHud::DrawRadar detoured: radar scale active");
+    g_detourActive = true;
+}
+
+// Per-frame poll: re-apply the detour after SA-MP restores DrawRadar.
+void MaintainDrawRadarDetour() {
+    auto* fn = reinterpret_cast<const uint8_t*>(kCHudDrawRadar);
+    const uint8_t entry = fn[0];
+
+    if (entry == 0xE9) {                       // our JMP still in place
+        g_detourActive = true;
+        return;
+    }
+    if (entry == 0xC3) {                       // SA-MP hiding radar (RET)
+        g_detourActive = false;
+        return;
+    }
+    if (entry == kDrawRadarEntry[0]) {         // 0xA1 -- SA-MP restored original
+        // Unlock .rdata floats once
+        if (!g_radarFloatsUnlocked) {
+            DWORD old = 0;
+            if (VirtualProtect(reinterpret_cast<void*>(kRadarTopFromBottom), 12,
+                               PAGE_READWRITE, &old))
+                g_radarFloatsUnlocked = true;
+        }
+        EnsureDrawRadarTrampoline();
+        if (g_drawRadarTrampoline) {
+            WriteDrawRadarJmp();
+            LogStage(28, "DrawRadar detour applied after SA-MP restore");
+        }
+        return;
+    }
+    // Unknown entry byte -- log once and leave alone
+    char m[80];
+    snprintf(m, sizeof(m), "DrawRadar entry byte 0x%02X unexpected", entry);
+    LogStage(29, m);
 }
 
 void ApplyRadar(protocol::RadarStyle style, float scale) {
@@ -703,6 +747,10 @@ void Tick() {
     // not gated on IsConnected: 241/242 can arrive before SA-MP reports connected.
     if (!skr::lobby::IsSkrSession()) ApplyRadar(protocol::RadarStyle::Round, 1.0f);
 
+    // Re-apply DrawRadar detour after SA-MP restores original bytes (at spawn).
+    // Runs every frame -- not rate-limited -- so we catch the transition immediately.
+    MaintainDrawRadarDetour();
+
     // Early CNetGame detection -- runs every CGame::Process frame (no rate limit).
     // Signals the cover to dismiss BEFORE the "Started" chat message renders.
     {
@@ -883,7 +931,11 @@ bool InstallHudDrawHook() {
     }
 
     VerifyRadarPatchSites();
-    InstallDrawRadarDetour();
+    // DrawRadar detour is NOT installed here.  SA-MP writes 0xC3 (RET) to
+    // CHud::DrawRadar entry to hide the radar until OnPlayerSpawn; any JMP
+    // we install now would be overwritten.  MaintainDrawRadarDetour() in
+    // Tick() polls the entry byte every frame and applies the detour as
+    // soon as SA-MP restores the original bytes.
     return true;
 }
 
