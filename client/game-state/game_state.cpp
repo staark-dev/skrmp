@@ -638,14 +638,13 @@ void Tick() {
     skr::lobby::OnInWorldTick();
     skr::escape_menu::Tick();
 
-    // Failsafe: dismiss the launch cover after 3 s of confirmed in-world state,
-    // regardless of lobby session-mode timeouts (which can be 30+ s for server
-    // CEF intro mode). This is game-state-driven, not a blind timeout: we only
-    // reach here when netgame state == 5 AND a player ped exists.
+    // Failsafe ONLY — not the normal dismiss path. The cover now dismisses
+    // itself in Draw() at the first frame where worldConnected + negotiation
+    // done + takeover.  This fires only if that path somehow fails after 5 s.
     {
         static DWORD s_inWorldSince = 0;
         if (!s_inWorldSince) s_inWorldSince = GetTickCount();
-        if (GetTickCount() - s_inWorldSince >= 3000)
+        if (GetTickCount() - s_inWorldSince >= 5000)
             skr::launch_cover::MarkGameplayConfirmed();
     }
 

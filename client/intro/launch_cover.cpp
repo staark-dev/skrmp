@@ -1,7 +1,6 @@
 #include "game-state/game_state.h"
 #include "intro/launch_cover.h"
 #include "lobby/lobby_manager.h"
-#include "cef-local/cef_local_loader.h"
 #include "ipc/handoff_trace.h"
 #include <atomic>
 #include <cstring>
@@ -9,8 +8,7 @@ namespace skr::launch_cover {
 namespace {
 HANDLE frameEvent{}, takeoverEvent{}, readyEvent{};
 bool finished = false, completionPending = false, frameReported = false;
-bool conditionsTraced = false;
-DWORD lastConditionTrace = 0;
+bool worldTraced = false, takeoverTraced = false;
 std::atomic<bool> gameplayConfirmed{false};
 IDirect3DTexture9* title = nullptr;
 constexpr int width = 640, height = 200;
@@ -64,32 +62,31 @@ bool Draw(IDirect3DDevice9* device, bool worldConnected) {
     if (!frameEvent || finished) return false;
     // Bootstrap runs even while the loading cover is active.
     skr::lobby::OnEndSceneAfterIntro(device);
-    using ReadyFn = bool(__cdecl*)();
-    auto module = GetModuleHandleW(L"client.dll");
-    auto ready = module ? reinterpret_cast<ReadyFn>(GetProcAddress(module, "skr_cef_session_visual_ready_v1")) : nullptr;
-    const bool visualReady = gameplayConfirmed.load(std::memory_order_relaxed)
-        || (skr::lobby::IsSkrSession() ? (ready && ready())
-            : !skr::game_state::IsEnhancedNegotiationPending());
-    // gameplayConfirmed already implies the player is in-world (set from
-    // game_state tick which only runs at netgame state 5), so it can bypass
-    // the render-thread worldConnected check that may lag behind.
-    const bool confirmed = gameplayConfirmed.load(std::memory_order_relaxed);
-    const bool takeover = WaitForSingleObject(takeoverEvent, 0) == WAIT_OBJECT_0;
-    completionPending = (confirmed || worldConnected) && visualReady && takeover;
 
-    // Diagnostic: trace conditions every 2s while cover is active, one-shot on completion
-    DWORD now = GetTickCount();
-    if (completionPending && !conditionsTraced) {
-        conditionsTraced = true;
-        char buf[128];
-        wsprintfA(buf, "LAUNCH-COVER: COMPLETING world=%d visual=%d confirmed=%d takeover=%d",
-                  worldConnected, visualReady, confirmed, takeover);
+    // Cover dismisses at the first stable frame where all three hold:
+    //   1. Player is in the game world (CNetGame state 5, render-thread)
+    //      OR gameplayConfirmed was set by the game-state failsafe.
+    //   2. Enhanced negotiation (RPC 240) has resolved — the protocol
+    //      handshake is done, so no further state changes are expected.
+    //      RPC 241 CefIntro is experimental and NOT gated here.
+    //   3. Launcher takeover event is signalled.
+    const bool confirmed = gameplayConfirmed.load(std::memory_order_relaxed);
+    const bool negotiationDone = !skr::game_state::IsEnhancedNegotiationPending();
+    const bool takeover = WaitForSingleObject(takeoverEvent, 0) == WAIT_OBJECT_0;
+
+    completionPending = (confirmed || worldConnected)
+                     && (confirmed || negotiationDone)
+                     && takeover;
+
+    // One-shot timing traces.
+    if (worldConnected && !worldTraced) {
+        worldTraced = true;
+        char buf[80]; wsprintfA(buf, "COVER-TIMING: state5 at %lu", GetTickCount());
         ipc::TraceHandoff(buf);
-    } else if (!conditionsTraced && now - lastConditionTrace >= 2000) {
-        lastConditionTrace = now;
-        char buf[128];
-        wsprintfA(buf, "LAUNCH-COVER: WAITING world=%d visual=%d confirmed=%d takeover=%d",
-                  worldConnected, visualReady, confirmed, takeover);
+    }
+    if (takeover && !takeoverTraced) {
+        takeoverTraced = true;
+        char buf[80]; wsprintfA(buf, "COVER-TIMING: takeover at %lu", GetTickCount());
         ipc::TraceHandoff(buf);
     }
     if (FAILED(device->TestCooperativeLevel())) return false;
@@ -123,7 +120,12 @@ void Presented(bool drewCover, HRESULT result) {
     if (!drewCover || result != D3D_OK) return;
     SetEvent(frameEvent);
     if (!frameReported) { frameReported = true; ipc::TraceHandoff("cover-presented"); }
-    if (completionPending) { finished = true; SetEvent(readyEvent); ipc::TraceHandoff("world-resources-hud-ready"); BeforeReset(); }
+    if (completionPending) {
+        finished = true; SetEvent(readyEvent);
+        char buf[80]; wsprintfA(buf, "COVER-TIMING: dismissed at %lu", GetTickCount());
+        ipc::TraceHandoff(buf);
+        BeforeReset();
+    }
 }
 void MarkGameplayConfirmed() {
     if (!gameplayConfirmed.exchange(true, std::memory_order_relaxed))
