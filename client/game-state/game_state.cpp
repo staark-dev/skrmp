@@ -531,7 +531,22 @@ void MaintainDrawRadarDetour() {
         return;
     }
     if (entry == 0xC3) {                       // SA-MP hiding radar (RET)
-        g_detourActive = false;
+        // After first spawn the trampoline exists.  SA-MP keeps writing
+        // 0xC3 but only touches byte 0 -- our JMP offset at bytes 1-4
+        // is still intact.  Restore byte 0 to 0xE9 every frame so the
+        // JMP is in place when CHud::Draw runs (CGame::Process < Draw).
+        if (g_drawRadarTrampoline) {
+            auto* p = const_cast<uint8_t*>(fn);
+            DWORD oldProt = 0;
+            if (VirtualProtect(p, 1, PAGE_EXECUTE_READWRITE, &oldProt)) {
+                *p = 0xE9;
+                VirtualProtect(p, 1, oldProt, &oldProt);
+                FlushInstructionCache(GetCurrentProcess(), p, 1);
+                g_detourActive = true;
+            }
+        } else {
+            g_detourActive = false;
+        }
         return;
     }
     if (entry == kDrawRadarEntry[0]) {         // 0xA1 -- SA-MP restored original
