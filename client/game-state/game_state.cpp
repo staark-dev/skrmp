@@ -125,22 +125,53 @@ using FindPlayerVehicleFn   = uint8_t*(__cdecl*)(int, bool);
 
 DWORD g_lastSend = 0;
 
+// ── Log helpers ─────────────────────────────────────────────────────
+// GetLogPath: resolves <gta>\SKR\game_state.log once, caches it.
+static char g_logPath[MAX_PATH] = {};
+static bool g_logPathOk = false;
+static const char* GetLogPath() {
+    if (g_logPathOk) return g_logPath;
+    DWORD n = GetModuleFileNameA(nullptr, g_logPath, MAX_PATH);
+    if (!n || n >= MAX_PATH) return nullptr;
+    char* slash = strrchr(g_logPath, '\\');
+    if (!slash) return nullptr;
+    snprintf(slash + 1, MAX_PATH - (slash + 1 - g_logPath), "SKR\\game_state.log");
+    g_logPathOk = true;
+    return g_logPath;
+}
+
 // Diagnostic: logs each distinct stage once to <gta>\SKR\game_state.log.
 uint32_t g_loggedStages = 0;
 void LogStage(int stage, const char* msg) {
     if (g_loggedStages & (1u << stage)) return;
     g_loggedStages |= (1u << stage);
-    char path[MAX_PATH];
-    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
-    if (!n || n >= MAX_PATH) return;
-    char* slash = strrchr(path, '\\');
-    if (!slash) return;
-    snprintf(slash + 1, MAX_PATH - (slash + 1 - path), "SKR\\game_state.log");
+    const char* path = GetLogPath();
+    if (!path) return;
     FILE* f = fopen(path, "a");
     if (!f) return;
     fprintf(f, "[%lu] stage %d: %s\n", GetTickCount(), stage, msg);
     fclose(f);
 }
+
+// LogDiag: rate-limited repeated diagnostic logging (every ~5 seconds per tag).
+// Unlike LogStage (one-shot), this logs periodically for ongoing diagnostics.
+static DWORD g_diagLastLog_HudDraw = 0;
+static DWORD g_diagLastLog_DrawRadar = 0;
+static DWORD g_diagLastLog_CallSite = 0;
+
+static void LogDiag(const char* tag, const char* msg) {
+    const char* path = GetLogPath();
+    if (!path) return;
+    FILE* f = fopen(path, "a");
+    if (!f) return;
+    fprintf(f, "[%lu] DIAG %s: %s\n", GetTickCount(), tag, msg);
+    fclose(f);
+}
+
+// ── Diagnostic counters ─────────────────────────────────────────────
+static std::atomic<uint32_t> g_hudDrawCount{0};
+static std::atomic<uint32_t> g_drawRadarCount{0};
+static std::atomic<uint32_t> g_trampolineCallCount{0};
 
 bool ReadPlayer(CVector& pos, float& heading) {
     auto* ped = *reinterpret_cast<uint8_t**>(kPlayersPed);
@@ -379,11 +410,32 @@ static std::atomic<int> g_radarCrashCount{0};
 constexpr int kMaxRadarCrashes = 3;
 
 void __cdecl HookedDrawRadar() {
+    g_drawRadarCount.fetch_add(1);
+
     auto* w = reinterpret_cast<float*>(kRadarWidth);
     auto* h = reinterpret_cast<float*>(kRadarHeight);
     auto* top = reinterpret_cast<float*>(kRadarTopFromBottom);
     const float s = g_radarScale;
     const float w0 = *w, h0 = *h, top0 = *top;
+
+    // Rate-limited diagnostic: every 5 seconds
+    DWORD now = GetTickCount();
+    if (now - g_diagLastLog_DrawRadar >= 5000) {
+        g_diagLastLog_DrawRadar = now;
+        uint8_t displayHud = *reinterpret_cast<uint8_t*>(kDisplayHud);
+        char m[320];
+        snprintf(m, sizeof(m),
+                 "calls=%u trampCalls=%u crashCount=%d trampoline=0x%p "
+                 "w=%.1f h=%.1f top=%.1f scale=%.2f style=%d bDisplayHud=%u "
+                 "maskByte=0x%02X",
+                 g_drawRadarCount.load(), g_trampolineCallCount.load(),
+                 g_radarCrashCount.load(),
+                 reinterpret_cast<void*>(g_drawRadarTrampoline),
+                 w0, h0, top0, s, static_cast<int>(g_radarStyle), displayHud,
+                 *reinterpret_cast<uint8_t*>(kDrawRadarMask));
+        LogDiag("DrawRadar", m);
+    }
+
     if (s != 1.0f) {
         *w = w0 * s;
         *h = h0 * s;
@@ -401,6 +453,7 @@ void __cdecl HookedDrawRadar() {
 
     if (g_radarCrashCount.load() < kMaxRadarCrashes) {
         __try {
+            g_trampolineCallCount.fetch_add(1);
             g_drawRadarTrampoline();
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             g_radarCrashCount.fetch_add(1);
@@ -595,10 +648,52 @@ bool IsConnected() {
     return netGame && netGame[kNetGameStateOff] == kStateConnected;
 }
 
-// ── CHud::Draw hook — passthrough, keeps the call-site for future use ──
+// ── CHud::Draw hook — passthrough with diagnostic logging ──
 VoidFn g_origHudDraw = nullptr;
 
 void __cdecl HookedHudDraw() {
+    g_hudDrawCount.fetch_add(1);
+
+    // Rate-limited diagnostic: every 5 seconds
+    DWORD now = GetTickCount();
+    if (now - g_diagLastLog_HudDraw >= 5000) {
+        g_diagLastLog_HudDraw = now;
+        uint8_t displayHud = *reinterpret_cast<uint8_t*>(kDisplayHud);
+        char m[256];
+        snprintf(m, sizeof(m),
+                 "calls=%u bDisplayHud=%u origHudDraw=0x%p radarStyle=%d radarScale=%.2f crashCount=%d",
+                 g_hudDrawCount.load(), displayHud,
+                 reinterpret_cast<void*>(g_origHudDraw),
+                 static_cast<int>(g_radarStyle), g_radarScale,
+                 g_radarCrashCount.load());
+        LogDiag("HudDraw", m);
+
+        // Check if call site 0x53E4FF still points to our hook
+        constexpr uintptr_t kSite = 0x53E4FF;
+        auto* site = reinterpret_cast<uint8_t*>(kSite);
+        if (site[0] == 0xE8) {
+            uintptr_t currentTarget = kSite + 5 + *reinterpret_cast<int32_t*>(site + 1);
+            if (currentTarget != reinterpret_cast<uintptr_t>(&HookedHudDraw)) {
+                char m2[128];
+                snprintf(m2, sizeof(m2),
+                         "ALERT: call site 0x53E4FF retargeted to 0x%08X (not our hook 0x%p)!",
+                         static_cast<unsigned>(currentTarget),
+                         reinterpret_cast<void*>(&HookedHudDraw));
+                LogDiag("CallSite", m2);
+            }
+        }
+
+        // Check DrawRadar entry: is our detour still in place?
+        auto* drEntry = reinterpret_cast<uint8_t*>(kCHudDrawRadar);
+        if (drEntry[0] != 0xE9) {
+            char m3[128];
+            snprintf(m3, sizeof(m3),
+                     "ALERT: CHud::DrawRadar (0x58A330) entry byte is 0x%02X, not 0xE9 (jmp)!",
+                     drEntry[0]);
+            LogDiag("DetourCheck", m3);
+        }
+    }
+
     if (g_origHudDraw) g_origHudDraw();
 }
 
@@ -770,6 +865,22 @@ bool InstallHudDrawHook() {
     FlushInstructionCache(GetCurrentProcess(), site, 5);
 
     LogStage(16, "CHud::Draw hooked — native radar with CEF mask overlay");
+
+    // One-shot diagnostic: log initial radar state at hook install time
+    {
+        uint8_t displayHud = *reinterpret_cast<uint8_t*>(kDisplayHud);
+        float rw = *reinterpret_cast<float*>(kRadarWidth);
+        float rh = *reinterpret_cast<float*>(kRadarHeight);
+        float rt = *reinterpret_cast<float*>(kRadarTopFromBottom);
+        uint8_t maskByte = *reinterpret_cast<uint8_t*>(kDrawRadarMask);
+        char dm[256];
+        snprintf(dm, sizeof(dm),
+                 "INIT bDisplayHud=%u radarW=%.1f radarH=%.1f radarTop=%.1f "
+                 "maskEntry=0x%02X scale=%.2f style=%d",
+                 displayHud, rw, rh, rt, maskByte, g_radarScale,
+                 static_cast<int>(g_radarStyle));
+        LogDiag("HookInstall", dm);
+    }
 
     VerifyRadarPatchSites();
     InstallDrawRadarDetour();
