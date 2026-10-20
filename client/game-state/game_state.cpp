@@ -608,6 +608,17 @@ void Tick() {
     // not gated on IsConnected: 241/242 can arrive before SA-MP reports connected.
     if (!skr::lobby::IsSkrSession()) ApplyRadar(protocol::RadarStyle::Round, 1.0f);
 
+    // Early CNetGame detection -- runs every CGame::Process frame (no rate limit).
+    // Signals the cover to dismiss BEFORE the "Started" chat message renders.
+    {
+        HMODULE sampEarly = GetModuleHandleA("samp.dll");
+        if (sampEarly) {
+            auto* ng = *reinterpret_cast<uint8_t**>(
+                reinterpret_cast<uintptr_t>(sampEarly) + kSampNetGameRva);
+            if (ng) skr::launch_cover::MarkNetGameReady();
+        }
+    }
+
     DWORD now = GetTickCount();
     if (now - g_lastSend < kSendIntervalMs) return;
     g_lastSend = now;

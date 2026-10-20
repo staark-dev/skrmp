@@ -8,8 +8,9 @@ namespace skr::launch_cover {
 namespace {
 HANDLE frameEvent{}, takeoverEvent{}, readyEvent{};
 bool finished = false, completionPending = false, frameReported = false;
-bool worldTraced = false, takeoverTraced = false;
+bool worldTraced = false, takeoverTraced = false, netGameTraced = false;
 std::atomic<bool> gameplayConfirmed{false};
+std::atomic<bool> netGameReady{false};
 IDirect3DTexture9* title = nullptr;
 constexpr int width = 640, height = 200;
 bool CreateTitle(IDirect3DDevice9* device) {
@@ -63,22 +64,24 @@ bool Draw(IDirect3DDevice9* device, bool worldConnected) {
     // Bootstrap runs even while the loading cover is active.
     skr::lobby::OnEndSceneAfterIntro(device);
 
-    // Cover dismisses at the first stable frame where all three hold:
-    //   1. Player is in the game world (CNetGame state 5, render-thread)
-    //      OR gameplayConfirmed was set by the game-state failsafe.
-    //   2. Enhanced negotiation (RPC 240) has resolved — the protocol
-    //      handshake is done, so no further state changes are expected.
-    //      RPC 241 CefIntro is experimental and NOT gated here.
-    //   3. Launcher takeover event is signalled.
+    // Cover dismisses at the first frame where BOTH hold:
+    //   1. CNetGame exists (netGameReady, set from game_state::Tick)
+    //      — this fires BEFORE SA-MP renders the "Started" chat message.
+    //      Fallbacks: worldConnected (state 5) or gameplayConfirmed (5s failsafe).
+    //   2. Launcher takeover event is signalled (no desktop flash).
+    const bool ready = netGameReady.load(std::memory_order_relaxed);
     const bool confirmed = gameplayConfirmed.load(std::memory_order_relaxed);
-    const bool negotiationDone = !skr::game_state::IsEnhancedNegotiationPending();
     const bool takeover = WaitForSingleObject(takeoverEvent, 0) == WAIT_OBJECT_0;
 
-    completionPending = (confirmed || worldConnected)
-                     && (confirmed || negotiationDone)
+    completionPending = (ready || confirmed || worldConnected)
                      && takeover;
 
     // One-shot timing traces.
+    if (ready && !netGameTraced) {
+        netGameTraced = true;
+        char buf[80]; wsprintfA(buf, "COVER-TIMING: netGameReady at %lu", GetTickCount());
+        ipc::TraceHandoff(buf);
+    }
     if (worldConnected && !worldTraced) {
         worldTraced = true;
         char buf[80]; wsprintfA(buf, "COVER-TIMING: state5 at %lu", GetTickCount());
@@ -130,5 +133,9 @@ void Presented(bool drewCover, HRESULT result) {
 void MarkGameplayConfirmed() {
     if (!gameplayConfirmed.exchange(true, std::memory_order_relaxed))
         ipc::TraceHandoff("LAUNCH-COVER: gameplayConfirmed = true");
+}
+void MarkNetGameReady() {
+    if (!netGameReady.exchange(true, std::memory_order_relaxed))
+        ipc::TraceHandoff("LAUNCH-COVER: netGameReady = true (CNetGame exists)");
 }
 }

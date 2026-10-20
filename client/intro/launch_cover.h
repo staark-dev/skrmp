@@ -12,4 +12,7 @@ void BeforeReset();
 // even when CEF visual-ready cannot be satisfied (e.g. HUD browser 101
 // was never created or ResourcesReadyForHandoff stays false).
 void MarkGameplayConfirmed();
+// Called from game_state::Tick() when CNetGame is first detected.
+// Triggers cover dismissal before the "Started" chat message renders.
+void MarkNetGameReady();
 }
