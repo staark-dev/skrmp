@@ -32,9 +32,9 @@ static constexpr StringPatch kPatches[] = {
     {"{FFFFFF}SA-MP {B9C9BF}0.3.7-R5 {FFFFFF}Started",
      "{FFFFFF}SKR {B9C9BF}Client R1 {FFFFFF}Started"},
 
-    // Connection messages — hide these on SKR client
-    {"Connecting to %s:%d...", ""},
-    {"Connected. Joining the game...", ""},
+    // Connection messages — rebrand for SKR client
+    {"Connecting to %s:%d...",         "Connecting to %s:%d..."},
+    {"Connected. Joining the game...", "Connected. Joining..."},
 
     // SA-MP 0.3.7-R5 (plain, used in various places)
     {"SA-MP 0.3.7-R5",         "SKR Client"},
