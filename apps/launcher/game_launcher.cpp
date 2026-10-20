@@ -13,6 +13,7 @@ const char* LaunchResultToString(LaunchResult r) {
         case LaunchResult::ProcessCreateFailed: return "CreateProcessW failed";
         case LaunchResult::InjectionFailed:     return "DLL injection failed";
         case LaunchResult::PipeFailed:          return "Named pipe IPC failed";
+        case LaunchResult::StartupFilesFailed: return "Startup DLL conflict or restore failed; inspect samp.dll/d3d9.dll and .skr backups";
         case LaunchResult::ResumeThreadFailed:  return "ResumeThread failed";
     }
     return "Unknown";
@@ -44,14 +45,21 @@ HMODULE InjectDll(HANDLE hProcess, const wchar_t* dllPath) {
         return nullptr;
     }
 
-    WaitForSingleObject(hThread, 10000);
+    const DWORD waited = WaitForSingleObject(hThread, 10000);
+    if (waited != WAIT_OBJECT_0) {
+        // The remote thread may still use remoteMem. The caller terminates
+        // this newly created process on failure, which reclaims the allocation.
+        CloseHandle(hThread);
+        return nullptr;
+    }
 
     DWORD exitCode = 0;
-    GetExitCodeThread(hThread, &exitCode);
+    const BOOL completed = GetExitCodeThread(hThread, &exitCode);
     CloseHandle(hThread);
     VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
 
-    return reinterpret_cast<HMODULE>(static_cast<uintptr_t>(exitCode));
+    return completed && exitCode != STILL_ACTIVE
+        ? reinterpret_cast<HMODULE>(static_cast<uintptr_t>(exitCode)) : nullptr;
 }
 
 LPTHREAD_START_ROUTINE FindRemoteExport(HMODULE remoteBase,
@@ -87,33 +95,30 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
     if (pos != std::wstring::npos)
         workDir.resize(pos);
 
-    // samp.dll is preloaded by SKR.Client (with its start held until the
-    // lobby's Connect), so nothing else may load it first.
-    //   samp.dll — SA-MP client
-    //   d3d9.dll — optional D3D9 proxy (samp-cef)
-    struct HideEntry { const wchar_t* orig; const wchar_t* hidden; };
-    HideEntry hideList[] = {
-        { L"\\samp.dll", L"\\samp.dll.skr" },
-        { L"\\d3d9.dll", L"\\d3d9.dll.skr" },
-    };
-    for (auto& e : hideList) {
-        std::wstring orig   = workDir + e.orig;
-        std::wstring hidden = workDir + e.hidden;
-        if (GetFileAttributesW(orig.c_str()) != INVALID_FILE_ATTRIBUTES)
-            MoveFileExW(orig.c_str(), hidden.c_str(), MOVEFILE_REPLACE_EXISTING);
-    }
-
-    // vorbisHooked.dll is the real Ogg Vorbis library (imports ogg.dll and
-    // vorbis.dll); vorbisFile.dll only forwards to it. Hiding it left GTA's
-    // ov_* calls null, which crashed on the first Ogg stream (vehicle radio).
-    // Undo that rename from older launcher builds.
-    {
-        std::wstring orig   = workDir + L"\\vorbisHooked.dll";
-        std::wstring hidden = workDir + L"\\vorbisHooked.dll.skr";
-        if (GetFileAttributesW(orig.c_str()) == INVALID_FILE_ATTRIBUTES &&
-            GetFileAttributesW(hidden.c_str()) != INVALID_FILE_ATTRIBUTES)
-            MoveFileExW(hidden.c_str(), orig.c_str(), 0);
-    }
+    // Keep proxy files out of process import resolution only. Never replace
+    // an existing backup. Restore before explicit SKR initialization.
+    struct StartupFiles {
+        std::vector<std::pair<std::wstring, std::wstring>> moved;
+        bool Restore() {
+            bool ok = true;
+            for (auto it = moved.rbegin(); it != moved.rend(); ++it) {
+                if (GetFileAttributesW(it->second.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+                if (!MoveFileExW(it->second.c_str(), it->first.c_str(), 0)) ok = false;
+            }
+            return ok;
+        }
+        ~StartupFiles() { Restore(); }
+        bool Hide(const std::wstring& original) {
+            const auto backup = original + L".skr";
+            if (GetFileAttributesW(backup.c_str()) != INVALID_FILE_ATTRIBUTES) return false;
+            if (GetFileAttributesW(original.c_str()) == INVALID_FILE_ATTRIBUTES) return true;
+            if (!MoveFileExW(original.c_str(), backup.c_str(), 0)) return false;
+            moved.emplace_back(original, backup);
+            return true;
+        }
+    } startupFiles;
+    if (!startupFiles.Hide(workDir + L"\\samp.dll") ||
+        !startupFiles.Hide(workDir + L"\\d3d9.dll")) return LaunchResult::StartupFilesFailed;
 
     std::wstring cmdLine = L"\"" + config.gtaSaPath + L"\"";
 
@@ -147,6 +152,13 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
         return LaunchResult::InjectionFailed;
     }
 
+    if (!startupFiles.Restore()) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return LaunchResult::StartupFilesFailed;
+    }
+
     // Find SkrRemoteInit in the remote process (same DLL, different base address)
     auto remoteInit = FindRemoteExport(remoteModule, config.clientDllPath.c_str(), "SkrRemoteInit");
     if (!remoteInit) {
@@ -161,7 +173,24 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
     ipc::LaunchParams params{};
     params.magic   = ipc::kLaunchParamsMagic;
     params.version = ipc::kLaunchParamsVersion;
-    params.serverPort = 0;
+    params.serverPort = config.serverPort;
+    params.enhancedAdvertised = config.enhancedAdvertised ? 1 : 0;
+    auto duplicateEvent = [&](HANDLE source, uint32_t& target, DWORD access) {
+        if (!source) return true;
+        HANDLE remote = nullptr;
+        if (!DuplicateHandle(GetCurrentProcess(), source, pi.hProcess, &remote, access, FALSE, 0)) return false;
+        target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(remote));
+        return true;
+    };
+    if (!duplicateEvent(config.frameReady, params.frameReadyHandle, EVENT_MODIFY_STATE) ||
+        !duplicateEvent(config.takeover, params.takeoverHandle, SYNCHRONIZE) ||
+        !duplicateEvent(config.sessionReady, params.sessionReadyHandle, EVENT_MODIFY_STATE)) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return LaunchResult::PipeFailed;
+    }
+    strncpy_s(params.serverAddress, config.serverAddress.c_str(), _TRUNCATE);
     WideCharToMultiByte(CP_UTF8, 0, config.playerName.c_str(), -1,
                         params.playerName, sizeof(params.playerName), nullptr, nullptr);
     if (config.joinTicket.size() == ipc::kJoinTicketSize) {
@@ -187,11 +216,12 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
         return LaunchResult::InjectionFailed;
     }
 
-    WaitForSingleObject(hInitThread, 10000);
+    const DWORD initWait = WaitForSingleObject(hInitThread, 10000);
     pipeThread.join();
+    SecureZeroMemory(&params, sizeof(params));
 
     DWORD initResult = 1;
-    GetExitCodeThread(hInitThread, &initResult);
+    const BOOL initCompleted = GetExitCodeThread(hInitThread, &initResult);
     CloseHandle(hInitThread);
 
     if (!pipeOk) {
@@ -199,6 +229,13 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
         return LaunchResult::PipeFailed;
+    }
+
+    if (initWait != WAIT_OBJECT_0 || !initCompleted || initResult != 0) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return LaunchResult::InjectionFailed;
     }
 
     // Resume game's main thread — D3D9 hooks are installed, intro will render

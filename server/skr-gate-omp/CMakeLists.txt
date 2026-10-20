@@ -51,3 +51,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     OUTPUT_NAME "SKRGate"
     PREFIX ""
 )
+
+add_executable(SKREnhancedTests ../../tests/unit/test_enhanced.cpp)
+target_include_directories(SKREnhancedTests PRIVATE ../../shared ${OMP_NET_DIR})
+target_link_libraries(SKREnhancedTests PRIVATE OMP-SDK OMP-Network)

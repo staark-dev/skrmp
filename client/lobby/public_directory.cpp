@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <initializer_list>
 
 // Source: https://api.open.mp/servers/ — the request made by the open.mp
 // server list page (https://open.mp/servers). JSON array of flat objects:
@@ -184,6 +185,17 @@ std::string Get(const std::map<std::string, std::string>& o, const char* key) {
     return it == o.end() || it->second == "null" ? std::string() : it->second;
 }
 
+// This endpoint has a flat JSON schema; aliases permit optional future
+// enrichment without assuming access to a server's private config.json.
+std::string First(const std::map<std::string, std::string>& o,
+                  std::initializer_list<const char*> fields) {
+    for (const auto* field : fields) {
+        auto value = Get(o, field);
+        if (!value.empty()) return value;
+    }
+    return {};
+}
+
 } // namespace
 
 bool FetchOpenMpServers(std::vector<PublicServer>& out, std::string& error) {
@@ -200,6 +212,13 @@ bool FetchOpenMpServers(std::vector<PublicServer>& out, std::string& error) {
         s.mode = Get(r, "gm");
         s.language = Get(r, "la");
         s.version = Get(r, "vn");
+        s.map = First(r, {"mapname", "map"});
+        s.website = First(r, {"weburl", "website"});
+        s.discord = First(r, {"discord", "discord_invite", "discord.invite"});
+        s.logo = Get(r, "logo");
+        s.bannerDark = First(r, {"bannerDark", "banner_dark", "banners.dark"});
+        s.bannerLight = First(r, {"bannerLight", "banner_light", "banners.light"});
+        s.banner = Get(r, "banner");
         s.players = atoi(Get(r, "pc").c_str());
         s.maxPlayers = atoi(Get(r, "pm").c_str());
         s.password = Get(r, "pa") == "true";
@@ -221,6 +240,14 @@ std::string PublicServersToLobbyJson(const std::vector<PublicServer>& list) {
         out += ",\"maxPlayers\":" + std::to_string(s.maxPlayers);
         out += ",\"address\":";   AppendJsonString(out, s.address);
         out += ",\"password\":";  out += s.password ? "true" : "false";
+        out += ",\"version\":";   AppendJsonString(out, s.version);
+        out += ",\"map\":";       AppendJsonString(out, s.map);
+        out += ",\"website\":";   AppendJsonString(out, s.website);
+        out += ",\"discord\":";   AppendJsonString(out, s.discord);
+        out += ",\"logo\":";      AppendJsonString(out, s.logo);
+        out += ",\"bannerDark\":"; AppendJsonString(out, s.bannerDark);
+        out += ",\"bannerLight\":"; AppendJsonString(out, s.bannerLight);
+        out += ",\"banner\":";    AppendJsonString(out, s.banner);
         out += ",\"description\":"; AppendJsonString(out, s.address + (s.version.empty() ? "" : " · " + s.version));
         out += ",\"order\":" + std::to_string(i);
         out += '}';

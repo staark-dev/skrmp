@@ -11,6 +11,14 @@ struct PublicServer {
     std::string mode;
     std::string language;
     std::string version;
+    // Optional public metadata. Not every open.mp server list response includes it.
+    std::string map;
+    std::string website;
+    std::string discord;
+    std::string logo;
+    std::string bannerDark;
+    std::string bannerLight;
+    std::string banner;
     int players = 0;
     int maxPlayers = 0;
     bool password = false;

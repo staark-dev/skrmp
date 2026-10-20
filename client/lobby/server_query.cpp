@@ -7,6 +7,8 @@
 #include <windows.h>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
+#include <cctype>
 
 // Wire format: SA-MP query mechanism (public, also implemented by open.mp).
 // Request: "SAMP" + server IPv4 (4 bytes) + port (uint16 LE) + opcode 'i'.
@@ -59,7 +61,7 @@ bool ReadShortString(const char* buf, size_t size, size_t& pos, std::string& out
     if (pos + 1 > size) return false;
     const uint8_t len = static_cast<uint8_t>(buf[pos++]);
     if (pos + len > size) return false;
-    out.assign(buf + pos, len);
+    out = Cp1252ToUtf8(buf + pos, len);
     pos += len;
     return true;
 }
@@ -100,7 +102,7 @@ void AppendJsonString(std::string& out, const std::string& s) {
 
 } // namespace
 
-ServerInfo QueryServer(const std::string& address, unsigned timeoutMs) {
+ServerInfo QueryServer(const std::string& address, unsigned timeoutMs, bool includeRules) {
     ServerInfo info;
     info.address = address;
 
@@ -158,7 +160,7 @@ ServerInfo QueryServer(const std::string& address, unsigned timeoutMs) {
     }
 
     // Rules ('r'): uint16 count, then { uint8 len + name, uint8 len + value }.
-    if (info.online) {
+    if (info.online && includeRules) {
         packet[10] = 'r';
         n = Exchange(s, to, packet, buf, sizeof(buf), timeoutMs);
         if (n >= static_cast<int>(kHeader + 2)) {
@@ -170,7 +172,25 @@ ServerInfo QueryServer(const std::string& address, unsigned timeoutMs) {
             for (uint16_t r = 0; r < count && ok; ++r) {
                 std::string name, value;
                 ok = ReadShortString(buf, size, pos, name) && ReadShortString(buf, size, pos, value);
-                if (ok && name == kSkrRule) info.skrClient = value;
+                if (!ok) break;
+                // Standard `r` rules expose mapname/weburl/version. More
+                // specific names below only exist when the server advertises
+                // custom query rules; open.mp config.json alone is not queried.
+                const std::string rawName = name;
+                std::transform(name.begin(), name.end(), name.begin(), [](unsigned char ch) {
+                    return static_cast<char>(std::tolower(ch));
+                });
+                if (name == kSkrRule || rawName == kSkrRule) info.skrClient = value;
+                else if (name == "mapname" || name == "map") info.map = value;
+                else if (name == "version") info.version = value;
+                else if (name == "weburl" || name == "website") info.website = value;
+                else if (name == "allowed_clients") info.allowedClients = value;
+                else if (name == "artwork" || name == "artwork.enable") info.artwork = value;
+                else if (name == "banner" || name == "banners") info.banners = value;
+                else if (name == "banners.dark" || name == "banner_dark") info.bannerDark = value;
+                else if (name == "banners.light" || name == "banner_light") info.bannerLight = value;
+                else if (name == "logo") info.logo = value;
+                else if (name == "discord.invite" || name == "discord") info.discord = value;
             }
             info.rulesKnown = ok;
         }
@@ -195,6 +215,18 @@ std::string ServerInfoToJson(const std::vector<ServerInfo>& list) {
         out += ",\"name\":";     AppendJsonString(out, s.hostname);
         out += ",\"mode\":";     AppendJsonString(out, s.gamemode);
         out += ",\"language\":"; AppendJsonString(out, s.language);
+        out += ",\"map\":"; AppendJsonString(out, s.map);
+        out += ",\"version\":"; AppendJsonString(out, s.version);
+        out += ",\"website\":"; AppendJsonString(out, s.website);
+        out += ",\"discord\":"; AppendJsonString(out, s.discord);
+        out += ",\"banner\":"; AppendJsonString(out, s.banners);
+        out += ",\"bannerDark\":"; AppendJsonString(out, s.bannerDark);
+        out += ",\"bannerLight\":"; AppendJsonString(out, s.bannerLight);
+        out += ",\"logo\":"; AppendJsonString(out, s.logo);
+        out += ",\"allowedClients\":"; AppendJsonString(out, s.allowedClients);
+        out += ",\"artwork\":"; AppendJsonString(out, s.artwork);
+        out += ",\"skrProtocol\":"; AppendJsonString(out, s.skrClient);
+        out += ",\"rulesKnown\":"; out += s.rulesKnown ? "true" : "false";
         out += ",\"skr\":";      out += !s.rulesKnown ? "null" : s.skrClient.empty() ? "false" : "true";
         out += '}';
     }

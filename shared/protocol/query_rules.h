@@ -11,6 +11,6 @@
 namespace skr::protocol {
 
 constexpr const char* kSkrQueryRule = "skr_client";
-constexpr const char* kSkrQueryRuleValue = "1";   // SKR protocol version
+constexpr const char* kSkrQueryRuleValue = "2";   // SKR protocol version
 
 } // namespace skr::protocol

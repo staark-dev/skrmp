@@ -30,6 +30,7 @@ void OnNetGameState(int sampState);
 
 // Server session info (RPC 241, shared/protocol/session_info.h). Game thread.
 void OnSessionInfo(uint8_t mode);
+void ResetEnhancedSession();
 
 // True once the server sent RPC 241, i.e. it runs the SKR Gate. SKR-only
 // behaviour (RPC 240, CEF HUD in place of the native one, chat panel) is

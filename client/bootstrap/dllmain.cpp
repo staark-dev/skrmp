@@ -12,6 +12,8 @@
 #include "ipc/launch_params.h"
 #include "samp-loader/samp_loader.h"
 #include "gta-fixes/gta_fixes.h"
+#include "intro/launch_cover.h"
+#include "game-state/game_state.h"
 
 namespace {
     std::atomic<bool> started{false};
@@ -22,6 +24,9 @@ namespace {
     LONG CALLBACK CrashTraceHandler(EXCEPTION_POINTERS* info);
 }
 
+extern "C" __declspec(dllexport) BOOL __cdecl SkrUsesExternalHandoff() noexcept {
+    return g_launchParams.frameReadyHandle != 0;
+}
 extern "C" __declspec(dllexport) BOOL __cdecl SkrInitialize() noexcept {
     if (started.exchange(true)) return TRUE;
 
@@ -30,7 +35,23 @@ extern "C" __declspec(dllexport) BOOL __cdecl SkrInitialize() noexcept {
     g_hasLaunchParams = skr::ipc::ReadLaunchParams(g_launchParams, 3000);
 
     // Runs before the launcher resumes GTA's main thread, like stock SA-MP.
+#ifdef SKR_EXTERNAL_LOBBY
+    if (!g_hasLaunchParams || !g_launchParams.serverPort ||
+        !memchr(g_launchParams.serverAddress, 0, sizeof(g_launchParams.serverAddress)) ||
+        !memchr(g_launchParams.playerName, 0, sizeof(g_launchParams.playerName))) {
+        started.store(false);
+        return FALSE;
+    }
+    skr::samp_loader::ConnectParams selected{g_launchParams.serverAddress,
+        g_launchParams.serverPort, g_launchParams.playerName};
+    if (!skr::samp_loader::PreloadSamp(&selected)) { started.store(false); return FALSE; }
+    skr::launch_cover::Configure(g_launchParams.frameReadyHandle, g_launchParams.takeoverHandle,
+                                g_launchParams.sessionReadyHandle);
+#else
     skr::samp_loader::PreloadSamp();
+#endif
+
+    skr::game_state::ConfigureEnhancedDiscovery(g_hasLaunchParams && g_launchParams.enhancedAdvertised == 1);
 
     AddVectoredExceptionHandler(1, &CrashTraceHandler);
     skr::gta_fixes::InstallGtaFixes();

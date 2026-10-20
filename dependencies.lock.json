@@ -58,6 +58,16 @@
       "architecture": "x86",
       "toolchain": "MSVC",
       "license": "UNKNOWN — verify before linking"
+    },
+    {
+      "name": "Microsoft.Web.WebView2",
+      "version": "1.0.2903.40",
+      "archive_url": "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.2903.40/microsoft.web.webview2.1.0.2903.40.nupkg",
+      "archive_sha256": "ef128016dd1e51c59178c827ed5b8aa3322c57afa8675d930f8109505542ad74",
+      "architecture": "x86 loader; Evergreen Runtime installed separately",
+      "toolchain": "MSVC Win32",
+      "license": "BSD-3-Clause (package LICENSE.txt)",
+      "notes": "Only SKR_EXTERNAL_LOBBY experimental build; no runtime bundled."
     }
   ],
   "removed": [

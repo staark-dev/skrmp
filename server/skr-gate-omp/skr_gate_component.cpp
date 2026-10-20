@@ -1,4 +1,5 @@
 #include "skr_gate_component.hpp"
+#include "protocol/join_validation.h"
 #include <Server/Components/Variables/variables.hpp>
 #include <chrono>
 #include <cmath>
@@ -37,7 +38,13 @@ bool ReadName(NetworkBitStream& bs, char (&out)[protocol::kClientStateMaxName + 
 
 bool SkrClientStateHandler::onReceive(IPlayer& peer, NetworkBitStream& bs) {
     const int id = peer.getID();
-    if (!gate_ || !gate_->IsAuthorized(id)) return false;
+    if (!gate_) return false;
+    const int offset = bs.GetReadOffset();
+    uint8_t marker = 0;
+    if (!bs.readUINT8(marker)) return false;
+    bs.SetReadOffset(offset);
+    if (marker == protocol::kEnhancedMarker) { gate_->Negotiate(peer, bs); return false; }
+    if (!gate_->IsEnhanced(id)) return false;
 
     const uint64_t now = NowMs();
     auto it = lastAcceptMs_.find(id);
@@ -80,95 +87,14 @@ bool SkrClientStateHandler::onReceive(IPlayer& peer, NetworkBitStream& bs) {
 
 // ── RPC 25 filter: block non-SKR clients at join ────────
 
-bool SkrJoinFilter::onReceive(IPlayer& peer, NetworkBitStream& bs) {
-    int savedOffset = bs.GetReadOffset();
-    int totalBits = bs.GetNumberOfBitsUsed();
-
-    if (core_)
-        core_->printLn("SKR Gate RPC25: totalBits=%d readOffset=%d", totalBits, savedOffset);
-
-    // CLIENT_JOIN structure: version(int32), mod(uint8),
-    // nickname(uint8 len + chars), challenge(uint32),
-    // authKey(uint8 len + chars), clientVer(uint8 len + chars)
-    int32_t version = 0;
-    uint8_t mod = 0, nickLen = 0;
-    if (!bs.readINT32(version) || !bs.readUINT8(mod) || !bs.readUINT8(nickLen)) {
-        if (core_) core_->printLn("SKR Gate RPC25: failed reading header");
-        bs.SetReadOffset(savedOffset);
-        return true;
-    }
-
-    if (core_)
-        core_->printLn("SKR Gate RPC25: ver=%d mod=%d nickLen=%d", version, mod, nickLen);
-
-    // Skip nickname bytes
-    bs.SetReadOffset(bs.GetReadOffset() + nickLen * 8);
-
-    uint32_t challenge = 0;
-    if (!bs.readUINT32(challenge)) {
-        if (core_) core_->printLn("SKR Gate RPC25: failed reading challenge");
-        bs.SetReadOffset(savedOffset); return true;
-    }
-
-    // Skip auth key (uint8 len + chars)
-    uint8_t authLen = 0;
-    if (!bs.readUINT8(authLen)) {
-        if (core_) core_->printLn("SKR Gate RPC25: failed reading authLen");
-        bs.SetReadOffset(savedOffset); return true;
-    }
-
-    if (core_)
-        core_->printLn("SKR Gate RPC25: challenge=0x%X authLen=%d", challenge, authLen);
-
-    bs.SetReadOffset(bs.GetReadOffset() + authLen * 8);
-
-    // Read client version string
-    uint8_t verLen = 0;
-    if (!bs.readUINT8(verLen)) {
-        if (core_) core_->printLn("SKR Gate RPC25: failed reading verLen");
-        bs.SetReadOffset(savedOffset); return true;
-    }
-
-    if (core_)
-        core_->printLn("SKR Gate RPC25: verLen=%d bitsLeft=%d",
-                       verLen, totalBits - bs.GetReadOffset());
-
-    char verStr[65] = {};
-    if (verLen > 0 && verLen <= 64) {
-        if (!bs.Read(verStr, verLen)) {
-            if (core_) core_->printLn("SKR Gate RPC25: failed reading verStr");
-            bs.SetReadOffset(savedOffset); return true;
-        }
-    }
-    verStr[verLen] = '\0';
-
-    bs.SetReadOffset(savedOffset);
-
-    bool isSKR = (verLen >= 3 && verStr[0] == 'S' && verStr[1] == 'K' && verStr[2] == 'R');
-
-    if (core_)
-        core_->printLn("SKR Gate RPC25: clientVer='%s' (len=%d) %s",
-                       verStr, verLen, isSKR ? "[ALLOWED]" : "[BLOCKED]");
-
-    if (!isSKR) {
-        peer.sendClientMessage(Colour::FromRGBA(0xA9C4E4FF),
-            "Checking client compatibility...");
-        peer.sendClientMessage(Colour::FromRGBA(0xAA3333FF),
-            "Connection rejected: SKR RC1 Client required.");
-        peer.sendClientMessage(Colour::FromRGBA(0xA9C4E4FF),
-            "Please download from skr-server.com to join.");
-        peer.kick();
-        return false;
-    }
-
-    return true;
+// Standard layout: open.mp 3d20f3dc Shared/NetCode/core.hpp PlayerConnect.
+bool SkrJoinFilter::onReceive(IPlayer&, NetworkBitStream& bs) {
+    return protocol::ValidateStandardJoin(bs);
 }
-
-// ── RPC 243: radar rect from SKRClient.dll ───────────────
 
 bool SkrRadarRectHandler::onReceive(IPlayer& peer, NetworkBitStream& bs) {
     const int id = peer.getID();
-    if (!gate_ || !gate_->IsAuthorized(id)) return false;
+    if (!gate_ || !gate_->IsEnhanced(id)) return false;
 
     const uint64_t now = NowMs();
     auto it = lastAcceptMs_.find(id);
@@ -369,32 +295,14 @@ void SkrGateComponent::onIncomingConnection(IPlayer& player, StringView ipAddres
     core_->printLn("SKR Gate: incoming connection from %.*s:%u (id %d)",
                    static_cast<int>(ipAddress.length()), ipAddress.data(), port, id);
 
-    player.sendClientMessage(Colour::FromRGBA(0xA9C4E4FF),
-        "Checking client compatibility...");
-
-    // Issue challenge
-    protocol::ChallengeMessage challenge{};
-    if (IssueChallenge(id, challenge)) {
-        core_->printLn("SKR Gate: challenge issued to player %d (gen %llu)",
-                       id, challenge.generation);
-    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto& data = players_[id];
+    data.Reset();
+    data.generation = ++generationCounter_;
 }
 
 void SkrGateComponent::onPlayerConnect(IPlayer& player) {
-    int id = player.getID();
-    core_->printLn("SKR Gate: player %d fully connected", id);
-
-    // If player got past the RPC filter, they're SKR — authorize
-    player.sendClientMessage(Colour::FromRGBA(0xA9C4E4FF),
-        "SKR Client verified.");
-    player.sendClientMessage(Colour::FromRGBA(0xD4A017FF),
-        "Authenticating... Please wait.");
-    // TODO: verify launcher token here before calling AuthorizePlayer
-    AuthorizePlayer(id, 0);
-
-    // Send session info early so the client knows about CefIntro before
-    // CEF initialization — the lobby can keep showing while auth loads.
-    SendSessionInfo(player);
+    core_->printLn("SKR Gate: player %d connected in hybrid mode (not authenticated)", player.getID());
 }
 
 void SkrGateComponent::onPlayerDisconnect(IPlayer& player, PeerDisconnectReason reason) {
@@ -412,7 +320,7 @@ void SkrGateComponent::onPlayerDisconnect(IPlayer& player, PeerDisconnectReason 
 void SkrGateComponent::onPlayerClientInit(IPlayer& player) {
     int id = player.getID();
     core_->printLn("SKR Gate: player %d client initialized", id);
-    if (IsAuthorized(id)) SendSessionInfo(player);
+    if (IsEnhanced(id)) SendSessionInfo(player);
 }
 
 // True when the gamemode or a filterscript implements
@@ -438,7 +346,8 @@ void SkrGateComponent::SendSessionInfo(IPlayer& player) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = players_.find(id);
-        if (it != players_.end() && it->second.sessionInfoSent) return;
+        if (it == players_.end() || it->second.enhanced.mode != protocol::ClientMode::Enhanced
+            || it->second.sessionInfoSent) return;
     }
 
     const uint8_t mode = static_cast<uint8_t>(ScriptsHaveIntro()
@@ -500,7 +409,7 @@ void SkrGateComponent::SendRadarStyle(int playerId) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = players_.find(playerId);
-        if (it == players_.end() || it->second.state != SkrPlayerState::Authorized
+        if (it == players_.end() || it->second.enhanced.mode != protocol::ClientMode::Enhanced
             || !it->second.sessionInfoSent) return;   // sent later from SendSessionInfo
         style = it->second.radarStyle;
         mode = it->second.radarSizeMode;
@@ -534,6 +443,7 @@ void SkrGateComponent::onTick(Microseconds elapsed, TimePoint /*now*/) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto& [id, data] : players_) {
+            data.enhanced.Expire(NowMs());
             if (data.state == SkrPlayerState::Challenged &&
                 data.challengeExpiresAt > 0 &&
                 nowEpoch > data.challengeExpiresAt) {
@@ -555,6 +465,49 @@ void SkrGateComponent::onTick(Microseconds elapsed, TimePoint /*now*/) {
 }
 
 // ── SKR gate logic ───────────────────────────────────────
+
+// Display-only capabilities are independent of protected authorization.
+bool SkrGateComponent::IsEnhanced(int id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = players_.find(id);
+    return it != players_.end() && it->second.state != SkrPlayerState::Rejected &&
+        it->second.enhanced.mode == protocol::ClientMode::Enhanced;
+}
+
+void SkrGateComponent::Negotiate(IPlayer& player, NetworkBitStream& bs) {
+    if (bs.GetNumberOfBitsUsed() - bs.GetReadOffset() != 64) return;
+    uint8_t marker = 0, step = 0, version = 0, caps = 0;
+    uint32_t token = 0;
+    if (!bs.readUINT8(marker) || !bs.readUINT8(step) || !bs.readUINT8(version) ||
+        !bs.readUINT8(caps) || !bs.readUINT32(token) || marker != protocol::kEnhancedMarker) return;
+    bool offer = false, confirmed = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(player.getID());
+        if (it == players_.end() || it->second.state == SkrPlayerState::Rejected) return;
+        auto& session = it->second.enhanced;
+        session.Expire(NowMs());
+        if (step == static_cast<uint8_t>(protocol::EnhancedStep::Hello) && token == 0) {
+            uint32_t generation = static_cast<uint32_t>(++generationCounter_);
+            if (!generation) generation = static_cast<uint32_t>(++generationCounter_);
+            offer = session.Begin(version, caps, generation, NowMs());
+            token = session.token;
+        } else if (step == static_cast<uint8_t>(protocol::EnhancedStep::Confirm)) {
+            confirmed = session.Confirm(version, caps, token, NowMs());
+        }
+    }
+    if (offer) {
+        NetworkBitStream response;
+        response.writeUINT8(protocol::kEnhancedMarker);
+        response.writeUINT8(static_cast<uint8_t>(protocol::EnhancedStep::Offer));
+        response.writeUINT8(protocol::kEnhancedVersion);
+        response.writeUINT8(protocol::kEnhancedCapabilities);
+        response.writeUINT32(token);
+        player.sendRPC(protocol::kRpcSessionInfo,
+            Span<uint8_t>(response.GetData(), response.GetNumberOfBitsUsed()), OrderingChannel_SyncRPC);
+    }
+    if (confirmed) SendSessionInfo(player);
+}
 
 bool SkrGateComponent::IssueChallenge(int playerId,
                                        protocol::ChallengeMessage& challengeOut) {

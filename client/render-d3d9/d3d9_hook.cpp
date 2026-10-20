@@ -1,8 +1,11 @@
 #include "render-d3d9/d3d9_hook.h"
 #include "intro/urban_intro.h"
+#include "intro/launch_cover.h"
 #include "lobby/lobby_manager.h"
+#include "render-d3d9/fps_engine.h"
 #include <atomic>
 #include <algorithm>
+#include <cstdio>
 
 namespace skr::render {
 
@@ -15,6 +18,10 @@ ResetFn    g_origReset    = nullptr;
 void**     g_hookedVtable = nullptr;
 std::atomic<bool> g_hookInstalled{false};
 HANDLE g_hookThread = nullptr;
+using PresentFn = HRESULT(WINAPI*)(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
+PresentFn g_origPresent = nullptr;
+std::atomic<bool> g_cefPresentOwner{false};
+bool g_cefDrewCover = false;
 LARGE_INTEGER g_freq{};
 
 // ── Transition overlay ──────────────────────────────────────────────
@@ -94,6 +101,8 @@ bool PatchVtable(void** vtable, int index, void* hook, void** original) {
 }
 
 HRESULT WINAPI HookedEndScene(IDirect3DDevice9* device) {
+    static bool reported = false;
+    if (!reported) { reported = true; fps::Trace("hook EndScene entered"); }
     if (!g_freq.QuadPart) {
         QueryPerformanceFrequency(&g_freq);
         QueryPerformanceCounter(&g_transLastTime);
@@ -150,10 +159,61 @@ HRESULT WINAPI HookedEndScene(IDirect3DDevice9* device) {
 }
 
 HRESULT WINAPI HookedReset(IDirect3DDevice9* device, D3DPRESENT_PARAMETERS* pp) {
+    fps::Trace("hook Reset entered");
+    skr::render::fps::BeforeReset();
+    skr::launch_cover::BeforeReset();
     skr::intro::BeforeReset();
     HRESULT hr = g_origReset(device, pp);
+    char message[80]{}; sprintf_s(message, "hook Reset returned 0x%08lX", hr); fps::Trace(message);
     skr::intro::AfterReset(hr);
     return hr;
+}
+
+HRESULT WINAPI HookedPresent(
+    IDirect3DDevice9* device,
+    const RECT* source,
+    const RECT* dest,
+    HWND window,
+    const RGNDATA* dirty)
+{
+    if (g_cefPresentOwner.load()) return g_origPresent(device, source, dest, window, dirty);
+    const bool inWorld = IsPlayerInGame();
+    static ULONGLONG lastDiagnostic = 0;
+
+    const bool drawn = skr::launch_cover::Draw(
+        device, inWorld
+    );
+    if (GetTickCount64() - lastDiagnostic >= 5000) {
+        lastDiagnostic = GetTickCount64();
+        char message[120]{};
+        sprintf_s(message, "hook Present inWorld=%u cover=%u introFinished=%u",
+                  inWorld ? 1u : 0u, drawn ? 1u : 0u, skr::intro::IsFinished() ? 1u : 0u);
+        fps::Trace(message);
+    }
+
+#ifdef SKR_EXTERNAL_LOBBY
+    // Diagnostic: testăm FPS fără condiția SA-MP.
+    if (!drawn && skr::intro::IsFinished()) {
+        skr::render::fps::Draw(device);
+    }
+#endif
+
+    HRESULT result = g_origPresent(
+        device, source, dest, window, dirty
+    );
+
+    skr::launch_cover::Presented(drawn, result);
+
+#ifdef SKR_EXTERNAL_LOBBY
+    // Diagnostic: permitem acumularea FPS
+    // fără a depinde de IsPlayerInGame().
+    skr::render::fps::Presented(
+        result,
+        !drawn && skr::intro::IsFinished()
+    );
+#endif
+
+    return result;
 }
 
 DWORD WINAPI D3D9HookThread(LPVOID) {
@@ -167,8 +227,14 @@ DWORD WINAPI D3D9HookThread(LPVOID) {
     if (!device) return 1;
 
     g_hookedVtable = *reinterpret_cast<void***>(device);
+#ifdef SKR_EXTERNAL_LOBBY
+    skr::render::fps::Initialize();
+#endif
 
     bool ok = true;
+#ifdef SKR_EXTERNAL_LOBBY
+    ok &= PatchVtable(g_hookedVtable, 17, reinterpret_cast<void*>(&HookedPresent), reinterpret_cast<void**>(&g_origPresent));
+#endif
     ok &= PatchVtable(g_hookedVtable, kVtableEndScene,
                        reinterpret_cast<void*>(&HookedEndScene),
                        reinterpret_cast<void**>(&g_origEndScene));
@@ -177,10 +243,30 @@ DWORD WINAPI D3D9HookThread(LPVOID) {
                        reinterpret_cast<void**>(&g_origReset));
 
     g_hookInstalled.store(ok);
+    fps::Trace(ok ? "D3D9 vtable hooks installed" : "D3D9 vtable hook install failed");
     return ok ? 0 : 1;
 }
 
 } // anonymous namespace
+
+// SKR-owned optional ABI, invoked by our pinned omp-cef fork after its rendering.
+// One owner prevents duplicate drawing/counting through nested D3D9 wrappers.
+extern "C" __declspec(dllexport) void __cdecl SkrBeforePresentV1(IDirect3DDevice9* device) {
+    if (!g_cefPresentOwner.exchange(true)) fps::Trace("CEF real-device Present owner acquired");
+    g_cefDrewCover = skr::launch_cover::Draw(device, IsPlayerInGame());
+    if (!g_cefDrewCover && skr::intro::IsFinished()) fps::Draw(device);
+}
+extern "C" __declspec(dllexport) void __cdecl SkrAfterPresentV1(HRESULT result) {
+    skr::launch_cover::Presented(g_cefDrewCover, result);
+    fps::Presented(result, !g_cefDrewCover && skr::intro::IsFinished());
+}
+extern "C" __declspec(dllexport) void __cdecl SkrBeforeResetV1() {
+    fps::Trace("CEF real-device Reset entered");
+    fps::BeforeReset(); skr::launch_cover::BeforeReset(); skr::intro::BeforeReset();
+}
+extern "C" __declspec(dllexport) BOOL __cdecl SkrEnhancedConfirmedV1() {
+    return skr::lobby::IsSkrSession() ? TRUE : FALSE;
+}
 
 bool InstallD3D9Hooks() {
     g_hookThread = CreateThread(nullptr, 0, D3D9HookThread, nullptr, 0, nullptr);
@@ -193,9 +279,17 @@ void RemoveD3D9Hooks() {
         CloseHandle(g_hookThread);
         g_hookThread = nullptr;
     }
+    skr::render::fps::Shutdown();
     skr::intro::Shutdown();
 
     if (g_hookInstalled.load() && g_hookedVtable) {
+        if (g_origPresent && g_hookedVtable[17] == reinterpret_cast<void*>(&HookedPresent)) {
+            DWORD old = 0;
+            if (VirtualProtect(&g_hookedVtable[17], sizeof(void*), PAGE_READWRITE, &old)) {
+                g_hookedVtable[17] = reinterpret_cast<void*>(g_origPresent);
+                VirtualProtect(&g_hookedVtable[17], sizeof(void*), old, &old);
+            }
+        }
         if (g_origEndScene) {
             DWORD old = 0;
             void* entry = &g_hookedVtable[kVtableEndScene];

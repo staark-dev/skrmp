@@ -1,12 +1,19 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "x86-debug",
       "displayName": "Win32 Debug",
       "generator": "Visual Studio 17 2022",
-      "architecture": { "value": "Win32", "strategy": "set" },
+      "architecture": {
+        "value": "Win32",
+        "strategy": "set"
+      },
       "binaryDir": "${sourceDir}/out/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
@@ -16,10 +23,26 @@
       "name": "x86-release",
       "displayName": "Win32 Release",
       "generator": "Visual Studio 17 2022",
-      "architecture": { "value": "Win32", "strategy": "set" },
+      "architecture": {
+        "value": "Win32",
+        "strategy": "set"
+      },
       "binaryDir": "${sourceDir}/out/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "external-lobby-x86",
+      "displayName": "External lobby Win32 Release (VS 2026)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": {
+        "value": "Win32",
+        "strategy": "set"
+      },
+      "binaryDir": "${sourceDir}/build-external-lobby",
+      "cacheVariables": {
+        "SKR_EXTERNAL_LOBBY": "ON"
       }
     }
   ],
@@ -33,6 +56,17 @@
       "name": "release",
       "configurePreset": "x86-release",
       "configuration": "Release"
+    },
+    {
+      "name": "external-lobby",
+      "configurePreset": "external-lobby-x86",
+      "configuration": "Release",
+      "targets": [
+        "SKRLauncher",
+        "SKRClient",
+        "SKRLobbyTests",
+        "SKRLaunchIpcTests"
+      ]
     }
   ]
 }

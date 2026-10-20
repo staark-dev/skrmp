@@ -13,8 +13,15 @@ namespace skr::launcher {
 struct LaunchConfig {
     std::wstring gtaSaPath;      // Full path to gta_sa.exe
     std::wstring clientDllPath;  // Full path to SKR.Client.dll
+    std::string serverAddress;
+    uint16_t serverPort = 0;
     std::wstring playerName;
     std::vector<uint8_t> joinTicket; // 32 bytes join ticket from backend (empty = no ticket yet)
+    HANDLE frameReady = nullptr;
+    HANDLE takeover = nullptr;
+    HANDLE sessionReady = nullptr;
+    bool enhancedAdvertised = false; // Fresh native query, not a UI claim.
+    bool localHandoffTest = false; // Explicit launcher-only development switch.
 };
 
 enum class LaunchResult : uint8_t {
@@ -24,7 +31,8 @@ enum class LaunchResult : uint8_t {
     ProcessCreateFailed,
     InjectionFailed,
     PipeFailed,
-    ResumeThreadFailed
+    ResumeThreadFailed,
+    StartupFilesFailed
 };
 
 const char* LaunchResultToString(LaunchResult r);

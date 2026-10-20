@@ -58,6 +58,188 @@ void Log(const char* fmt, ...) {
     fclose(f);
 }
 
+// ── Debug: crash/exit tracer ──────────────────────────────────────
+// Writes to <gta>\SKR\debug_quit.log — captures what kills the process.
+void DebugLog(const char* fmt, ...) {
+    std::wstring dir = LogDir();
+    if (dir.empty()) return;
+    std::lock_guard<std::mutex> lk(g_logMutex);
+    FILE* f = _wfopen((dir + L"debug_quit.log").c_str(), L"a");
+    if (!f) return;
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    fprintf(f, "[%02u:%02u:%02u.%03u] ", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    va_list ap; va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+    fflush(f);
+    fclose(f);
+}
+
+void LogModuleAt(FILE* f, uintptr_t addr) {
+    HMODULE mod = nullptr;
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(addr), &mod) && mod) {
+        wchar_t name[MAX_PATH];
+        if (GetModuleFileNameW(mod, name, MAX_PATH)) {
+            auto base = reinterpret_cast<uintptr_t>(mod);
+            fprintf(f, "    0x%08X -> %ls+0x%X\n", static_cast<unsigned>(addr), name,
+                    static_cast<unsigned>(addr - base));
+            return;
+        }
+    }
+    fprintf(f, "    0x%08X -> (unknown)\n", static_cast<unsigned>(addr));
+}
+
+void DumpStack(FILE* f, CONTEXT* ctx) {
+    // Walk the x86 stack frame chain (EBP-based)
+    uintptr_t ebp = ctx->Ebp;
+    uintptr_t eip = ctx->Eip;
+    fprintf(f, "  Stack trace:\n");
+    LogModuleAt(f, eip);
+    for (int i = 0; i < 16 && ebp > 0x10000 && ebp < 0x7FFE0000; ++i) {
+        __try {
+            uintptr_t ret = *reinterpret_cast<uintptr_t*>(ebp + 4);
+            if (ret < 0x10000 || ret > 0x7FFE0000) break;
+            LogModuleAt(f, ret);
+            ebp = *reinterpret_cast<uintptr_t*>(ebp);
+        } __except (EXCEPTION_EXECUTE_HANDLER) { break; }
+    }
+}
+
+LONG WINAPI DebugVEH(EXCEPTION_POINTERS* ep) {
+    if (!ep || !ep->ExceptionRecord || !ep->ContextRecord) return EXCEPTION_CONTINUE_SEARCH;
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    // Only log fatal exceptions, not benign ones (breakpoints, C++ exceptions)
+    if (code == 0x80000003 || code == 0x80000004 ||   // breakpoint, single step
+        code == 0xE06D7363 ||                          // C++ exception (MSVC)
+        code == 0x406D1388)                            // SetThreadName
+        return EXCEPTION_CONTINUE_SEARCH;
+
+    std::wstring dir = LogDir();
+    if (dir.empty()) return EXCEPTION_CONTINUE_SEARCH;
+    FILE* f = _wfopen((dir + L"debug_quit.log").c_str(), L"a");
+    if (!f) return EXCEPTION_CONTINUE_SEARCH;
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    fprintf(f, "\n=== EXCEPTION at %02u:%02u:%02u.%03u ===\n", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    fprintf(f, "  Code: 0x%08X (%s)\n", code,
+            code == 0xC0000005 ? "ACCESS_VIOLATION" :
+            code == 0xC0000374 ? "HEAP_CORRUPTION" :
+            code == 0xC00000FD ? "STACK_OVERFLOW" : "other");
+    fprintf(f, "  EIP:  0x%08X\n", ep->ContextRecord->Eip);
+    if (code == 0xC0000005 && ep->ExceptionRecord->NumberParameters >= 2) {
+        fprintf(f, "  %s at 0x%08X\n",
+                ep->ExceptionRecord->ExceptionInformation[0] ? "WRITE" : "READ",
+                static_cast<unsigned>(ep->ExceptionRecord->ExceptionInformation[1]));
+    }
+    fprintf(f, "  Registers: EAX=%08X EBX=%08X ECX=%08X EDX=%08X\n",
+            ep->ContextRecord->Eax, ep->ContextRecord->Ebx,
+            ep->ContextRecord->Ecx, ep->ContextRecord->Edx);
+    fprintf(f, "             ESI=%08X EDI=%08X ESP=%08X EBP=%08X\n",
+            ep->ContextRecord->Esi, ep->ContextRecord->Edi,
+            ep->ContextRecord->Esp, ep->ContextRecord->Ebp);
+    DumpStack(f, ep->ContextRecord);
+    fflush(f);
+    fclose(f);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// Hook ExitProcess to log who's killing us
+using ExitProcessFn = void(WINAPI*)(UINT);
+ExitProcessFn g_origExitProcess = nullptr;
+
+// SEH stack scan — must be in a function without C++ objects
+static void ScanStackSEH(FILE* f, uintptr_t stackPtr) {
+    int found = 0;
+    for (int i = 0; i < 64 && found < 16; ++i) {
+        __try {
+            uintptr_t val = reinterpret_cast<uintptr_t*>(stackPtr)[i];
+            if (val < 0x10000 || val > 0x7FFE0000) continue;
+            HMODULE mod = nullptr;
+            if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                    reinterpret_cast<LPCWSTR>(val), &mod) || !mod)
+                continue;
+            MEMORY_BASIC_INFORMATION mbi;
+            if (!VirtualQuery(reinterpret_cast<void*>(val), &mbi, sizeof(mbi))) continue;
+            if (!(mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ |
+                                 PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
+                continue;
+            wchar_t name[MAX_PATH];
+            if (GetModuleFileNameW(mod, name, MAX_PATH)) {
+                auto base = reinterpret_cast<uintptr_t>(mod);
+                fprintf(f, "    [esp+%02X] 0x%08X -> %ls+0x%X\n",
+                        i * 4, static_cast<unsigned>(val), name,
+                        static_cast<unsigned>(val - base));
+                ++found;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) { break; }
+    }
+}
+
+void WINAPI HookedExitProcess(UINT exitCode) {
+    std::wstring dir = LogDir();
+    if (!dir.empty()) {
+        FILE* f = _wfopen((dir + L"debug_quit.log").c_str(), L"a");
+        if (f) {
+            SYSTEMTIME st;
+            GetLocalTime(&st);
+            fprintf(f, "\n=== ExitProcess(%u) at %02u:%02u:%02u.%03u ===\n",
+                    exitCode, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+            fprintf(f, "  Caller stack (raw scan):\n");
+            uintptr_t stackPtr;
+            __asm { mov stackPtr, esp }
+            ScanStackSEH(f, stackPtr);
+            fflush(f);
+            fclose(f);
+        }
+    }
+    if (g_origExitProcess) g_origExitProcess(exitCode);
+    TerminateProcess(GetCurrentProcess(), exitCode);
+}
+
+void InstallDebugTracer() {
+    AddVectoredExceptionHandler(1, &DebugVEH);
+
+    // IAT hook ExitProcess in gta_sa.exe
+    HMODULE exe = GetModuleHandleW(nullptr);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(exe);
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(reinterpret_cast<uint8_t*>(exe) + dos->e_lfanew);
+    auto& impDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!impDir.VirtualAddress) return;
+
+    auto* imp = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(
+        reinterpret_cast<uint8_t*>(exe) + impDir.VirtualAddress);
+    for (; imp->Name; ++imp) {
+        auto* name = reinterpret_cast<const char*>(reinterpret_cast<uint8_t*>(exe) + imp->Name);
+        if (_stricmp(name, "kernel32.dll") != 0) continue;
+        auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(
+            reinterpret_cast<uint8_t*>(exe) + imp->FirstThunk);
+        for (; thunk->u1.Function; ++thunk) {
+            if (reinterpret_cast<void*>(thunk->u1.Function) == GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "ExitProcess")) {
+                DWORD old;
+                if (VirtualProtect(&thunk->u1.Function, sizeof(void*), PAGE_READWRITE, &old)) {
+                    g_origExitProcess = reinterpret_cast<ExitProcessFn>(thunk->u1.Function);
+                    thunk->u1.Function = reinterpret_cast<uintptr_t>(&HookedExitProcess);
+                    VirtualProtect(&thunk->u1.Function, sizeof(void*), old, &old);
+                }
+                break;
+            }
+        }
+        break;
+    }
+
+    DebugLog("=== Debug tracer installed (VEH + ExitProcess hook) ===");
+    DebugLog("  PID: %lu  TID: %lu", GetCurrentProcessId(), GetCurrentThreadId());
+    DebugLog("  samp.dll: 0x%08X", reinterpret_cast<uintptr_t>(GetModuleHandleA("samp.dll")));
+    DebugLog("  client.dll: 0x%08X", reinterpret_cast<uintptr_t>(GetModuleHandleW(L"client.dll")));
+    DebugLog("  SKR.Client.dll: 0x%08X", reinterpret_cast<uintptr_t>(GetModuleHandleW(L"SKR.Client.dll")));
+}
+
 // ── State ──────────────────────────────────────────────────────────
 std::atomic<bool> g_initialized{false};
 std::atomic<bool> g_disabled{true};   // default OFF until lobby.on exists (see Initialize)
@@ -189,17 +371,13 @@ int __cdecl OnPlay(const char*, skr::cef::CefListValue* args) {
 }
 
 int __cdecl OnQuit(const char*, skr::cef::CefListValue*) {
-    // In the world, quitting belongs to SA-MP (/q, its own exit path).
     if (g_gameplayActive.load()) {
         Log("quit from lobby ignored: gameplay active");
         return 0;
     }
     Log("quit requested from lobby");
-    // Close the GTA process cleanly. ExitProcess runs atexit handlers in this
-    // module; d3d9 teardown is driven by that.
+    DebugLog("QUIT: user quit from lobby (OnQuit handler)");
     PostQuitMessage(0);
-    // Fallback for GTA's own message loop which does not react to PostQuitMessage
-    // when stuck on the vanilla menu; schedule a hard exit shortly after.
     HWND w = FindWindowW(L"Grand theft auto San Andreas", nullptr);
     if (w) PostMessageW(w, WM_CLOSE, 0, 0);
     ExitProcess(0);
@@ -844,7 +1022,8 @@ void InstallDInputHookOnce() {
 void Initialize() {
     if (g_initialized.exchange(true)) return;
     g_disabled.store(false);
-    Log("lobby manager initialize -> ENABLED");
+    InstallDebugTracer();
+    Log("lobby manager initialize -> ENABLED (debug tracer active)");
 }
 
 void Shutdown() {
@@ -882,6 +1061,8 @@ DWORD g_inWorldSince = 0;
 constexpr DWORD kNoSessionInfoGraceMs = 1500;   // RPC 241 may land just after the first world tick
 constexpr DWORD kIntroWaitMaxMs = 30000;        // never block on a server intro that never shows
 constexpr DWORD kResourceWaitMaxMs = 120000;    // never block on a stalled resource download
+
+void ResetEnhancedSession() { g_sessionMode.store(-1); g_inWorldSince = 0; skr::escape_menu::Disable(); }
 
 void OnSessionInfo(uint8_t mode) {
     const int value = mode == static_cast<uint8_t>(skr::protocol::SessionMode::CefIntro) ? 1 : 0;
@@ -942,16 +1123,46 @@ void OnInWorldTick() {
 void OnGameplayConfirmed(const char* reason) {
     if (g_disabled.load() || g_gameplayActive.exchange(true)) return;
     auto& bridge = skr::cef::CefBridge::Instance();
-    // Destroyed, not hidden: a hidden page keeps keyboard focus and its
-    // Escape handler would still quit the game.
-    bridge.DestroyBrowser(kBrowserId);
+    // Hide + unfocus instead of DestroyBrowser: destroying while RenderAll
+    // iterates browsers_ on the render thread causes a use-after-free that
+    // surfaces as HEAP_CORRUPTION ~46 s later.  The browser stays in the
+    // map (safe for iteration) and is destroyed at Shutdown.
+    bridge.HideBrowser(kBrowserId);
+    bridge.UnfocusBrowser(kBrowserId);
     // Give GTA its front-end back so ESC opens the pause menu in the world.
     if (g_menuPatched.exchange(false)) RestoreGtaMainMenu();
     *reinterpret_cast<bool*>(0x00BA677A) = false;   // m_bDontDrawFrontEnd (+0x32), set by the lobby
     g_browserShown.store(false);
     g_gameInputReleased.store(false);
     g_connecting.store(false);
-    Log("connect -> %s; lobby browser destroyed and game input restored", reason);
+
+    // Disable forced rendering now that the lobby is gone; without this CEF
+    // keeps drawing even when the window loses focus or the device is lost.
+    using ForceFn = void(__cdecl*)(bool);
+    static ForceFn pForce = reinterpret_cast<ForceFn>(
+        GetProcAddress(GetModuleHandleW(L"client.dll"), "skr_cef_set_force_draw"));
+    if (pForce) {
+        pForce(false);
+        Log("force draw DISABLED (pForce=0x%08X)", reinterpret_cast<uintptr_t>(pForce));
+        DebugLog("force_draw disabled via skr_cef_set_force_draw(false)");
+    } else {
+        Log("WARNING: skr_cef_set_force_draw not found in client.dll — force_draw LEAK");
+        DebugLog("WARNING: cannot disable force_draw — skr_cef_set_force_draw not resolved");
+    }
+
+    // Kill CEF rendering entirely: RenderAll() in App::Tick() still runs every
+    // frame via the D3D Present hook and can crash in the texture pipeline.
+    using RenderEnFn = void(__cdecl*)(bool);
+    static RenderEnFn pRenderEn = reinterpret_cast<RenderEnFn>(
+        GetProcAddress(GetModuleHandleW(L"client.dll"), "skr_cef_set_render_enabled"));
+    if (pRenderEn) {
+        pRenderEn(false);
+        Log("CEF render DISABLED via skr_cef_set_render_enabled(false)");
+        DebugLog("CEF render disabled — ShouldSkipBrowserRendering() will return true");
+    }
+
+    Log("connect -> %s; lobby browser hidden and game input restored", reason);
+    DebugLog("OnGameplayConfirmed: %s (browser hidden, destroy deferred to shutdown)", reason);
 
     // On SKR servers, replace the native GTA pause menu with our custom ESC menu.
     if (IsSkrSession()) {
@@ -1051,7 +1262,11 @@ void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
         // Force draw_enabled_ on so rendering works even when the launcher
         // window still has focus (UpdateBrowserDrawState checks foreground).
         static bool forceSet = false;
-        if (pForce && !forceSet) { pForce(true); forceSet = true; Log("force draw enabled"); }
+        if (pForce && !forceSet) {
+            pForce(true); forceSet = true;
+            Log("force draw ENABLED (pForce=0x%08X)", reinterpret_cast<uintptr_t>(pForce));
+            DebugLog("force_draw ENABLED via skr_cef_set_force_draw(true)");
+        }
         if (pPump) pPump();
 
         // The lobby layout targets ~1366x768; zoom the page by screen height so

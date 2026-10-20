@@ -3,6 +3,7 @@
 #include <sdk.hpp>
 #include <Server/Components/Pawn/pawn.hpp>
 #include "protocol/messages.h"
+#include "protocol/enhanced.h"
 #include "protocol/client_state.h"
 #include "protocol/session_info.h"
 #include "protocol/query_rules.h"
@@ -27,6 +28,7 @@ enum class SkrPlayerState : uint8_t {
 };
 
 struct SkrPlayerData {
+    protocol::EnhancedSession enhanced;
     SkrPlayerState state = SkrPlayerState::Connected;
     uint8_t connectionId[protocol::kConnectionIdSize]{};
     uint8_t nonce[protocol::kNonceSize]{};
@@ -52,6 +54,7 @@ struct SkrPlayerData {
     uint32_t missedAcBeats = 0;
 
     void Reset() {
+        enhanced = {};
         state = SkrPlayerState::Connected;
         generation = 0;
         challengeExpiresAt = 0;
@@ -157,6 +160,8 @@ public:
 
     const SkrPlayerData* GetPlayerData(int playerId) const;
     bool IsAuthorized(int playerId) const;
+    bool IsEnhanced(int playerId) const;
+    void Negotiate(IPlayer& player, NetworkBitStream& bs);
     void SendSessionInfo(IPlayer& player);
     bool ScriptsHaveIntro();
 

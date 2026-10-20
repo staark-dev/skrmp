@@ -34,6 +34,15 @@ add_library(SKRShared STATIC
 target_include_directories(SKRShared PUBLIC ${CMAKE_SOURCE_DIR}/shared)
 target_link_libraries(SKRShared PRIVATE bcrypt sodium)
 
+option(SKR_EXTERNAL_LOBBY "Experimental WebView2 lobby before GTA startup" OFF)
+set(SKR_LOBBY_MANAGER client/lobby/lobby_manager.cpp)
+if(SKR_EXTERNAL_LOBBY)
+  set(SKR_LOBBY_MANAGER client/lobby/external_lobby_manager.cpp)
+  set(SKR_WEBVIEW2_ROOT "${CMAKE_SOURCE_DIR}/deps/webview2/1.0.2903.40" CACHE PATH "Pinned WebView2 SDK")
+  if(NOT EXISTS "${SKR_WEBVIEW2_ROOT}/build/native/include/WebView2.h")
+    message(FATAL_ERROR "Install Microsoft.Web.WebView2 1.0.2903.40; see docs/external-launcher.md")
+  endif()
+endif()
 # --- Launcher (with updater + inventory) ---
 add_executable(SKRLauncher WIN32
   apps/launcher/main.cpp
@@ -46,6 +55,14 @@ target_include_directories(SKRLauncher PRIVATE
   ${CMAKE_SOURCE_DIR}/shared
 )
 target_link_libraries(SKRLauncher PRIVATE user32 bcrypt SKRShared)
+if(SKR_EXTERNAL_LOBBY)
+  target_sources(SKRLauncher PRIVATE apps/launcher/lobby_window.cpp client/lobby/settings_io.cpp
+    client/lobby/server_query.cpp client/lobby/public_directory.cpp shared/performance/fps_settings.cpp)
+  target_include_directories(SKRLauncher PRIVATE "${SKR_WEBVIEW2_ROOT}/build/native/include" "${CMAKE_SOURCE_DIR}/client")
+  target_link_libraries(SKRLauncher PRIVATE "${SKR_WEBVIEW2_ROOT}/build/native/x86/WebView2LoaderStatic.lib"
+    ole32 oleaut32 shell32 shlwapi version ws2_32 winhttp gdi32)
+  target_compile_definitions(SKRLauncher PRIVATE SKR_EXTERNAL_LOBBY=1)
+endif()
 
 # --- Client DLL (injected by launcher) ---
 add_library(SKRClient SHARED
@@ -54,13 +71,16 @@ add_library(SKRClient SHARED
   client/skrac/external_adapter.cpp
   client/skrac/ac_policy.cpp
   client/intro/urban_intro.cpp
+  client/intro/launch_cover.cpp
   client/intro/intro_audio.cpp
   client/intro/miniaudio_impl.cpp
   client/render-d3d9/d3d9_hook.cpp
+  client/render-d3d9/fps_engine.cpp
+  shared/performance/fps_settings.cpp
   client/render-d3d9/chat_box.cpp
   client/cef-bridge/cef_bridge.cpp
   client/cef-bridge/cef_plugin_exports.cpp
-  client/lobby/lobby_manager.cpp
+  ${SKR_LOBBY_MANAGER}
   client/lobby/menu_patch.cpp
   client/lobby/settings_io.cpp
   client/lobby/server_query.cpp
@@ -74,6 +94,9 @@ add_library(SKRClient SHARED
   client/gta-fixes/gta_fixes.cpp
   client/escape-menu/escape_menu.cpp
 )
+if(SKR_EXTERNAL_LOBBY)
+  target_compile_definitions(SKRClient PRIVATE SKR_EXTERNAL_LOBBY=1)
+endif()
 set_target_properties(SKRClient PROPERTIES
   OUTPUT_NAME "SKR.Client" PREFIX ""
 )
@@ -82,7 +105,18 @@ target_include_directories(SKRClient PRIVATE
   ${CMAKE_SOURCE_DIR}/shared
   ${CMAKE_SOURCE_DIR}/deps/miniaudio-0.11.23
 )
-target_link_libraries(SKRClient PRIVATE d3d9 dxguid version bcrypt windowscodecs ole32 shell32 ws2_32 winhttp SKRShared)
+# Plugin-SDK has GTA 1.0 US declarations (e.g. CTimer), not a standalone FPS unlocker.
+# Optional type metadata only; we intentionally do not patch GTA timing offsets.
+set(SKR_PLUGIN_SDK_ROOT "${CMAKE_SOURCE_DIR}/deps/plugin-sdk" CACHE PATH "Optional DK22Pac plugin-sdk checkout")
+if(EXISTS "${SKR_PLUGIN_SDK_ROOT}/plugin_sa/game_sa/CTimer.h")
+  target_include_directories(SKRClient PRIVATE
+    "${SKR_PLUGIN_SDK_ROOT}/plugin_sa/game_sa"
+    "${SKR_PLUGIN_SDK_ROOT}/plugin_sa"
+    "${SKR_PLUGIN_SDK_ROOT}/shared")
+  target_compile_definitions(SKRClient PRIVATE SKR_PLUGIN_SDK_AVAILABLE=1)
+endif()
+
+target_link_libraries(SKRClient PRIVATE d3d9 dxguid version bcrypt windowscodecs ole32 shell32 ws2_32 winhttp gdi32 SKRShared)
 # Third-party single-header implementation; keep its warnings out of the /W4 build.
 set_source_files_properties(client/intro/miniaudio_impl.cpp PROPERTIES COMPILE_OPTIONS "/W0")
 
@@ -111,9 +145,15 @@ add_custom_target(SKRLobbyAssets
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   VERBATIM)
 add_dependencies(SKRClient SKRLobbyAssets)
+if(SKR_EXTERNAL_LOBBY)
+  add_dependencies(SKRLauncher SKRLobbyAssets)
+endif()
 
 # --- Intro timeline/transport tests (no GTA, no device) ---
 add_executable(SKRLobbyTests tests/unit/test_lobby_settings.cpp client/lobby/settings_io.cpp)
+add_executable(SKRFpsD3D9Tests tests/unit/test_fps_d3d9.cpp client/render-d3d9/fps_engine.cpp shared/performance/fps_settings.cpp)
+target_include_directories(SKRFpsD3D9Tests PRIVATE ${CMAKE_SOURCE_DIR}/client ${CMAKE_SOURCE_DIR}/shared)
+target_link_libraries(SKRFpsD3D9Tests PRIVATE d3d9 shell32 ole32)
 target_include_directories(SKRLobbyTests PRIVATE ${CMAKE_SOURCE_DIR}/client)
 target_link_libraries(SKRLobbyTests PRIVATE shell32 ole32)
 
@@ -203,8 +243,13 @@ target_include_directories(SKRFakeGame PRIVATE
 )
 target_link_libraries(SKRFakeGame PRIVATE SKRShared ws2_32)
 
+add_executable(SKRLaunchIpcTests tests/unit/test_launch_ipc.cpp)
+target_include_directories(SKRLaunchIpcTests PRIVATE ${CMAKE_SOURCE_DIR}/shared)
+add_executable(SKRLaunchProbe tools/launch_probe.cpp apps/launcher/game_launcher.cpp)
+target_include_directories(SKRLaunchProbe PRIVATE ${CMAKE_SOURCE_DIR}/shared ${CMAKE_SOURCE_DIR}/apps/launcher)
+
 if(MSVC)
-  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests SKRIntroTests SKRLobbyTests SKRTestServer SKRSmokeClient SKRFakeGame)
+  foreach(target SKRLauncher SKRClient SKRShared SKRGate SKRAuth SKROps SKRTests SKROpsTests SKRIntroTests SKRLobbyTests SKRTestServer SKRSmokeClient SKRFakeGame SKRLaunchIpcTests)
     target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT)

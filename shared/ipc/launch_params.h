@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 
 namespace skr::ipc {
 
@@ -18,7 +19,7 @@ inline void MakePipeName(wchar_t* buf, size_t bufChars, DWORD pid) {
 }
 
 static constexpr uint32_t kLaunchParamsMagic   = 0x534B5231; // "SKR1"
-static constexpr uint32_t kLaunchParamsVersion = 1;
+static constexpr uint32_t kLaunchParamsVersion = 4;
 static constexpr size_t   kMaxAddress          = 256;
 static constexpr size_t   kMaxPlayerName       = 64;
 static constexpr size_t   kJoinTicketSize      = 32;
@@ -33,87 +34,107 @@ struct LaunchParams {
     char     playerName[kMaxPlayerName];
     uint8_t  joinTicket[kJoinTicketSize];
     uint8_t  hasJoinTicket;  // 1 if joinTicket is populated
-    uint8_t  reserved[15];
+    uint8_t  enhancedAdvertised; // skr_client=2; discovery hint, never authentication
+    uint8_t  reserved[2];
+    uint32_t frameReadyHandle = 0;
+    uint32_t takeoverHandle = 0;
+    uint32_t sessionReadyHandle = 0;
 };
 
 static_assert(sizeof(LaunchParams) < 4096, "LaunchParams must fit in a single pipe buffer");
 
-// --- Writer (launcher side) ---
-
-// Creates named pipe, writes params, waits for client to connect and read.
-// Must be called after DLL injection succeeds, before ResumeThread.
-// Returns true if the client read the data within timeoutMs.
-inline bool WriteLaunchParams(DWORD childPid, const LaunchParams& params, DWORD timeoutMs = 5000) {
-    wchar_t pipeName[128];
-    MakePipeName(pipeName, 128, childPid);
-
-    HANDLE hPipe = CreateNamedPipeW(
-        pipeName,
-        PIPE_ACCESS_OUTBOUND,
-        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-        1,                          // single instance
-        sizeof(LaunchParams),       // out buffer
-        0,                          // in buffer (not used)
-        timeoutMs,
-        nullptr
-    );
-    if (hPipe == INVALID_HANDLE_VALUE) return false;
-
-    // Wait for the DLL to connect
-    BOOL connected = ConnectNamedPipe(hPipe, nullptr);
-    if (!connected && GetLastError() != ERROR_PIPE_CONNECTED) {
-        CloseHandle(hPipe);
+// v2 transport: bounded overlapped I/O and an explicit receipt acknowledgement.
+// See Microsoft Named Pipe Server Using Overlapped I/O and CancelIoEx docs.
+namespace detail {
+struct Handle {
+    HANDLE value;
+    explicit Handle(HANDLE h) : value(h) {}
+    ~Handle() { if (value && value != INVALID_HANDLE_VALUE) CloseHandle(value); }
+    Handle(const Handle&) = delete;
+    Handle& operator=(const Handle&) = delete;
+};
+inline DWORD Remaining(ULONGLONG deadline) {
+    const auto now = GetTickCount64();
+    return now >= deadline ? 0 : static_cast<DWORD>(deadline - now);
+}
+inline bool Complete(HANDLE pipe, OVERLAPPED& op, BOOL immediate,
+                     ULONGLONG deadline, DWORD& bytes) {
+    if (immediate) return true;
+    if (GetLastError() != ERROR_IO_PENDING) return false;
+    if (WaitForSingleObject(op.hEvent, Remaining(deadline)) != WAIT_OBJECT_0) {
+        CancelIoEx(pipe, &op);
+        // The OVERLAPPED and its buffer must remain alive until cancellation completes.
+        GetOverlappedResult(pipe, &op, &bytes, TRUE);
         return false;
     }
+    return GetOverlappedResult(pipe, &op, &bytes, FALSE) != FALSE;
+}
+inline bool Transfer(HANDLE pipe, void* buffer, DWORD size, bool write, ULONGLONG deadline) {
+    Handle event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!event.value || !Remaining(deadline)) return false;
+    OVERLAPPED op{}; op.hEvent = event.value;
+    DWORD bytes = 0;
+    BOOL immediate = write ? WriteFile(pipe, buffer, size, &bytes, &op)
+                           : ReadFile(pipe, buffer, size, &bytes, &op);
+    return Complete(pipe, op, immediate, deadline, bytes) && bytes == size;
+}
+inline bool Valid(const LaunchParams& p) {
+    return p.magic == kLaunchParamsMagic && p.version == kLaunchParamsVersion &&
+        p.hasJoinTicket <= 1 && p.enhancedAdvertised <= 1 && memchr(p.serverAddress, 0, sizeof(p.serverAddress)) &&
+        memchr(p.playerName, 0, sizeof(p.playerName));
+}
+} // namespace detail
 
-    DWORD written = 0;
-    BOOL ok = WriteFile(hPipe, &params, sizeof(params), &written, nullptr);
-    FlushFileBuffers(hPipe);
-    DisconnectNamedPipe(hPipe);
-    CloseHandle(hPipe);
-
-    return ok && written == sizeof(params);
+inline bool WriteLaunchParams(DWORD childPid, const LaunchParams& params, DWORD timeoutMs = 5000) {
+    if (!detail::Valid(params)) return false;
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    wchar_t name[128]; MakePipeName(name, 128, childPid);
+    detail::Handle pipe(CreateNamedPipeW(name,
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+        1, sizeof(LaunchParams), 1, timeoutMs, nullptr));
+    if (pipe.value == INVALID_HANDLE_VALUE) return false;
+    detail::Handle event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!event.value) return false;
+    OVERLAPPED op{}; op.hEvent = event.value;
+    DWORD bytes = 0;
+    BOOL connected = ConnectNamedPipe(pipe.value, &op);
+    if (!connected && GetLastError() == ERROR_PIPE_CONNECTED) connected = TRUE;
+    if (!detail::Complete(pipe.value, op, connected, deadline, bytes)) return false;
+    ULONG peer = 0;
+    if (!GetNamedPipeClientProcessId(pipe.value, &peer) || peer != childPid) return false;
+    auto copy = params;
+    bool sent = detail::Transfer(pipe.value, &copy, sizeof(copy), true, deadline);
+    SecureZeroMemory(&copy, sizeof(copy));
+    if (!sent) return false;
+    uint8_t ack = 0;
+    return detail::Transfer(pipe.value, &ack, sizeof(ack), false, deadline) && ack == 1;
 }
 
-// --- Reader (DLL side) ---
-
-// Connects to the pipe the launcher created, reads LaunchParams.
-// Called early in SkrInitialize before any network activity.
 inline bool ReadLaunchParams(LaunchParams& out, DWORD timeoutMs = 5000) {
-    wchar_t pipeName[128];
-    MakePipeName(pipeName, 128, GetCurrentProcessId());
-
-    // The pipe may not exist yet if the launcher thread hasn't reached CreateNamedPipe.
-    // Retry with short sleeps.
-    HANDLE hPipe = INVALID_HANDLE_VALUE;
-    DWORD deadline = GetTickCount() + timeoutMs;
-    while (GetTickCount() < deadline) {
-        hPipe = CreateFileW(
-            pipeName,
-            GENERIC_READ,
-            0,
-            nullptr,
-            OPEN_EXISTING,
-            0,
-            nullptr
-        );
-        if (hPipe != INVALID_HANDLE_VALUE) break;
-        if (GetLastError() != ERROR_PIPE_BUSY && GetLastError() != ERROR_FILE_NOT_FOUND) break;
-        Sleep(10);
+    SecureZeroMemory(&out, sizeof(out));
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    wchar_t name[128]; MakePipeName(name, 128, GetCurrentProcessId());
+    HANDLE opened = INVALID_HANDLE_VALUE;
+    while (detail::Remaining(deadline)) {
+        opened = CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                             FILE_FLAG_OVERLAPPED, nullptr);
+        if (opened != INVALID_HANDLE_VALUE) break;
+        DWORD error = GetLastError();
+        if (error != ERROR_PIPE_BUSY && error != ERROR_FILE_NOT_FOUND) return false;
+        Sleep((std::min)(DWORD(10), detail::Remaining(deadline)));
     }
-    if (hPipe == INVALID_HANDLE_VALUE) return false;
-
+    detail::Handle pipe(opened);
+    if (opened == INVALID_HANDLE_VALUE) return false;
     DWORD mode = PIPE_READMODE_MESSAGE;
-    SetNamedPipeHandleState(hPipe, &mode, nullptr, nullptr);
-
-    DWORD bytesRead = 0;
-    BOOL ok = ReadFile(hPipe, &out, sizeof(out), &bytesRead, nullptr);
-    CloseHandle(hPipe);
-
-    if (!ok || bytesRead != sizeof(out)) return false;
-    if (out.magic != kLaunchParamsMagic || out.version != kLaunchParamsVersion) return false;
-
-    return true;
+    if (!SetNamedPipeHandleState(opened, &mode, nullptr, nullptr)) return false;
+    LaunchParams received{};
+    bool valid = detail::Transfer(opened, &received, sizeof(received), false, deadline) && detail::Valid(received);
+    uint8_t ack = valid ? 1 : 0;
+    bool acknowledged = detail::Transfer(opened, &ack, sizeof(ack), true, deadline);
+    if (valid && acknowledged) out = received;
+    SecureZeroMemory(&received, sizeof(received));
+    return valid && acknowledged;
 }
 
 } // namespace skr::ipc

@@ -165,7 +165,7 @@ std::wstring GtaDir() {
 
 } // namespace
 
-bool PreloadSamp() {
+bool PreloadSamp(const ConnectParams* startup) {
     std::lock_guard<std::mutex> lk(g_loadMutex);
     if (g_sampModule) return true;
 
@@ -179,8 +179,9 @@ bool PreloadSamp() {
     std::wstring dir = GtaDir();
     std::wstring sampPath = dir + L"\\samp.dll";
     std::wstring hidden = sampPath + L".skr";
-    if (GetFileAttributesW(hidden.c_str()) != INVALID_FILE_ATTRIBUTES)
-        MoveFileExW(hidden.c_str(), sampPath.c_str(), MOVEFILE_REPLACE_EXISTING);
+    if (GetFileAttributesW(sampPath.c_str()) == INVALID_FILE_ATTRIBUTES &&
+        GetFileAttributesW(hidden.c_str()) != INVALID_FILE_ATTRIBUTES)
+        MoveFileExW(hidden.c_str(), sampPath.c_str(), 0);
     if (GetFileAttributesW(sampPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
         Log("samp.dll not found (tried restore from .skr and original)");
         return false;
@@ -224,6 +225,20 @@ bool PreloadSamp() {
         Log("samp.dll did not open its client bootstrap (g_ModeClient=%d CGame=%p)",
             settings->onlineGame, sampGame);
         return false;
+    }
+
+    if (startup) {
+        if (!startup->serverAddress || !startup->playerName || !startup->serverPort ||
+            !IsSafeArg(startup->serverAddress, true) || !IsSafeArg(startup->playerName, false)) return false;
+        // GTA is suspended below state 7. Fill the verified Settings block
+        // before its native bootstrap proceeds; retain native state waits.
+        auto* selected = reinterpret_cast<R5Settings*>(base + kR5SettingsRva);
+        strncpy_s(selected->host, startup->serverAddress, _TRUNCATE);
+        _snprintf_s(selected->port, sizeof(selected->port), _TRUNCATE, "%u", startup->serverPort);
+        strncpy_s(selected->nickname, startup->playerName, _TRUNCATE);
+        g_sampModule = module;
+        g_loaded.store(true);
+        return true;
     }
 
     // Samp_MainThread (RVA 0xC3A80, initialization_flow.md §4) waits with

@@ -1,216 +1,126 @@
 <!doctype html>
-<html lang="ro">
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SKR — Meniu în joc</title>
-<link rel="stylesheet" href="lobby.css">
-<script src="lobby.js" defer></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#090a0a">
+  <title>SKR Client — Multiplayer Launcher</title>
+  <link rel="stylesheet" href="lobby.css">
+  <script src="lobby.js" defer></script>
 </head>
-<!--
-  SKR Lobby — Phase 1. Design ported from the launcher-ui session's
-  ingame-menu preview. Two modes exist in the markup:
-    - "lobby" (pre-connect):  Servere / Setări / Ieșire       (active in Phase 1)
-    - "pause" (in-game):      Continuă / Hartă / Setări / Deconectare / Ieșire
-  Phase 1 defaults to lobby mode. Pause mode is a stub — the DOM is here so
-  Phase 2's native adapter can call window.skrLobby.setMode('pause').
--->
-<body class="in-game" style="background:#182026;color:#f1f2ed">
-<div class="shell">
-  <header class="header">
-    <a class="brand" href="#" id="brandLink">
-      <strong>SKR</strong>
-      <span>ROLEPLAY<br><small>SAN ANDREAS</small></span>
-    </a>
-    <nav id="navigation" aria-label="Meniul jocului"></nav>
-    <div class="player-profile">
-      <button class="player-profile__button" id="profileToggle" type="button" aria-expanded="false">
-        <span class="player-avatar" id="playerAvatar">?</span>
-        <span class="player-profile__copy">
-          <small>JUCĂTOR</small>
-          <strong id="playerName">Setează nickname</strong>
-        </span>
-        <span class="player-profile__status" id="playerStatus"></span>
-        <span class="player-profile__chevron">⌄</span>
-      </button>
-      <div class="profile-popover" id="profilePopover" hidden>
-        <span class="eyebrow">PROFIL LOCAL</span>
-        <h2>Identitatea ta</h2>
-        <p>Acest nickname va fi folosit când intri pe un server.</p>
-        <label for="nickname">Nickname</label>
-        <div class="profile-popover__field">
-          <input class="nickname-input" id="nickname" type="text" minlength="3" maxlength="24"
-                 autocomplete="off" spellcheck="false" placeholder="ex. Staark"
-                 aria-describedby="nicknameHint nicknameError">
-          <span class="nickname-check" id="nicknameValid" hidden>✓</span>
-        </div>
-        <div class="nickname-feedback">
-          <span id="nicknameHint">3–24 caractere: litere, cifre și _</span>
-          <span class="nickname-error" id="nicknameError" role="status"></span>
-        </div>
-        <button class="button button--gold profile-save" id="saveNickname" type="button" disabled>Salvează profilul</button>
-      </div>
-    </div>
-    <span class="mode-label" id="modeLabel">OFFLINE</span>
-  </header>
+<body class="in-game loading">
+  <div class="splash" id="splash" aria-live="polite">
+    <div class="splash__content"><div class="splash__logo">SKR<span>.</span></div><div class="splash__sub">MULTIPLAYER CLIENT</div><div class="splash__bar"><div class="splash__fill" id="splashFill"></div></div><div class="splash__status" id="splashStatus">Loading interface…</div></div>
+  </div>
 
-  <main>
-    <!-- Settings -->
-    <section class="page" data-page="settings" hidden>
-      <div class="page-heading">
-        <div>
-          <span class="eyebrow">CONFIGUREAZĂ EXPERIENȚA</span>
-          <h1>Setări</h1>
+  <div class="shell" id="launcherShell">
+    <header class="header">
+      <div class="header__left">
+        <a class="brand" href="#" id="brandLink" aria-label="SKR Client home"><strong>SKR<span>.</span></strong><span>CLIENT<small>MULTIPLAYER</small></span></a>
+        <nav id="navigation" aria-label="Main navigation"></nav>
+        <div class="header-links" aria-label="Community links">
+          <a href="https://open.mp/" target="_blank" rel="noopener noreferrer" title="open.mp official website">open.mp <span aria-hidden="true">↗</span></a>
+          <a href="https://skr-server.com/" target="_blank" rel="noopener noreferrer" title="SKR community forum">Forum <span aria-hidden="true">↗</span></a>
         </div>
-        <p>Jocul tău. În ritmul tău.</p>
       </div>
-      <div class="settings-layout">
-        <aside class="categories" aria-label="Categorii setări">
-          <button data-tab="graphics"  class="category active"><span class="category__number">01</span><span>Grafică<small>Imagine și afișare</small></span><i>›</i></button>
-          <button data-tab="audio"     class="category"><span class="category__number">02</span><span>Audio<small>Sunet și radio</small></span><i>›</i></button>
-          <button data-tab="controls"  class="category"><span class="category__number">03</span><span>Controale<small>Tastatură și mouse</small></span><i>›</i></button>
-          <button data-tab="interface" class="category"><span class="category__number">04</span><span>Interfață SKR<small>HUD, chat și radar</small></span><i>›</i></button>
-          <div class="category-note">SETĂRI JOC<span>Phase 1: valorile se aplică doar la nivelul UI. Persistența reală vine în Phase 2.</span></div>
-        </aside>
-        <div class="settings-panel">
-          <div class="panel-heading">
-            <div>
-              <span class="eyebrow" id="tabEyebrow">AFIȘARE ȘI PERFORMANȚĂ</span>
-              <h2 id="tabTitle">Grafică</h2>
+      <div class="header__right">
+        <div class="directory-metrics" id="directoryMetrics" title="Public directory counts, not personal servers" aria-live="polite">
+          <div class="directory-metric"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19v-1a6 6 0 0 1 12 0v1M17 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 5"/></svg><strong id="headerPlayersOnline">—</strong><small>players online</small></div>
+          <div class="directory-metric"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="7" rx="1"/><rect x="4" y="14" width="16" height="7" rx="1"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h4M12 17.5h4"/></svg><strong id="headerServersOnline">—</strong><small>servers listed</small></div>
+        </div>
+        <span class="mode-label" id="modeLabel">READY</span>
+        <div class="player-profile">
+          <button class="player-profile__button" id="profileToggle" type="button" aria-expanded="false" title="Edit nickname"><span class="player-avatar" id="playerAvatar">?</span><span class="player-profile__copy"><small>PLAYER</small><strong id="playerName">Set nickname</strong></span><span class="player-profile__status" id="playerStatus"></span><span class="player-profile__chevron">⌄</span></button>
+          <div class="profile-popover" id="profilePopover" hidden>
+            <span class="eyebrow">YOUR IDENTITY</span><h2>Player profile</h2><p>This nickname is used when connecting to multiplayer servers.</p>
+            <label for="nickname">Nickname</label><div class="profile-popover__field"><input class="nickname-input" id="nickname" type="text" minlength="3" maxlength="24" autocomplete="off" spellcheck="false" placeholder="e.g. Staark" aria-describedby="nicknameHint nicknameError"><span class="nickname-check" id="nicknameValid" hidden>✓</span></div>
+            <div class="nickname-feedback"><span id="nicknameHint">3–24 characters: letters, digits and _</span><span class="nickname-error" id="nicknameError" role="status"></span></div>
+            <button class="button button--gold profile-save" id="saveNickname" type="button" disabled>Save profile</button>
+          </div>
+        </div>
+        <button id="headerSettings" class="icon-button" aria-label="Settings" title="Settings" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.6a3.6 3.6 0 1 0 0-7.2 3.6 3.6 0 0 0 0 7.2Z"/><path d="M19.2 12a7.5 7.5 0 0 0-.1-1.2l2-1.6-2-3.4-2.5 1a8 8 0 0 0-2.1-1.2L14.1 3h-4.2l-.4 2.6a8 8 0 0 0-2.1 1.2l-2.5-1-2 3.4 2 1.6a8 8 0 0 0 0 2.4l-2 1.6 2 3.4 2.5-1a8 8 0 0 0 2.1 1.2l.4 2.6h4.2l.4-2.6a8 8 0 0 0 2.1-1.2l2.5 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z"/></svg></button>
+        <button id="headerQuit" class="icon-button icon-button--exit" aria-label="Exit to desktop" title="Exit to desktop" type="button">×</button>
+      </div>
+      <div class="exit-toolbar" id="exitToolbar" hidden role="dialog" aria-modal="true" aria-label="Confirm exit">
+        <strong>ARE YOU SURE?</strong><button type="button" class="exit-toolbar__confirm" id="exitDesktopButton">Exit to desktop</button><button type="button" class="exit-toolbar__cancel" id="exitCancelButton">Cancel</button>
+      </div>
+    </header>
+
+    <main id="mainContent">
+      <section class="page home-page" data-page="home" hidden>
+        <div class="home-layout">
+          <div class="home-primary">
+            <div class="home-top-row">
+              <button class="quick-browse home-tile" id="homeBrowse" type="button"><span class="quick-browse__art" aria-hidden="true"><span class="quick-browse__grid"></span><span class="quick-browse__skyline"></span></span><span class="quick-browse__top">EXPLORE SAN ANDREAS</span><span class="quick-browse__title">Find your next<br>server<span>.</span></span><span class="quick-browse__bottom">BROWSE SERVERS <b>↗</b></span></button>
+              <div class="last-server home-tile"><div class="tile-heading">LAST SERVER<span class="tiny-pill" id="lastServerBadge">NONE</span></div><div id="lastServerContent" class="last-server__content"><div class="placeholder-icon">⌁</div><div><strong>No recent sessions</strong><small>Your latest server launch will show here.</small></div></div><div class="last-server__footer"><span id="lastServerMeta">Ready for multiplayer</span><button type="button" id="lastServerConnect" data-action="connect" data-server-id="" class="button button--outline" data-connectable="false" disabled>Connect ↗</button></div></div>
+              <div class="home-side-stack"><button id="homeFavorites" class="home-mini home-tile" type="button"><span>FAVORITES</span><b>♡</b><small id="favoritesCount">Save servers you love</small></button><button id="homeHistory" class="home-mini home-tile" type="button"><span>HISTORY</span><b>↺</b><small id="historyCount">Recently launched servers</small></button></div>
             </div>
-            <span class="panel-index" id="tabIndex">01 / 04</span>
+            <div class="section-heading"><div><span class="section-heading__kicker">THE MULTIPLAYER WORLD</span><h2>DISCOVER SERVERS <span class="online-pip"></span></h2></div><button class="subtle-link" id="homeViewAll" type="button">View all servers <span>↗</span></button></div>
+            <div class="featured-server" id="featuredServer"><div id="featuredServerBanner" class="featured-server__banner" hidden></div><div class="featured-server__ambient"></div><div class="featured-server__content"><span class="featured-server__tag">DISCOVER A PUBLIC SERVER</span><div class="featured-server__identity"><div class="featured-server__logo">SKR</div><div><h3>Make San Andreas yours.</h3><p>Choose a community and start playing.</p></div></div><p class="featured-server__desc" id="featuredDescription">Discover servers, save favorites and connect directly from SKR Client.</p><div class="featured-server__meta" id="featuredMeta"><span>Live server directory</span><span>Multiplayer</span></div></div><div class="featured-server__bottom"><button id="featuredConnect" type="button" class="button button--outline" data-action="connect" data-connectable="false" data-server-id="" disabled>Connect ↗</button><button id="featuredDetails" type="button" class="feature-detail">Browse servers →</button></div></div>
+            <div class="home-lower"><div class="home-info-strip"><span class="dot dot--green"></span><span id="homeDirectoryStatus">Checking server directory…</span><button id="homeRefresh" class="small-refresh" type="button" title="Refresh servers">↻</button></div><button class="home-create" id="homeAddServer" type="button"><span>DIRECT CONNECT</span><small>Have a server address? Add it here.</small><b>↗</b></button></div>
           </div>
-          <div id="settingsFields"></div>
-          <div class="panel-actions">
-            <span class="change-status" id="changeStatus" role="status">Nicio modificare</span>
-            <button class="button button--secondary" id="resetChanges">Anulează</button>
-            <button class="button button--gold" id="applyChanges" disabled>Aplică modificările <span>↗</span></button>
+          <aside class="home-aside"><div class="aside-heading"><span>SKR CLIENT</span><span class="aside-live">MULTIPLAYER</span></div><div class="aside-feature"><div class="aside-emblem">S<span>K</span>R<span class="emblem-dot">.</span></div><div class="aside-feature__bottom"><span>WELCOME TO SKR CLIENT</span><h3>Your game.<br>Your servers.</h3><p>A dedicated launcher for exploring San Andreas multiplayer. Fast access to servers, favorites and your next session.</p></div></div><div class="aside-row"><span>SERVER BROWSER</span><span>OPEN.MP / SA-MP</span></div><div class="aside-row"><span>CLIENT STATUS</span><span class="status-ready"><i></i> READY</span></div><div class="aside-bottom"><span>BUILT FOR THE GAME.</span><small>Not another web dashboard.</small></div></aside>
+        </div>
+      </section>
+
+      <section class="page servers-page" data-page="servers" hidden>
+        <div class="server-toolbar"><div class="server-toolbar__title"><span class="eyebrow">EXPLORE MULTIPLAYER</span><h1>Browse servers<span class="title-dot">.</span></h1><p><span class="catalog-dot"></span><span id="directoryStatus">Checking server directory…</span></p></div><div class="server-tools"><button class="server-filter active" type="button" data-server-filter="all">All servers</button><button class="server-filter" type="button" data-server-filter="recommended">Featured</button><button class="server-filter" type="button" data-server-filter="favorites">Favorites</button><button class="server-filter" type="button" data-server-filter="history">History</button><label class="server-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg><input id="serverSearch" type="search" placeholder="Search servers…" aria-label="Search servers"></label><button class="server-add" id="addServerButton" type="button" aria-haspopup="dialog"><span>＋</span> Add server</button><button class="directory-refresh" id="refreshServers" type="button" aria-label="Refresh server list">↻</button></div></div>
+        <div class="inline-server-panel"><div class="inline-server-heading"><span>SERVER</span><span>MODE</span><span>PLAYERS</span><span>LATENCY</span><span id="serverCount">0 SERVERS</span></div><div class="public-server-list public-server-list--inline" id="publicServerList"><div class="server-list-state">Loading multiplayer servers…</div></div></div>
+      </section>
+
+      <section class="page server-details" data-page="details" hidden aria-labelledby="detailsName">
+        <button id="detailsBack" class="button button--secondary" type="button">← Back</button>
+        <div id="detailsBanner" class="server-details__banner" hidden></div>
+        <div class="server-details__panel">
+          <span id="detailsInitials" class="server-mark server-details__icon" aria-hidden="true"></span>
+          <div class="server-details__identity"><span class="eyebrow">SERVER DETAILS</span><h1 id="detailsName" tabindex="-1"></h1><p id="detailsDescription"></p><p id="detailsStatus" role="status"></p></div>
+          <dl id="detailsFacts" class="server-details__facts"></dl>
+          <div id="detailsLinks" class="server-details__links" hidden></div>
+          <section class="server-details__resources" aria-labelledby="detailsResourcesTitle">
+            <div class="server-details__resources-heading">
+              <div><span class="eyebrow">SERVER CONTENT</span><h2 id="detailsResourcesTitle">Resources</h2></div>
+              <span id="detailsResourcesStatus" class="server-details__resources-status">Checking available information…</span>
+            </div>
+            <div id="detailsResources" class="server-details__resources-list" aria-live="polite"></div>
+            <p class="server-details__resources-note">Server-advertised capabilities only — not a downloadable resource manifest.</p>
+          </section>
+          <div class="server-details__actions">
+            <button id="detailsConnect" class="button button--gold" type="button" data-action="connect">Connect ↗</button>
+            <button id="detailsFavorite" class="button button--secondary" type="button">Favorite</button>
+            <button id="detailsCopy" class="button button--secondary" type="button">Copy Server URL</button>
           </div>
+          <p id="detailsCopyStatus" role="status"></p>
         </div>
-      </div>
-    </section>
-
-    <!-- Servers (pre-connect mode landing page) -->
-    <section class="page" data-page="servers" hidden>
-      <div class="server-toolbar">
-        <div class="server-toolbar__title">
-          <span class="eyebrow">SKR MULTIPLAYER</span>
-          <h1>Alege un server</h1>
-          <p><span class="catalog-dot"></span><span id="directoryStatus">Catalog public disponibil</span></p>
-        </div>
-        <div class="server-tools">
-          <button class="server-filter active" type="button" data-server-filter="all">Toate</button>
-          <button class="server-filter" type="button" data-server-filter="recommended">Recomandate</button>
-          <button class="server-filter" type="button" data-server-filter="favorites">Favorite</button>
-          <label class="server-search">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
-            <input id="serverSearch" type="search" placeholder="Nume, mod sau limbă" aria-label="Caută un server">
-          </label>
-          <button class="server-add" id="addServerButton" type="button" aria-haspopup="dialog">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
-            Adaugă server
-          </button>
-          <button class="directory-refresh" id="refreshServers" type="button" aria-label="Actualizează lista serverelor">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"></path><path d="M18.5 9A7 7 0 1 0 19 15"></path></svg>
-          </button>
-        </div>
-      </div>
-      <div class="inline-server-panel">
-        <div class="inline-server-heading">
-          <span>SERVER</span><span>MOD</span><span>JUCĂTORI</span><span>PING</span><span id="serverCount">0 SERVERE</span>
-        </div>
-        <div class="public-server-list public-server-list--inline" id="publicServerList">
-          <div class="server-list-state">Se încarcă serverele publice…</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Map (pause mode stub) -->
-    <section class="page" data-page="map" hidden>
-      <div class="page-heading">
-        <div>
-          <span class="eyebrow">ORIENTARE</span>
-          <h1>Hartă</h1>
-        </div>
-        <p>San Andreas</p>
-      </div>
-      <div class="map-placeholder">
-        <svg viewBox="0 0 64 64" aria-hidden="true"><path d="m5 15 18-8 18 8 18-8v42l-18 8-18-8-18 8Zm18-8v42m18-34v42"/></svg>
-        <h2>Harta jocului</h2>
-        <p>Aici se deschide harta reală GTA prin adaptorul clientului.</p>
-        <span>Phase 1: harta nu este conectată.</span>
-      </div>
-    </section>
-
-    <!-- Resume (pause mode) -->
-    <section class="page resume" data-page="resume" hidden>
-      <span class="eyebrow">SKR ROLEPLAY</span>
-      <h1>ÎNAPOI ÎN<br><em>POVESTE.</em></h1>
-      <p>În joc, „Continuă” închide meniul și restabilește controlul.</p>
-      <button class="button button--gold" data-action="open-settings">Înapoi la setări</button>
-    </section>
-  </main>
-
-  <footer>
-    <span><kbd>ESC</kbd> <span id="escapeLabel">Ieși din joc</span></span>
-    <span>SKR CLIENT <b>LOCAL · OFFLINE</b></span>
-  </footer>
+      </section>
+      <section class="page" data-page="settings" hidden><div class="page-heading"><div><span class="eyebrow">MAKE IT YOURS</span><h1>Settings<span class="title-dot">.</span></h1></div><p>Adjust your launcher and game preferences.</p></div><div class="settings-layout"><aside class="categories" aria-label="Settings categories"><button data-tab="graphics" class="category active"><span class="category__number">01</span><span>Graphics<small>Display &amp; performance</small></span><i>↗</i></button><button data-tab="audio" class="category"><span class="category__number">02</span><span>Audio<small>Sound &amp; volume</small></span><i>↗</i></button><button data-tab="controls" class="category"><span class="category__number">03</span><span>Controls<small>Keyboard &amp; mouse</small></span><i>↗</i></button><button data-tab="interface" class="category"><span class="category__number">04</span><span>Interface<small>HUD &amp; display</small></span><i>↗</i></button><div class="category-note">GAME SETTINGS<span>Only settings supported by the current native adapter can be applied.</span></div></aside><div class="settings-panel"><div class="panel-heading"><div><span class="eyebrow" id="tabEyebrow">DISPLAY &amp; PERFORMANCE</span><h2 id="tabTitle">Graphics</h2></div><span class="panel-index" id="tabIndex">01 / 04</span></div><div id="settingsFields"></div>
+<div id="fpsEnginePanel" class="fps-engine-panel" hidden>
+  <div class="fps-engine-head"><div><span class="eyebrow">SKR FPS ENGINE</span><h3>Frame Rate</h3></div><small>Native GTA D3D9</small></div>
+  <label class="fps-engine-row" for="fpsCounterEnabled"><span><b>Show FPS counter</b><small>Measures actual GTA Present calls, not WebView2 FPS.</small></span><input id="fpsCounterEnabled" type="checkbox" checked></label>
+  <label class="fps-engine-row" for="fpsCapSetting"><span><b>SKR frame cap</b><small>Experimental cap; does not override GTA/SA-MP or VSync limits.</small></span><select id="fpsCapSetting" class="setting-input"><option value="0">Game default (no SKR cap)</option><option value="30">30 FPS</option><option value="60">60 FPS</option><option value="90">90 FPS</option><option value="120">120 FPS — experimental</option><option value="144">144 FPS — experimental</option><option value="165">165 FPS — experimental</option><option value="240">240 FPS — experimental</option></select></label>
+  <p class="fps-engine-note">To exceed GTA's current limit, disable Frame Limiter in GTA display settings; VSync and SA-MP may still impose a lower limit. High FPS can alter GTA physics. Changes apply on next GTA launch.</p>
+  <div class="fps-engine-actions"><span id="fpsSettingsStatus" role="status">Loading FPS preferences…</span><button id="saveFpsSettings" class="button button--secondary" type="button">Save FPS preferences</button></div>
 </div>
+<div class="panel-actions"><span class="change-status" id="changeStatus" role="status">No pending changes</span><button class="button button--secondary" id="resetChanges">Discard</button><button class="button button--gold" id="applyChanges" disabled>Apply changes <span>↗</span></button></div></div></div></section>
 
-<div class="modal-backdrop" id="confirmModal" hidden>
-  <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-    <span class="eyebrow">CONFIRMARE</span>
-    <h2 id="modalTitle"></h2>
-    <p id="modalText"></p>
-    <div>
-      <button class="button button--secondary" id="cancelModal">Anulează</button>
-      <button class="button button--gold" id="confirmModalButton">Confirmă</button>
-    </div>
-  </section>
-</div>
+      <section class="page" data-page="map" hidden><div class="page-heading"><div><span class="eyebrow">SAN ANDREAS</span><h1>Map<span class="title-dot">.</span></h1></div></div><div class="map-placeholder"><h2>In-game map</h2><p>The native GTA map adapter isn't connected yet.</p></div></section>
+      <section class="page resume" data-page="resume" hidden><span class="eyebrow">SKR CLIENT</span><h1>BACK TO THE<br>GAME<span class="title-dot">.</span></h1><p>Resume your session.</p><button class="button button--gold" data-action="open-settings">Open settings</button></section>
+    </main>
+    <footer><span><kbd>ESC</kbd> <span id="escapeLabel">Exit to desktop</span></span><span>SKR CLIENT <b>ALPHA BUILD</b></span></footer>
+  </div>
+  <div id="externalLinkModal" class="modal-backdrop external-link" hidden>
+    <section class="modal external-link__dialog" role="dialog" aria-modal="true" aria-labelledby="externalLinkTitle" aria-describedby="externalLinkExplanation externalLinkLimit">
+      <span class="eyebrow">EXTERNAL WEBSITE</span><h2 id="externalLinkTitle">You are leaving SKR Client</h2>
+      <p id="externalLinkExplanation">This website is outside SKR Client. Check the full destination before continuing. The website may redirect you elsewhere.</p>
+      <strong id="externalLinkHost"></strong><p id="externalLinkUrl" class="external-link__url"></p>
+      <p id="externalLinkLimit" role="status"></p>
+      <div class="external-link__actions"><button id="externalLinkVisit" class="button button--gold" type="button">Visit Site</button><button id="externalLinkCancel" class="button button--secondary" type="button">Cancel</button></div>
+    </section>
+  </div>
+  <div id="exitDimmer" class="exit-dimmer" hidden></div>
 
-<div class="modal-backdrop" id="addServerModal" hidden>
-  <form class="modal add-server-form" id="addServerForm" role="dialog" aria-modal="true" aria-labelledby="addServerTitle" novalidate>
-    <span class="eyebrow">SERVER PERSONAL</span>
-    <h2 id="addServerTitle">Adaugă server</h2>
-    <p>Serverul se salvează local și apare în listă cu eticheta „Personal”.</p>
-    <label class="field-label" for="addServerAddress">Adresă</label>
-    <input class="nickname-input" id="addServerAddress" type="text" maxlength="260"
-           autocomplete="off" spellcheck="false" placeholder="ex. 127.0.0.1:7777"
-           aria-describedby="addServerHint addServerError">
-    <label class="field-label" for="addServerName">Nume <small>(opțional)</small></label>
-    <input class="nickname-input" id="addServerName" type="text" maxlength="64"
-           autocomplete="off" spellcheck="false" placeholder="ex. Serverul meu">
-    <div class="nickname-feedback">
-      <span id="addServerHint">Format: host:port — IPv4 sau nume de domeniu, port 1–65535.</span>
-      <span class="nickname-error" id="addServerError" role="status"></span>
-    </div>
-    <div>
-      <button class="button button--secondary" id="cancelAddServer" type="button">Anulează</button>
-      <button class="button button--gold" id="confirmAddServer" type="submit" disabled>Adaugă</button>
-    </div>
-  </form>
-</div>
-
-<div class="modal-backdrop connection-backdrop" id="connectionModal" hidden>
-  <section class="modal connection-modal" role="status" aria-live="polite" aria-labelledby="connectionTitle">
-    <span class="eyebrow">CONECTARE</span>
-    <h2 id="connectionTitle">Se pornește sesiunea…</h2>
-    <div class="connection-server">
-      <strong id="connectionServer">Server</strong>
-      <span id="connectionAddress"></span>
-    </div>
-    <ol class="connection-steps" id="connectionSteps">
-      <li data-step="launch"><i aria-hidden="true"></i><span>Pornire joc</span></li>
-      <li data-step="world"><i aria-hidden="true"></i><span>Încărcare lume</span></li>
-      <li data-step="server"><i aria-hidden="true"></i><span>Conectare la server</span></li>
-      <li data-step="download"><i aria-hidden="true"></i><span>Descărcare resurse<small id="connectionDownload"></small></span></li>
-      <li data-step="join"><i aria-hidden="true"></i><span>Intrare în joc</span></li>
-    </ol>
-    <p class="connection-text" id="connectionText"></p>
-  </section>
-</div>
-
-<div class="toast" id="toast" hidden role="status"></div>
+  <div class="modal-backdrop" id="confirmModal" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><span class="eyebrow">CONFIRMATION</span><h2 id="modalTitle"></h2><p id="modalText"></p><div><button class="button button--secondary" id="cancelModal">Cancel</button><button class="button button--gold" id="confirmModalButton">Continue</button></div></section></div>
+  <div class="modal-backdrop" id="addServerModal" hidden><form class="modal add-server-form" id="addServerForm" role="dialog" aria-modal="true" aria-labelledby="addServerTitle" novalidate><span class="eyebrow">CUSTOM SERVER</span><h2 id="addServerTitle">Add a server</h2><p>Add a server address to your personal list.</p><label class="field-label" for="addServerAddress">Server address</label><input class="nickname-input" id="addServerAddress" type="text" maxlength="260" autocomplete="off" spellcheck="false" placeholder="e.g. 127.0.0.1:7777" aria-describedby="addServerHint addServerError"><label class="field-label" for="addServerName">Display name <small>(optional)</small></label><input class="nickname-input" id="addServerName" type="text" maxlength="64" autocomplete="off" spellcheck="false" placeholder="My server"><div class="nickname-feedback"><span id="addServerHint">Format: host:port — IPv4 or hostname, port 1–65535.</span><span class="nickname-error" id="addServerError" role="status"></span></div><div><button class="button button--secondary" id="cancelAddServer" type="button">Cancel</button><button class="button button--gold" id="confirmAddServer" type="submit" disabled>Add server</button></div></form></div>
+  <div class="modal-backdrop connection-backdrop" id="connectionModal" hidden><section class="modal connection-modal" role="status" aria-live="polite" aria-labelledby="connectionTitle"><span class="eyebrow">JOINING SESSION</span><h2 id="connectionTitle">Starting your session…</h2><div class="connection-server"><strong id="connectionServer">Server</strong><span id="connectionAddress"></span></div><ol class="connection-steps" id="connectionSteps"><li data-step="launch"><i></i><span>Starting game</span></li><li data-step="world"><i></i><span>Loading world</span></li><li data-step="server"><i></i><span>Contacting server</span></li><li data-step="download"><i></i><span>Downloading resources<small id="connectionDownload"></small></span></li><li data-step="join"><i></i><span>Joining session</span></li></ol><p class="connection-text" id="connectionText"></p></section></div>
+  <div class="toast" id="toast" hidden role="status"></div>
 </body>
 </html>

@@ -1,11 +1,13 @@
 #include "game-state/game_state.h"
 #include "protocol/client_state.h"
 #include "protocol/session_info.h"
+#include "protocol/enhanced.h"
 #include "protocol/radar_style.h"
 #include "protocol/radar_rect.h"
 #include "lobby/lobby_manager.h"
 #include "escape-menu/escape_menu.h"
 #include <windows.h>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -22,6 +24,8 @@
 //    RVA 0x26EB94 = CNetGame*, state byte @+0x3CD (5 = connected, as used in d3d9_hook).
 
 namespace skr::game_state {
+namespace { std::atomic<bool> g_enhancedAdvertised{false}; }
+void ConfigureEnhancedDiscovery(bool advertised) { g_enhancedAdvertised.store(advertised); }
 
 namespace {
 
@@ -369,6 +373,10 @@ VoidFn g_drawRadarTrampoline = nullptr;
 
 // Scales whatever width/height SA-MP set for this frame; the top edge is raised by
 // the extra height so the bottom margin stays. Restored so SA-MP's own restore matches.
+// Crash counter for radar — stops calling the trampoline after repeated crashes
+static std::atomic<int> g_radarCrashCount{0};
+constexpr int kMaxRadarCrashes = 3;
+
 void __cdecl HookedDrawRadar() {
     auto* w = reinterpret_cast<float*>(kRadarWidth);
     auto* h = reinterpret_cast<float*>(kRadarHeight);
@@ -380,8 +388,6 @@ void __cdecl HookedDrawRadar() {
         *h = h0 * s;
         *top = top0 + h0 * (s - 1.0f);
     }
-    // Capture the effective rect BEFORE the trampoline, while our scale is active.
-    // HUD-unit → screen-pixel: x * (screenW / 640), y * (screenH / 448).
     const float screenW = static_cast<float>(*reinterpret_cast<int*>(kRsMaxWidth));
     const float screenH = static_cast<float>(*reinterpret_cast<int*>(kRsMaxHeight));
     const float sx = screenW / kHudBaseWidth;
@@ -390,16 +396,24 @@ void __cdecl HookedDrawRadar() {
     rect.w = *w * sx;
     rect.h = *h * sy;
     rect.x = kRadarLeftMargin * sx;
-    rect.y = screenH - *top * sy;   // top-from-bottom → top-from-top
+    rect.y = screenH - *top * sy;
 
-    g_drawRadarTrampoline();
+    if (g_radarCrashCount.load() < kMaxRadarCrashes) {
+        __try {
+            g_drawRadarTrampoline();
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            g_radarCrashCount.fetch_add(1);
+            LogStage(21 + g_radarCrashCount.load(),
+                     "SEH: DrawRadar trampoline crashed — radar drawing disabled");
+        }
+    }
+
     if (s != 1.0f) {
         *w = w0;
         *h = h0;
         *top = top0;
     }
 
-    // Flag dirty when the rect moves by more than 1 pixel.
     if (std::abs(rect.x - g_lastSentRect.x) > 1.0f ||
         std::abs(rect.y - g_lastSentRect.y) > 1.0f ||
         std::abs(rect.w - g_lastSentRect.w) > 1.0f ||
@@ -474,10 +488,74 @@ using RakRegisterRpcFn = void(__thiscall*)(void*, const int*, RpcHandlerFn);
 const int g_sessionInfoRpcId = protocol::kRpcSessionInfo;
 void* g_sessionRpcRakClient = nullptr;
 
+enum class Negotiation { Idle, HelloSent, OfferReceived, ConfirmSent, Enhanced, Failed };
+Negotiation g_negotiation = Negotiation::Idle;
+uint32_t g_negotiationToken = 0;
+ULONGLONG g_negotiationDeadline = 0;
+bool g_wasConnected = false;
+
+bool SendNegotiation(uintptr_t base, uint8_t* netGame, protocol::EnhancedStep step, uint32_t token) {
+    void* rak = *reinterpret_cast<void**>(netGame);
+    if (!rak) return false;
+    alignas(16) uint8_t bs[0x400]{};
+    reinterpret_cast<BsThisFn>(base + kBsCtorRva)(bs);
+    uint8_t packet[8]{protocol::kEnhancedMarker, static_cast<uint8_t>(step),
+        protocol::kEnhancedVersion, protocol::kEnhancedCapabilities};
+    memcpy(packet + 4, &token, 4); // verified x86 little-endian wire representation
+    reinterpret_cast<BsWriteBytesFn>(base + kBsWriteBytesRva)(bs, reinterpret_cast<const char*>(packet), 8);
+    int id = protocol::kRpcClientState;
+    auto vtbl = *reinterpret_cast<uint8_t**>(rak);
+    const bool sent = (*reinterpret_cast<RakRpcFn*>(vtbl + kRakRpcVtableOffset))(rak, &id, bs, 1, 9, 0, false);
+    reinterpret_cast<BsThisFn>(base + kBsDtorRva)(bs);
+    return sent;
+}
+
 void __cdecl OnSessionInfoRpc(RpcParams* params) {
-    if (!params || !params->input || params->numberOfBitsOfData < 16) return;
-    if (params->input[0] != protocol::kSessionInfoVersion) return;
-    skr::lobby::OnSessionInfo(params->input[1]);
+    if (!params || !params->input || !g_enhancedAdvertised.load()) return;
+    const auto* in = params->input;
+    if (GetTickCount64() >= g_negotiationDeadline) return;
+    if (params->numberOfBitsOfData == 64 && in[0] == protocol::kEnhancedMarker) {
+        if (g_negotiation != Negotiation::HelloSent ||
+            in[1] != static_cast<uint8_t>(protocol::EnhancedStep::Offer) ||
+            in[2] != protocol::kEnhancedVersion || in[3] != protocol::kEnhancedCapabilities) return;
+        memcpy(&g_negotiationToken, in + 4, 4);
+        if (g_negotiationToken) g_negotiation = Negotiation::OfferReceived;
+        return;
+    }
+    if (params->numberOfBitsOfData != 16 || in[0] != protocol::kSessionInfoVersion ||
+        in[1] > 1 || g_negotiation != Negotiation::ConfirmSent) return;
+    g_negotiation = Negotiation::Enhanced;
+    skr::lobby::OnSessionInfo(in[1]);
+    LogStage(26, "Enhanced capabilities confirmed (not authentication)");
+}
+
+void TickNegotiation(uintptr_t base, uint8_t* netGame) {
+    const bool connected = netGame[kNetGameStateOff] == kStateConnected;
+    if (!connected) {
+        if (g_wasConnected) {
+            skr::lobby::ResetEnhancedSession();
+            ApplyRadar(protocol::RadarStyle::Round, 1.0f);
+            g_negotiation = Negotiation::Idle;
+            g_negotiationToken = 0;
+            g_negotiationDeadline = 0;
+        }
+        g_wasConnected = false;
+        return;
+    }
+    g_wasConnected = true;
+    if (!g_enhancedAdvertised.load()) return;
+    const auto now = GetTickCount64();
+    if (g_negotiation == Negotiation::Idle) {
+        g_negotiationDeadline = now + protocol::kEnhancedTimeoutMs;
+        g_negotiation = SendNegotiation(base, netGame, protocol::EnhancedStep::Hello, 0)
+            ? Negotiation::HelloSent : Negotiation::Failed;
+        LogStage(27, "Enhanced hello attempted after native discovery");
+    } else if (g_negotiation != Negotiation::Enhanced && now >= g_negotiationDeadline) {
+        g_negotiation = Negotiation::Failed;
+    } else if (g_negotiation == Negotiation::OfferReceived) {
+        g_negotiation = SendNegotiation(base, netGame, protocol::EnhancedStep::Confirm, g_negotiationToken)
+            ? Negotiation::ConfirmSent : Negotiation::Failed;
+    }
 }
 
 const int g_radarStyleRpcId = protocol::kRpcRadarStyle;
@@ -540,6 +618,7 @@ void Tick() {
     auto* netGame = *reinterpret_cast<uint8_t**>(base + kSampNetGameRva);
     if (!netGame) { LogStage(2, "no CNetGame"); return; }
     RegisterSessionInfoRpc(netGame);
+    TickNegotiation(base, netGame);
     skr::lobby::OnNetGameState(netGame[kNetGameStateOff]);
     if (netGame[kNetGameStateOff] != kStateConnected) {
         char m[64];
@@ -562,16 +641,18 @@ void Tick() {
     // loads them.  DrawMap also calls this from EndScene, but by then the
     // streaming update has already finished for this frame.
     if (skr::lobby::IsSkrSession()) {
-        reinterpret_cast<void(__cdecl*)(const CVector&)>(kStreamRadarSections)(pos);
+        __try {
+            reinterpret_cast<void(__cdecl*)(const CVector&)>(kStreamRadarSections)(pos);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            LogStage(25, "SEH: StreamRadarSections crashed");
+        }
 
-        // Diagnostic: log tile registration once
         auto* ids = reinterpret_cast<const int*>(kGRadarTxdIds);
         int reg = 0;
         for (int i = 0; i < 144; ++i) if (ids[i] != -1) ++reg;
         char m[96];
         snprintf(m, sizeof(m), "radar tiles: %d/144 registered, id[72]=%d", reg, ids[72]);
         LogStage(15, m);
-
     }
 
     // RPC 240 is SKR-private: never sent to servers without the SKR Gate.
@@ -625,7 +706,8 @@ void Tick() {
     }
 
     // RPC 243: radar screen-space rect, sent only when it changes.
-    if (g_radarRectDirty) {
+    // TODO: disabled for debugging random quits — re-enable after testing
+    if (false && g_radarRectDirty) {
         if (SendRadarRect(base, netGame, g_lastSentRect)) {
             g_radarRectDirty = false;
             char m[96];
@@ -670,6 +752,11 @@ bool InstallHudDrawHook() {
     VerifyRadarPatchSites();
     InstallDrawRadarDetour();
     return true;
+}
+
+bool IsEnhancedNegotiationPending() {
+    return g_enhancedAdvertised.load() && g_negotiation != Negotiation::Enhanced &&
+        g_negotiation != Negotiation::Failed;
 }
 
 } // namespace skr::game_state

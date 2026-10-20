@@ -15,7 +15,7 @@ struct ConnectParams {
 // Load the pinned samp.dll before GTA initializes (its pre-game patches must
 // precede GTA's own allocations) with SA-MP's client mode on, and hold its
 // StartGame at a gate. Returns false for any unknown binary or late call.
-bool PreloadSamp();
+bool PreloadSamp(const ConnectParams* startup = nullptr);
 
 // Write the chosen server into SA-MP's Settings block and open the gate:
 // SA-MP starts the game and creates CNetGame for this server. Once per process.
