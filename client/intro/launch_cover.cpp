@@ -3,11 +3,13 @@
 #include "lobby/lobby_manager.h"
 #include "cef-local/cef_local_loader.h"
 #include "ipc/handoff_trace.h"
+#include <atomic>
 #include <cstring>
 namespace skr::launch_cover {
 namespace {
 HANDLE frameEvent{}, takeoverEvent{}, readyEvent{};
 bool finished = false, completionPending = false, frameReported = false;
+std::atomic<bool> gameplayConfirmed{false};
 IDirect3DTexture9* title = nullptr;
 constexpr int width = 640, height = 200;
 bool CreateTitle(IDirect3DDevice9* device) {
@@ -63,8 +65,9 @@ bool Draw(IDirect3DDevice9* device, bool worldConnected) {
     using ReadyFn = bool(__cdecl*)();
     auto module = GetModuleHandleW(L"client.dll");
     auto ready = module ? reinterpret_cast<ReadyFn>(GetProcAddress(module, "skr_cef_session_visual_ready_v1")) : nullptr;
-    const bool visualReady = skr::lobby::IsSkrSession() ? (ready && ready())
-        : !skr::game_state::IsEnhancedNegotiationPending();
+    const bool visualReady = gameplayConfirmed.load(std::memory_order_relaxed)
+        || (skr::lobby::IsSkrSession() ? (ready && ready())
+            : !skr::game_state::IsEnhancedNegotiationPending());
     completionPending = worldConnected && visualReady &&
                         WaitForSingleObject(takeoverEvent, 0) == WAIT_OBJECT_0;
     if (FAILED(device->TestCooperativeLevel())) return false;
@@ -99,5 +102,8 @@ void Presented(bool drewCover, HRESULT result) {
     SetEvent(frameEvent);
     if (!frameReported) { frameReported = true; ipc::TraceHandoff("cover-presented"); }
     if (completionPending) { finished = true; SetEvent(readyEvent); ipc::TraceHandoff("world-resources-hud-ready"); BeforeReset(); }
+}
+void MarkGameplayConfirmed() {
+    gameplayConfirmed.store(true, std::memory_order_relaxed);
 }
 }

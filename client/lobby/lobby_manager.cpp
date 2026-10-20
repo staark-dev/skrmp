@@ -6,6 +6,7 @@
 #include "protocol/session_info.h"
 #include "cef-bridge/cef_bridge.h"
 #include "cef-local/cef_local_loader.h"
+#include "intro/launch_cover.h"
 #include "intro/urban_intro.h"
 #include "samp-loader/samp_loader.h"
 #include "escape-menu/escape_menu.h"
@@ -1122,6 +1123,9 @@ void OnInWorldTick() {
 
 void OnGameplayConfirmed(const char* reason) {
     if (g_disabled.load() || g_gameplayActive.exchange(true)) return;
+    // Unblock the launch cover: gameplay is confirmed, so visualReady
+    // should be true even if CEF HUD browser 101 was never created.
+    skr::launch_cover::MarkGameplayConfirmed();
     auto& bridge = skr::cef::CefBridge::Instance();
     // Hide + unfocus instead of DestroyBrowser: destroying while RenderAll
     // iterates browsers_ on the render thread causes a use-after-free that
