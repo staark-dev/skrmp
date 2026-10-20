@@ -131,18 +131,36 @@ struct Window {
         }
         if (!handedOver && WaitForSingleObject(frame, 0) == WAIT_OBJECT_0) {
             // Child signalled only after a successful Present of the SKR cover.
+            // Seamless handoff: bring GTA's window above the launcher BEFORE
+            // hiding it, so the desktop is never exposed between the two.
             handedOver = true;
-            ipc::TraceHandoff("frame-confirmed-window-hidden");
-            SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            ShowWindow(hwnd, SW_HIDE);
-            EnumWindows([](HWND game, LPARAM value) -> BOOL {
-                DWORD owner = 0; GetWindowThreadProcessId(game, &owner);
-                if (owner == static_cast<DWORD>(value) && IsWindowVisible(game) && !GetWindow(game, GW_OWNER)) {
-                    SetForegroundWindow(game); return FALSE;
+            struct FindCtx { DWORD pid; HWND result; };
+            FindCtx ctx{pid, nullptr};
+            EnumWindows([](HWND wnd, LPARAM lp) -> BOOL {
+                auto* c = reinterpret_cast<FindCtx*>(lp);
+                DWORD owner = 0; GetWindowThreadProcessId(wnd, &owner);
+                if (owner == c->pid && IsWindowVisible(wnd) && !GetWindow(wnd, GW_OWNER)) {
+                    c->result = wnd; return FALSE;
                 }
                 return TRUE;
-            }, static_cast<LPARAM>(pid));
+            }, reinterpret_cast<LPARAM>(&ctx));
+            if (ctx.result) {
+                // GTA on top while launcher still covers the screen behind it.
+                SetWindowPos(ctx.result, HWND_TOPMOST, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                SetForegroundWindow(ctx.result);
+                ipc::TraceHandoff("handoff-gta-foreground");
+            }
+            // Hide launcher — GTA is already covering the screen.
+            SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            ShowWindow(hwnd, SW_HIDE);
+            // Remove TOPMOST from GTA so Alt+Tab and other windows work normally.
+            if (ctx.result) {
+                SetWindowPos(ctx.result, HWND_NOTOPMOST, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
             SetEvent(takeover);
+            ipc::TraceHandoff("frame-confirmed-window-hidden");
         }
         if (!sessionReady && WaitForSingleObject(ready, 0) == WAIT_OBJECT_0) {
             sessionReady = true; ipc::TraceHandoff("session-visual-ready");
