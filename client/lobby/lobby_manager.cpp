@@ -1113,6 +1113,7 @@ void OnInWorldTick() {
     // true (lobby not initialized — e.g. after a reconnect in the same
     // process where Shutdown() ran but Initialize() didn't re-run).
     auto confirm = [](const char* reason) {
+        Log("OnInWorldTick -> confirm: %s (g_disabled=%d)", reason, g_disabled.load() ? 1 : 0);
         skr::launch_cover::MarkGameplayConfirmed();
         OnGameplayConfirmed(reason);
     };
