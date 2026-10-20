@@ -6,6 +6,7 @@
 #include "protocol/radar_rect.h"
 #include "lobby/lobby_manager.h"
 #include "escape-menu/escape_menu.h"
+#include "intro/launch_cover.h"
 #include <windows.h>
 #include <atomic>
 #include <cmath>
@@ -636,6 +637,17 @@ void Tick() {
     // hand over based on the server's session info (RPC 241).
     skr::lobby::OnInWorldTick();
     skr::escape_menu::Tick();
+
+    // Failsafe: dismiss the launch cover after 3 s of confirmed in-world state,
+    // regardless of lobby session-mode timeouts (which can be 30+ s for server
+    // CEF intro mode). This is game-state-driven, not a blind timeout: we only
+    // reach here when netgame state == 5 AND a player ped exists.
+    {
+        static DWORD s_inWorldSince = 0;
+        if (!s_inWorldSince) s_inWorldSince = GetTickCount();
+        if (GetTickCount() - s_inWorldSince >= 3000)
+            skr::launch_cover::MarkGameplayConfirmed();
+    }
 
     // Stream radar tiles during CGame::Process so the streaming system actually
     // loads them.  DrawMap also calls this from EndScene, but by then the
