@@ -84,6 +84,8 @@ struct Window {
         if (process) { CloseHandle(process); process = nullptr; }
         launching = handedOver = sessionReady = cancelling = false;
         ipc::TraceHandoff("lobby-restored");
+        // Restore WebView2 visibility (hidden during handoff).
+        if (controller) controller->put_IsVisible(TRUE);
         SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         ShowWindow(hwnd, SW_SHOW);
         SetForegroundWindow(hwnd);
@@ -131,9 +133,30 @@ struct Window {
         }
         if (!handedOver && WaitForSingleObject(frame, 0) == WAIT_OBJECT_0) {
             // Child signalled only after a successful Present of the SKR cover.
-            // Seamless handoff: bring GTA's window above the launcher BEFORE
-            // hiding it, so the desktop is never exposed between the two.
+            // Seamless handoff via transparent-window technique:
+            // 1. Hide WebView2 so the launcher shows its BLACK_BRUSH background.
+            // 2. Make launcher fully transparent (WS_EX_LAYERED, alpha 0) —
+            //    GTA's cover is visible through the transparent launcher.
+            // 3. Activate GTA's window (no cross-process SetWindowPos needed).
+            // 4. Hide the (already invisible) launcher and restore its style.
+            //
+            // This avoids the ~4 s cross-process SetWindowPos block that
+            // occurred when manipulating TOPMOST on GTA's window while its
+            // message loop was busy with D3D9 initialization.
             handedOver = true;
+            ipc::TraceHandoff("handoff-begin");
+
+            // Step 1: WebView2 off — launcher becomes a pure black rectangle.
+            if (controller) controller->put_IsVisible(FALSE);
+
+            // Step 2: Launcher becomes fully transparent. The user now sees
+            // GTA's cover through the launcher without a desktop flash.
+            const LONG_PTR prevExStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, prevExStyle | WS_EX_LAYERED);
+            SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+            ipc::TraceHandoff("handoff-transparent");
+
+            // Step 3: Activate GTA.
             struct FindCtx { DWORD pid; HWND result; };
             FindCtx ctx{pid, nullptr};
             EnumWindows([](HWND wnd, LPARAM lp) -> BOOL {
@@ -144,21 +167,15 @@ struct Window {
                 }
                 return TRUE;
             }, reinterpret_cast<LPARAM>(&ctx));
-            if (ctx.result) {
-                // GTA on top while launcher still covers the screen behind it.
-                SetWindowPos(ctx.result, HWND_TOPMOST, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-                SetForegroundWindow(ctx.result);
-                ipc::TraceHandoff("handoff-gta-foreground");
-            }
-            // Hide launcher — GTA is already covering the screen.
-            SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            if (ctx.result) SetForegroundWindow(ctx.result);
+            ipc::TraceHandoff("handoff-gta-foreground");
+
+            // Step 4: Hide launcher (already transparent — no visual effect).
             ShowWindow(hwnd, SW_HIDE);
-            // Remove TOPMOST from GTA so Alt+Tab and other windows work normally.
-            if (ctx.result) {
-                SetWindowPos(ctx.result, HWND_NOTOPMOST, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            }
+            // Restore original extended style and remove TOPMOST for lobby return.
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, prevExStyle & ~static_cast<LONG_PTR>(WS_EX_LAYERED));
+            SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             SetEvent(takeover);
             ipc::TraceHandoff("frame-confirmed-window-hidden");
         }
@@ -171,6 +188,7 @@ struct Window {
             // Keep monitoring until the child has actually exited before another launch.
             deadline = GetTickCount64() + 10000;
             SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            if (controller) controller->put_IsVisible(TRUE);
             ShowWindow(hwnd, SW_SHOW);
             Emit("skr:launch:failed", "GTA sau interfața serverului nu a confirmat încărcarea. Revenim în lobby.");
         }
