@@ -68,7 +68,11 @@ bool Draw(IDirect3DDevice9* device, bool worldConnected) {
     const bool visualReady = gameplayConfirmed.load(std::memory_order_relaxed)
         || (skr::lobby::IsSkrSession() ? (ready && ready())
             : !skr::game_state::IsEnhancedNegotiationPending());
-    completionPending = worldConnected && visualReady &&
+    // gameplayConfirmed already implies the player is in-world (set from
+    // game_state tick which only runs at netgame state 5), so it can bypass
+    // the render-thread worldConnected check that may lag behind.
+    completionPending = (gameplayConfirmed.load(std::memory_order_relaxed) || worldConnected)
+                        && visualReady &&
                         WaitForSingleObject(takeoverEvent, 0) == WAIT_OBJECT_0;
     if (FAILED(device->TestCooperativeLevel())) return false;
     if (!title && !CreateTitle(device)) return false;

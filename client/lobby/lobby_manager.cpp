@@ -1107,16 +1107,26 @@ void OnInWorldTick() {
     }
     const DWORD waited = now - g_inWorldSince;
 
+    // Helper: unblock the launch cover AND run the full lobby confirmation
+    // when the lobby is enabled. MarkGameplayConfirmed is called before
+    // OnGameplayConfirmed so the cover unblocks even when g_disabled is
+    // true (lobby not initialized — e.g. after a reconnect in the same
+    // process where Shutdown() ran but Initialize() didn't re-run).
+    auto confirm = [](const char* reason) {
+        skr::launch_cover::MarkGameplayConfirmed();
+        OnGameplayConfirmed(reason);
+    };
+
     switch (g_sessionMode.load()) {
         case 1:
-            if (ServerPageFocused()) OnGameplayConfirmed("server CEF page took focus");
-            else if (waited >= kIntroWaitMaxMs) OnGameplayConfirmed("server intro did not appear in time");
+            if (ServerPageFocused()) confirm("server CEF page took focus");
+            else if (waited >= kIntroWaitMaxMs) confirm("server intro did not appear in time");
             break;
         case 0:
-            OnGameplayConfirmed("server session mode none");
+            confirm("server session mode none");
             break;
         default:
-            if (waited >= kNoSessionInfoGraceMs) OnGameplayConfirmed("no session info (non-SKR server)");
+            if (waited >= kNoSessionInfoGraceMs) confirm("no session info (non-SKR server)");
             break;
     }
 }
