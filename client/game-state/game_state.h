@@ -1,6 +1,21 @@
 #pragma once
+#include <cstdint>
 
 namespace skr::game_state {
+
+// ── Client connection mode (task-spec §3 state machine) ─────────────
+// STANDARD     – connected to a vanilla SA-MP / open.mp server.
+// NEGOTIATING  – enhanced handshake in progress (Hello sent, awaiting Offer/Confirm).
+// ENHANCED     – SKR Runtime confirmed; enhanced RPCs and features unlocked.
+enum class ClientConnectionMode : uint8_t {
+    Standard    = 0,
+    Negotiating = 1,
+    Enhanced    = 2,
+};
+
+// Returns the current connection mode.  Thread-safe (reads an atomic).
+ClientConnectionMode GetConnectionMode();
+
 void ConfigureEnhancedDiscovery(bool advertised);
 bool IsEnhancedNegotiationPending();
 

@@ -185,6 +185,7 @@ ServerInfo QueryServer(const std::string& address, unsigned timeoutMs, bool incl
                 else if (name == "version") info.version = value;
                 else if (name == "weburl" || name == "website") info.website = value;
                 else if (name == "allowed_clients") info.allowedClients = value;
+                else if (name == "skr_mode") info.skrMode = value;
                 else if (name == "artwork" || name == "artwork.enable") info.artwork = value;
                 else if (name == "banner" || name == "banners") info.banners = value;
                 else if (name == "banners.dark" || name == "banner_dark") info.bannerDark = value;
@@ -224,6 +225,7 @@ std::string ServerInfoToJson(const std::vector<ServerInfo>& list) {
         out += ",\"bannerLight\":"; AppendJsonString(out, s.bannerLight);
         out += ",\"logo\":"; AppendJsonString(out, s.logo);
         out += ",\"allowedClients\":"; AppendJsonString(out, s.allowedClients);
+        out += ",\"skrMode\":"; AppendJsonString(out, s.skrMode);
         out += ",\"artwork\":"; AppendJsonString(out, s.artwork);
         out += ",\"skrProtocol\":"; AppendJsonString(out, s.skrClient);
         out += ",\"rulesKnown\":"; out += s.rulesKnown ? "true" : "false";

@@ -2,6 +2,7 @@
 #include "protocol/client_state.h"
 #include "protocol/session_info.h"
 #include "protocol/enhanced.h"
+#include "protocol/rejection.h"
 #include "protocol/radar_style.h"
 #include "protocol/radar_rect.h"
 #include "lobby/lobby_manager.h"
@@ -626,6 +627,14 @@ bool SendNegotiation(uintptr_t base, uint8_t* netGame, protocol::EnhancedStep st
 void __cdecl OnSessionInfoRpc(RpcParams* params) {
     if (!params || !params->input || !g_enhancedAdvertised.load()) return;
     const auto* in = params->input;
+    protocol::RejectionMessage rejection{};
+    if (params->numberOfBitsOfData == sizeof(rejection) * 8 &&
+        protocol::DecodeRejection(in, sizeof(rejection), rejection)) {
+        g_negotiation = Negotiation::Failed;
+        skr::lobby::OnConnectionRejected(
+            static_cast<protocol::RejectionReason>(rejection.reason), rejection.supportedClients);
+        return;
+    }
     if (GetTickCount64() >= g_negotiationDeadline) return;
     if (params->numberOfBitsOfData == 64 && in[0] == protocol::kEnhancedMarker) {
         if (g_negotiation != Negotiation::HelloSent ||
@@ -952,6 +961,21 @@ bool InstallHudDrawHook() {
     // Tick() polls the entry byte every frame and applies the detour as
     // soon as SA-MP restores the original bytes.
     return true;
+}
+
+ClientConnectionMode GetConnectionMode() {
+    if (!g_enhancedAdvertised.load())
+        return ClientConnectionMode::Standard;
+    switch (g_negotiation) {
+    case Negotiation::Enhanced:
+        return ClientConnectionMode::Enhanced;
+    case Negotiation::HelloSent:
+    case Negotiation::OfferReceived:
+    case Negotiation::ConfirmSent:
+        return ClientConnectionMode::Negotiating;
+    default:  // Idle, Failed
+        return ClientConnectionMode::Standard;
+    }
 }
 
 bool IsEnhancedNegotiationPending() {

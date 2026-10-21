@@ -30,14 +30,29 @@
   // ── State ───────────────────────────────────────────────────────
   // Nickname / GTA path / intro live in the WPF launcher's launcher.ini —
   // deliberately not exposed in this in-game Settings panel (see brief).
-  var state = {
-    graphics:  { resolution:'1920 × 1080', screen:'Fullscreen', distance:70, effects:'Ridicată', antialias:'2×' },
-    audio:     { effects:80, radio:50, volume:80 },
-    controls:  { sensitivity:50, invert:false },
-    interface: { hudScale:100, chat:true, radar:true }
+  var uiDefaults = {
+    interface: { compact:false, motion:false },
+    browser: { directoryMetrics:true, compactRows:false },
+    privacy: { hideAddresses:false },
   };
+  var state = {
+    graphics: { resolution:'1920 × 1080', screen:'Fullscreen' },
+    audio: { volume:80 },
+    interface: uiDefaults.interface,
+    browser: uiDefaults.browser,
+    privacy: uiDefaults.privacy
+  };
+  try {
+    var storedUi = JSON.parse(localStorage.getItem('skr.enhanced.preferences.v1') || '{}');
+    ['interface','browser','privacy'].forEach(function (section) {
+      Object.keys(uiDefaults[section]).forEach(function (key) {
+        if (typeof storedUi[section]?.[key] === 'boolean') state[section][key] = storedUi[section][key];
+      });
+    });
+  } catch(e) {}
   var saved = JSON.parse(JSON.stringify(state));
-  var currentTab = 'graphics';
+  var currentTab = 'interface';
+  var settingsReturnPage = 'home';
   var currentPage = '';
   var pendingAction = null;
   var previousFocus = null;
@@ -156,30 +171,39 @@
   }
 
   var config = {
-    graphics:{title:'Graphics',eyebrow:'DISPLAY & PERFORMANCE',fields:[
-      ['resolution','Resolution','Applies on the next game launch.','select',['Automat','1280 × 720','1366 × 768','1600 × 900','1920 × 1080','2560 × 1440']],
-      ['screen','Display mode','Display changes require confirmation in-game.','select',['Fullscreen','Fereastră','Fereastră fără margini']],
-      ['distance','Draw distance','How far distant objects are rendered.','range'],
-      ['effects','Effects quality','Visual effects detail level.','select',['Scăzută','Medie','Ridicată','Foarte ridicată']],
-      ['antialias','Anti-aliasing','Edge smoothing.','select',['Dezactivat','2×','4×','8×']]
+    interface:{title:'Interface',eyebrow:'APPEARANCE & MOTION',fields:[
+      ['compact','Compact layout','Use tighter spacing in the launcher.','toggle'],
+      ['motion','Reduce motion','Disable decorative transitions and animation.','toggle']
     ]},
-    audio:{title:'Audio',eyebrow:'SOUND & AMBIENCE',fields:[
-      ['effects','Sound effects','Vehicles, footsteps and world sounds.','range'],
-      ['radio','Radio','In-game radio volume.','range'],
-      ['volume','SKR audio','Saved preference; in-game audio support is in progress.','range']
+    browser:{title:'Server browser',eyebrow:'DISCOVER & EXPLORE',fields:[
+      ['directoryMetrics','Directory statistics','Show the public server and player counters in the header.','toggle'],
+      ['compactRows','Compact server list','Fit more servers on screen with smaller directory rows.','toggle']
     ]},
-    controls:{title:'Controls',eyebrow:'KEYBOARD & MOUSE',fields:[
-      ['sensitivity','Mouse sensitivity','Camera movement speed.','range'],
-      ['invert','Invert vertical axis','Invert vertical mouse movement.','toggle'],
-      ['bindings','Key bindings','Native key binding editor is not connected.','binding']
+    privacy:{title:'Privacy',eyebrow:'ON-SCREEN VISIBILITY',fields:[
+      ['hideAddresses','Hide server addresses','Conceal server IPs and addresses in the interface; connections still use them.','toggle']
     ]},
-    interface:{title:'Interface',eyebrow:'HUD & PREFERENCES',fields:[
-      ['hudScale','HUD scale','Size of the HUD elements.','scale'],
-      ['chat','Chatbox','Show chat messages.','toggle'],
-      ['radar','Radar','Show the radar minimap.','toggle']
+    graphics:{title:'Display',eyebrow:'NATIVE DISPLAY',fields:[
+      ['resolution','Resolution','Applied by the launcher on next game start.','select',['Automat','1280 × 720','1366 × 768','1600 × 900','1920 × 1080','2560 × 1440']],
+      ['screen','Window mode','Fullscreen or windowed mode on next launch.','select',['Fullscreen','Fereastră']]
+    ]},
+    audio:{title:'Audio',eyebrow:'NATIVE PREFERENCE',fields:[
+      ['volume','Launcher audio level','Stored through the native settings bridge.','range']
     ]}
   };
 
+  function applyUiPreferences() {
+    document.body.classList.toggle('skr-compact', !!state.interface.compact);
+    document.body.classList.toggle('skr-reduced-motion', !!state.interface.motion);
+    document.body.classList.toggle('skr-browser-compact', !!state.browser.compactRows);
+    document.body.classList.toggle('skr-hide-addresses', !!state.privacy.hideAddresses);
+    var metrics = $('directoryMetrics');
+    if (metrics) metrics.classList.toggle('skr-user-hidden', !state.browser.directoryMetrics);
+  }
+  function saveUiPreferences() {
+    try { localStorage.setItem('skr.enhanced.preferences.v1', JSON.stringify({
+      interface:state.interface,browser:state.browser,privacy:state.privacy
+    })); return true; } catch(e) { return false; }
+  }
   // ── CEF bridge wrappers ─────────────────────────────────────────
   // Reuse the CEF event contract with a string-only WebView2 transport.
   if (window.chrome && window.chrome.webview) {
@@ -454,6 +478,7 @@
           bannerLight: safeImageUrl(s.bannerLight),
           logo: safeImageUrl(s.logo),
           allowedClients: String(s.allowedClients || '').slice(0, 255),
+          skrMode: String(s.skrMode || '').slice(0, 32),
           artwork: String(s.artwork || '').slice(0, 255),
           rulesKnown: s.rulesKnown === true,
           skr: s.skr === true ? true : s.skr === false ? false : null
@@ -697,7 +722,7 @@
         var skrTag = document.createElement('i');
         skrTag.className = server.skr ? 'skr-tag' : 'skr-tag skr-tag--missing';
         skrTag.textContent = server.skr ? 'SKR' : 'NO SKR';
-        skrTag.title = server.skr ? 'Native SKR Client support' : 'No native SKR Client support detected';
+        skrTag.title = server.skr ? 'SKR Enhanced support' : 'No SKR Enhanced support detected';
         row.querySelector('.server-name-line').appendChild(skrTag);
       }
       if (server.personal) {
@@ -802,9 +827,9 @@
     var c = config[currentTab];
     $('tabTitle').textContent = c.title;
     $('tabEyebrow').textContent = c.eyebrow;
-    $('tabIndex').textContent = '0' + (Object.keys(config).indexOf(currentTab) + 1) + ' / 04';
+    $('tabIndex').textContent = '0' + (Object.keys(config).indexOf(currentTab) + 1) + ' / 03';
     $('settingsFields').textContent = '';
-    if ($('fpsEnginePanel')) $('fpsEnginePanel').hidden = currentTab !== 'graphics';
+    // Native FPS panel intentionally hidden until GTA integration is validated.
 
     document.querySelectorAll('[data-tab]').forEach(function (b) {
       var active = b.dataset.tab === currentTab;
@@ -864,7 +889,7 @@
       }
       if (input) {
         input.id = 'setting-' + f[0];
-        var supported = (currentTab === 'graphics' && (f[0] === 'resolution' || f[0] === 'screen')) || (currentTab === 'audio' && f[0] === 'volume');
+        var supported = true;
         input.disabled = !supported;
         if (!supported) hint.textContent = 'Requires a future game adapter update.';
         input.addEventListener(input.type === 'range' ? 'input' : 'change', function () {
@@ -998,6 +1023,20 @@
 
   // ── Navigation / modals ─────────────────────────────────────────
   function showPage(name) {
+    if (name === 'settings') {
+      if (currentPage !== 'settings') settingsReturnPage = currentPage || 'home';
+      if (!pendingSettings) { state = JSON.parse(JSON.stringify(saved)); renderFields(); }
+      currentPage = 'settings';
+      $('launcherShell').classList.add('settings-open');
+      $('headerSettings').setAttribute('aria-expanded', 'true');
+      document.querySelector('.page[data-page="settings"]').hidden = false;
+      $('closeSettings').focus();
+      return;
+    }
+    if (currentPage === 'settings' && !pendingSettings) { state = JSON.parse(JSON.stringify(saved)); renderFields(); }
+    $('launcherShell').classList.remove('settings-open');
+    $('headerSettings').setAttribute('aria-expanded', 'false');
+    document.querySelector('.page[data-page="settings"]').hidden = true;
     currentPage = name;
     document.body.classList.toggle('view-servers', name === 'servers');
     document.querySelectorAll('.page').forEach(function (p) {
@@ -1018,6 +1057,7 @@
     if (previousFocus) previousFocus.focus();
   }
   function startConnect(selected) {
+    if (connectPending) return; // a launch is already in flight
     connectPending = true;
     updateNicknameState(false);
     setConnectionServer(selected);
@@ -1034,7 +1074,7 @@
       hideConnection();
       pendingConnectionServer = null;
       previousRecentEntry = null;
-      toast('Native connection is only available in SKR Client.');
+      toast('Native connection is only available in SKR Enhanced.');
     } else {
       // Native postMessage is not a successful-connect acknowledgement.
       // Save the selected server immediately so the card survives the GTA
@@ -1053,7 +1093,7 @@
     if (action && action.type === 'connect') {
       $('modalTitle').textContent = 'Limited SKR compatibility';
       $('modalText').textContent  = (action.server.name || action.server.address) +
-        ' has no detected SKR Client support. Some in-game features may be unavailable. Connect anyway?';
+        ' has no detected SKR Enhanced support. Advanced features will remain disabled. Connect anyway?';
     } else if (action === 'quit') {
       $('modalTitle').textContent = 'Exit game?';
       $('modalText').textContent  = 'Your current game session will close.';
@@ -1196,6 +1236,10 @@
   $('serverSearch').addEventListener('input', renderServerBrowser);
   document.body.appendChild($('exitToolbar'));
   $('headerSettings').addEventListener('click', function () { showPage('settings'); });
+  $('closeSettings').addEventListener('click', function () { showPage(settingsReturnPage); $('headerSettings').focus(); });
+  document.querySelector('.skr-settings-overlay').addEventListener('click', function (event) {
+    if (event.target === this) { showPage(settingsReturnPage); $('headerSettings').focus(); }
+  });
   $('headerQuit').addEventListener('click', openExitToolbar);
   $('exitCancelButton').addEventListener('click', closeExitToolbar);
   $('exitDesktopButton').addEventListener('click', function () {
@@ -1208,6 +1252,21 @@
   $('homeFavorites').addEventListener('click', function () { showPage('servers'); setServerFilter('favorites'); });
   $('homeHistory').addEventListener('click', function () { showPage('servers'); setServerFilter('history'); });
   $('homeAddServer').addEventListener('click', openAddServer);
+  var createServerFocus = null;
+  function closeCreateServer() {
+    $('createServerModal').hidden = true;
+    if (createServerFocus && typeof createServerFocus.focus === 'function') createServerFocus.focus();
+  }
+  $('homeCreateServer').addEventListener('click', function () {
+    createServerFocus = document.activeElement;
+    $('createServerModal').hidden = false;
+    $('cancelCreateServer').focus();
+  });
+  $('cancelCreateServer').addEventListener('click', closeCreateServer);
+  $('createServerModal').addEventListener('click', function (event) {
+    if (event.target === $('createServerModal')) closeCreateServer();
+  });
+
   $('homeRefresh').addEventListener('click', function () { $('refreshServers').click(); });
 
   $('refreshServers').addEventListener('click', function () {
@@ -1264,6 +1323,15 @@
   });
   $('applyChanges').addEventListener('click', function () {
     if (pendingSettings) return;
+    var nativeChanged = state.graphics.resolution !== saved.graphics.resolution ||
+      state.graphics.screen !== saved.graphics.screen || state.audio.volume !== saved.audio.volume;
+    if (!nativeChanged) {
+      if (!saveUiPreferences()) { toast('Could not store local preferences.'); return; }
+      saved = JSON.parse(JSON.stringify(state));
+      applyUiPreferences(); updateDirty(); renderServerBrowser();
+      toast('Launcher preferences saved.');
+      return;
+    }
     pendingSettings = JSON.parse(JSON.stringify(state));
     updateDirty();
     var payload = {
@@ -1272,15 +1340,12 @@
       volume: state.audio.volume
     };
     if (!cefEmit('skr:lobby:settings:save', JSON.stringify(payload))) {
-      pendingSettings = null;
-      updateDirty();
-      toast('Saving requires the native SKR Client bridge.');
-      return;
+      pendingSettings = null; updateDirty();
+      toast('Native bridge is required to save display/audio settings.'); return;
     }
     settingsTimer = setTimeout(function () {
-      pendingSettings = null;
-      updateDirty();
-      toast('The client did not confirm saving. Changes remain unapplied.');
+      pendingSettings = null; updateDirty();
+      toast('Native save not confirmed. Changes remain unapplied.');
     }, 4000);
   });
   $('cancelModal').addEventListener('click', closeModal);
@@ -1294,6 +1359,10 @@
 
   document.addEventListener('keydown', function (e) {
     if (!$('externalLinkModal').hidden) { handleExternalKeys(e); return; }
+    if (!$('createServerModal').hidden) {
+      if (e.key === 'Escape') { e.preventDefault(); closeCreateServer(); }
+      return;
+    }
     if (!$('addServerModal').hidden) {
       if (e.key === 'Escape') { e.preventDefault(); closeAddServer(); return; }
       if (e.key === 'Tab') {
@@ -1309,8 +1378,18 @@
       if (e.shiftKey && document.activeElement === a) { e.preventDefault(); b.focus(); }
       else if (!e.shiftKey && document.activeElement === b) { e.preventDefault(); a.focus(); }
     }
+    if (currentPage === 'settings' && e.key === 'Tab' && $('confirmModal').hidden && $('connectionModal').hidden) {
+      var modal = document.querySelector('.skr-settings-overlay .settings-layout');
+      var controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled])'), function (el) { return el.offsetParent !== null; });
+      if (controls.length) {
+        var firstControl = controls[0], lastControl = controls[controls.length - 1];
+        if (e.shiftKey && document.activeElement === firstControl) { e.preventDefault(); lastControl.focus(); }
+        else if (!e.shiftKey && document.activeElement === lastControl) { e.preventDefault(); firstControl.focus(); }
+      }
+    }
     if (e.key === 'Escape') {
       e.preventDefault();
+      if (currentPage === 'settings') { showPage(settingsReturnPage); $('headerSettings').focus(); return; }
       if (!$('exitToolbar').hidden) { closeExitToolbar(); return; }
       if (!$('confirmModal').hidden) { closeModal(); return; }
       if (!$('profilePopover').hidden) { setProfileOpen(false); return; }
@@ -1331,6 +1410,9 @@
     if (!pendingSettings) return;
     saved = pendingSettings;
     pendingSettings = null;
+    saveUiPreferences();
+    applyUiPreferences();
+    renderServerBrowser();
     updateDirty();
     toast('Preferences saved. Display changes apply on next launch.');
   });
@@ -1436,13 +1518,96 @@
     '<div class="launch-cover__body"><div class="launch-cover__eyebrow"><span></span> SAN ANDREAS MULTIPLAYER</div>' +
       '<h1>YOUR WORLD.<br><em>IS LOADING.</em></h1><p class="launch-cover__subtitle" id="skrLaunchStatus">Preparing your session…</p>' +
       '<div class="launch-cover__server"><div class="launch-cover__server-icon">↗</div><div><small>CONNECTING TO</small><strong id="skrLaunchServer">Multiplayer server</strong><span id="skrLaunchAddress">Starting San Andreas</span></div></div>' +
-      '<div class="launch-cover__progress"><div class="launch-cover__track"><span></span></div><div class="launch-cover__progress-labels"><span id="skrLaunchPhase">LAUNCHING GAME</span><span>SKR CLIENT</span></div></div>' +
-    '</div><div class="launch-cover__footer"><span>SKR CLIENT <i>·</i> SAN ANDREAS MULTIPLAYER</span><button id="skrLaunchCancel" type="button">Cancel launch <span aria-hidden="true">×</span></button></div>';
+      '<div class="launch-cover__progress"><div class="launch-cover__track"><span></span></div><div class="launch-cover__progress-labels"><span id="skrLaunchPhase">LAUNCHING GAME</span><span id="skrLaunchMode">SKR ENHANCED</span></div></div>' +
+      '<ol class="launch-cover__steps" id="skrLaunchSteps"></ol>' +
+    '</div><div class="launch-cover__footer"><span>SKR ENHANCED <i>·</i> SAN ANDREAS MULTIPLAYER</span><button id="skrLaunchCancel" type="button">Cancel launch <span aria-hidden="true">×</span></button></div>';
   document.body.appendChild(launchCover);
-  function updateLaunchCoverStatus(message, phase) {
+  function updateLaunchCoverStatus(message, phase, fromStage) {
     if (!launchCover || launchCover.hidden) return;
+    // While the native stage machine is driving, it is the only writer.
+    if (!fromStage && launchStageIndex >= 0) return;
     $('skrLaunchStatus').textContent = message;
     $('skrLaunchPhase').textContent = phase;
+  }
+
+  // Mirrors LaunchStage in apps/launcher/lobby_window.cpp. The order is the
+  // contract: stages only move forward, so a late or repeated native event
+  // can never light up a later step. No step shows a percentage, because the
+  // launcher has no byte-level signal to show one from.
+  var LAUNCH_STEPS = [
+    { key: 'preflight',     label: 'Server preflight',    phase: 'CHECKING SERVER',
+      status: 'Checking the server…',    detail: 'Reading the native query response from the server.' },
+    { key: 'starting',      label: 'San Andreas started', phase: 'STARTING GAME',
+      status: 'Starting San Andreas…', detail: 'The game process is running and suspended.' },
+    { key: 'injecting',     label: 'SKR client loaded',   phase: 'LOADING CLIENT',
+      status: 'Loading the SKR client…', detail: 'SKR.Client.dll is attaching to the game.' },
+    { key: 'client-ready',  label: 'SKR client ready',    phase: 'CLIENT READY',
+      status: 'SKR client is ready…',  detail: 'Render hooks and anti-cheat reported ready.' },
+    { key: 'waiting-frame', label: 'First frame',         phase: 'LOADING WORLD',
+      status: 'San Andreas is loading…', detail: 'Waiting for the game to draw its first frame.' },
+    { key: 'handoff',       label: 'Handed to the game',  phase: 'ENTERING WORLD',
+      status: 'Entering San Andreas…',  detail: '' },
+    { key: 'session-ready', label: 'Session ready',       phase: 'SESSION READY',
+      status: 'Session ready.',          detail: '' }
+  ];
+  var launchStageIndex = -1;
+  var launchServerMode = '';
+  function launchStepIndex(key) {
+    for (var i = 0; i < LAUNCH_STEPS.length; i++) if (LAUNCH_STEPS[i].key === key) return i;
+    return -1;
+  }
+  // Resource sync runs inside the game client. The launcher cannot see its
+  // file or byte counts, so it names the owner instead of inventing progress.
+  function launchStepDetail(step, index) {
+    if (launchServerMode === 'enhanced' && index >= launchStepIndex('handoff'))
+      return 'Resource synchronization managed by game client.';
+    return step.detail || '';
+  }
+  function renderLaunchSteps() {
+    var host = $('skrLaunchSteps');
+    if (!host) return;
+    var failed = launchCover.classList.contains('launch-cover--failed');
+    host.textContent = '';
+    LAUNCH_STEPS.forEach(function (step, i) {
+      var state = i < launchStageIndex ? 'done'
+                : i === launchStageIndex ? (failed ? 'failed' : 'active')
+                : 'pending';
+      var item = document.createElement('li');
+      item.className = 'launch-step launch-step--' + state;
+      var mark = document.createElement('i');
+      mark.setAttribute('aria-hidden', 'true');
+      mark.textContent = state === 'done' ? '✓' : state === 'failed' ? '!' : '';
+      var text = document.createElement('span');
+      text.textContent = step.label;
+      item.appendChild(mark);
+      item.appendChild(text);
+      if (state === 'active' || state === 'failed') {
+        item.setAttribute('aria-current', 'step');
+        var detail = launchStepDetail(step, i);
+        if (detail && !failed) {
+          var note = document.createElement('small');
+          note.textContent = detail;
+          item.appendChild(note);
+        }
+      }
+      host.appendChild(item);
+    });
+  }
+  function setLaunchStage(key) {
+    var next = launchStepIndex(key);
+    if (next < 0 || next <= launchStageIndex) return;
+    launchStageIndex = next;
+    var step = LAUNCH_STEPS[next];
+    updateLaunchCoverStatus(step.status, step.phase, true);
+    showConnection(step.status, launchStepDetail(step, next));
+    renderLaunchSteps();
+  }
+  function resetLaunchStages() {
+    launchStageIndex = -1;
+    launchServerMode = '';
+    var mode = $('skrLaunchMode');
+    if (mode) mode.textContent = 'SKR ENHANCED';
+    renderLaunchSteps();
   }
   function showLaunchCover(server) {
     var s = server || pendingConnectionServer;
@@ -1455,6 +1620,7 @@
     $('skrLaunchPhase').textContent = 'LAUNCHING GAME';
     $('skrLaunchCancel').firstChild.textContent = 'Cancel launch ';
     launchCover.hidden = false;
+    resetLaunchStages();
   }
   $('skrLaunchCancel').addEventListener('click', function () {
     updateLaunchCoverStatus('Cancelling launch…', 'CANCELLING');
@@ -1473,12 +1639,28 @@
     $('skrLaunchStatus').textContent = String(message || 'Unable to launch San Andreas.');
     $('skrLaunchPhase').textContent = 'LAUNCH FAILED';
     $('skrLaunchCancel').firstChild.textContent = 'Back to launcher ';
+    renderLaunchSteps();
   });
   cefOn('skr:launch:idle', function (message) {
     launchCover.hidden = true;
     launchCover.classList.remove('launch-cover--failed');
+    resetLaunchStages();
     connectPending = false; hideConnection(); updateNicknameState(false);
     if (message) toast(String(message));
+  });
+  cefOn('skr:launch:stage', function (key) { setLaunchStage(String(key || '')); });
+  cefOn('skr:launch:server-mode', function (mode) {
+    launchServerMode = String(mode || '');
+    var el = $('skrLaunchMode');
+    if (el) el.textContent = launchServerMode === 'enhanced' ? 'SKR ENHANCED'
+                           : launchServerMode === 'standard' ? 'STANDARD SA-MP'
+                           : 'SERVER MODE UNKNOWN';
+    renderLaunchSteps();
+  });
+  cefOn('skr:connection:rejected', function (message) {
+    connectPending = false;
+    hideConnection();
+    toast(String(message || '[UNKNOWN_REJECTION] The server rejected the connection.'));
   });
   // Details resolve current data by ID on each update, never a stale copied server.
   function detailServer() { return allServers().filter(function (s) { return s.id === detailsId; })[0]; }
@@ -1517,7 +1699,6 @@
       fact('Map', (info && info.online && info.map) || s.map);
       fact('Version', (info && info.online && info.version) || s.version);
       fact('Supported clients', info && info.online && info.allowedClients);
-      fact('Runtime', info && info.rulesKnown ? (info.skrProtocol === '2' ? 'SKR Enhanced' : info.skrProtocol ? 'SKR (incompatible version)' : 'Standard') : 'Unconfirmed');
       fact('Address', s.address);
     }
     var links = $('detailsLinks');
@@ -1556,6 +1737,58 @@
     resourceStatus.textContent = !s ? 'Unavailable' : resources.childElementCount ? 'Server-advertised' :
       info && info.rulesKnown ? 'No resource details advertised' :
       detailsQueryAt[s.address] && !info ? 'Checking live query…' : 'Not available';
+
+    // ── Client Access panel ──────────────────────────
+    // The server advertises display names via the `allowed_clients` rule
+    // ("SA-MP 0.3.7, SKR Client, open.mp") and its policy mode via `skr_mode`.
+    var clientAccessSection = document.querySelector('.server-details__client-access');
+    var clientBadges = $('detailsClientAccess');
+    if (clientAccessSection && clientBadges) {
+      clientBadges.textContent = '';
+      var clientList = info && info.online && info.allowedClients ? info.allowedClients.trim() : '';
+      var skrMode = info && info.online ? String(info.skrMode || '').trim().toLowerCase() : '';
+      if (clientList) {
+        // Match on a normalised key so both advertised display names and raw
+        // config identifiers resolve to the same badge.
+        var clientKinds = [
+          { test: /^samp0?3dl$/,            label: 'SA-MP 0.3.DL', cls: 'badge--samp' },
+          { test: /^samp/,                  label: 'SA-MP 0.3.7',  cls: 'badge--samp' },
+          { test: /^(skr|skrclient|skrenhanced)/, label: 'SKR Client', cls: 'badge--skr' },
+          { test: /^(openmp|omp)/,          label: 'open.mp',      cls: 'badge--omp' }
+        ];
+        clientList.split(',').forEach(function (raw) {
+          var name = raw.trim();
+          if (!name) return;
+          var key = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (!key) return;
+          var meta = null;
+          for (var i = 0; i < clientKinds.length; i++) {
+            if (clientKinds[i].test.test(key)) { meta = clientKinds[i]; break; }
+          }
+          var badge = document.createElement('span');
+          badge.className = 'client-badge ' + (meta ? meta.cls : 'badge--generic');
+          badge.textContent = meta ? meta.label : name.slice(0, 32);
+          clientBadges.appendChild(badge);
+        });
+        if (skrMode) {
+          var modeMeta = skrMode === 'hybrid'
+              ? { label: 'Hybrid mode', cls: 'badge--hybrid', title: 'Accepts both legacy SA-MP clients and the SKR Enhanced client.' }
+            : skrMode === 'enhanced'
+              ? { label: 'Enhanced only', cls: 'badge--enhanced', title: 'Requires the SKR Enhanced client.' }
+            : skrMode === 'standard'
+              ? { label: 'Standard mode', cls: 'badge--standard', title: 'Legacy SA-MP clients only.' }
+              : { label: skrMode.slice(0, 24), cls: 'badge--generic', title: '' };
+          var modeBadge = document.createElement('span');
+          modeBadge.className = 'client-badge client-badge--mode ' + modeMeta.cls;
+          modeBadge.textContent = modeMeta.label;
+          if (modeMeta.title) modeBadge.title = modeMeta.title;
+          clientBadges.appendChild(modeBadge);
+        }
+        clientAccessSection.hidden = false;
+      } else {
+        clientAccessSection.hidden = true;
+      }
+    }
 
     $('detailsConnect').dataset.serverId = s ? s.id : '';
     $('detailsConnect').dataset.connectable = s && s.address ? 'true' : 'false';
@@ -1617,7 +1850,28 @@
   function interceptExternal(e) {
     var anchor = e.target.closest && e.target.closest('a[href]');
     if (!anchor || anchor.getAttribute('href').charAt(0) === '#') return;
-    e.preventDefault(); e.stopPropagation(); confirmExternal(anchor);
+    e.preventDefault(); e.stopPropagation();
+
+    // Trusted header links and the two footer partner links open immediately.
+    // Keep the confirmation dialog for arbitrary external links elsewhere.
+    var trustedEcosystemLink = anchor.closest('.header-links') || anchor.closest('.footer-ecosystem');
+    if (trustedEcosystemLink) {
+      var href = anchor.getAttribute('href');
+      var trusted = {
+        'https://open.mp/': true,
+        'https://www.sa-mp.com/': true,
+        'https://skr-server.com/': true
+      };
+      if (!trusted[href]) { confirmExternal(anchor); return; }
+      if (location.hostname === 'skr-launcher.invalid') {
+        if (!cefEmit('skr:external:open', href))
+          toast('Could not contact the launcher to open this website.');
+      } else {
+        window.open(href, '_blank', 'noopener,noreferrer');
+      }
+      return;
+    }
+    confirmExternal(anchor);
   }
   document.addEventListener('click', interceptExternal, true);
   document.addEventListener('auxclick', function (e) { if (e.button === 1) interceptExternal(e); }, true);
@@ -1707,4 +1961,18 @@
   requestLoad();
   if (!cefEmit('skr:fps:get')) fpsSetStatus('FPS preferences available in SKRLauncher.');
   preloadAssets();
+})();
+
+// Wordmarks are supplied locally by the user; missing images keep text fallback.
+(function () {
+  function initFooterLogos() {
+    document.querySelectorAll('img[data-partner-logo]').forEach(function (img) {
+      function sync() { img.parentElement.classList.toggle('has-logo', img.complete && img.naturalWidth > 0); }
+      img.addEventListener('load', sync);
+      img.addEventListener('error', sync);
+      sync();
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initFooterLogos);
+  else initFooterLogos();
 })();

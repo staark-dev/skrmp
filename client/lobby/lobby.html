@@ -4,22 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#090a0a">
-  <title>SKR Client — Multiplayer Launcher</title>
+  <title>SKR Enhanced v1.0.0 — Multiplayer Launcher</title>
   <link rel="stylesheet" href="lobby.css">
   <script src="lobby.js" defer></script>
 </head>
 <body class="in-game loading">
   <div class="splash" id="splash" aria-live="polite">
-    <div class="splash__content"><div class="splash__logo">SKR<span>.</span></div><div class="splash__sub">MULTIPLAYER CLIENT</div><div class="splash__bar"><div class="splash__fill" id="splashFill"></div></div><div class="splash__status" id="splashStatus">Loading interface…</div></div>
+    <div class="splash__content"><div class="splash__logo">SKR<span>.</span></div><div class="splash__sub">ENHANCED · V1.0.0</div><div class="splash__bar"><div class="splash__fill" id="splashFill"></div></div><div class="splash__status" id="splashStatus">Loading interface…</div></div>
   </div>
 
   <div class="shell" id="launcherShell">
     <header class="header">
       <div class="header__left">
-        <a class="brand" href="#" id="brandLink" aria-label="SKR Client home"><strong>SKR<span>.</span></strong><span>CLIENT<small>MULTIPLAYER</small></span></a>
+        <a class="brand" href="#" id="brandLink" aria-label="SKR Enhanced home"><span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span></a>
         <nav id="navigation" aria-label="Main navigation"></nav>
         <div class="header-links" aria-label="Community links">
-          <a href="https://open.mp/" target="_blank" rel="noopener noreferrer" title="open.mp official website">open.mp <span aria-hidden="true">↗</span></a>
+          <span class="ecosystem-label">BUILT AROUND</span><a href="https://open.mp/" target="_blank" rel="noopener noreferrer" title="open.mp official website">open.mp <span aria-hidden="true">↗</span></a><a href="https://www.sa-mp.com/" target="_blank" rel="noopener noreferrer" title="SA-MP website">SA-MP <span aria-hidden="true">↗</span></a>
           <a href="https://skr-server.com/" target="_blank" rel="noopener noreferrer" title="SKR community forum">Forum <span aria-hidden="true">↗</span></a>
         </div>
       </div>
@@ -30,15 +30,15 @@
         </div>
         <span class="mode-label" id="modeLabel">READY</span>
         <div class="player-profile">
-          <button class="player-profile__button" id="profileToggle" type="button" aria-expanded="false" title="Edit nickname"><span class="player-avatar" id="playerAvatar">?</span><span class="player-profile__copy"><small>PLAYER</small><strong id="playerName">Set nickname</strong></span><span class="player-profile__status" id="playerStatus"></span><span class="player-profile__chevron">⌄</span></button>
+          <button class="player-profile__button" id="profileToggle" type="button" aria-expanded="false" title="Edit nickname"><span class="player-avatar" id="playerAvatar">?</span><span class="player-profile__copy"><small>PLAYER</small><strong id="playerName">Set nickname</strong></span><span class="player-profile__status" id="playerStatus"></span></button>
           <div class="profile-popover" id="profilePopover" hidden>
-            <span class="eyebrow">YOUR IDENTITY</span><h2>Player profile</h2><p>This nickname is used when connecting to multiplayer servers.</p>
+            <div class="profile-popover__header"><span class="profile-popover__avatar" aria-hidden="true">◈</span><div><h2>Player profile</h2><p>Choose your multiplayer nickname</p></div></div>
             <label for="nickname">Nickname</label><div class="profile-popover__field"><input class="nickname-input" id="nickname" type="text" minlength="3" maxlength="24" autocomplete="off" spellcheck="false" placeholder="e.g. Staark" aria-describedby="nicknameHint nicknameError"><span class="nickname-check" id="nicknameValid" hidden>✓</span></div>
             <div class="nickname-feedback"><span id="nicknameHint">3–24 characters: letters, digits and _</span><span class="nickname-error" id="nicknameError" role="status"></span></div>
             <button class="button button--gold profile-save" id="saveNickname" type="button" disabled>Save profile</button>
           </div>
         </div>
-        <button id="headerSettings" class="icon-button" aria-label="Settings" title="Settings" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.6a3.6 3.6 0 1 0 0-7.2 3.6 3.6 0 0 0 0 7.2Z"/><path d="M19.2 12a7.5 7.5 0 0 0-.1-1.2l2-1.6-2-3.4-2.5 1a8 8 0 0 0-2.1-1.2L14.1 3h-4.2l-.4 2.6a8 8 0 0 0-2.1 1.2l-2.5-1-2 3.4 2 1.6a8 8 0 0 0 0 2.4l-2 1.6 2 3.4 2.5-1a8 8 0 0 0 2.1 1.2l.4 2.6h4.2l.4-2.6a8 8 0 0 0 2.1-1.2l2.5 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z"/></svg></button>
+        <button id="headerSettings" class="icon-button" aria-expanded="false" aria-controls="settingsModalTitle" aria-label="Settings" title="Settings" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.6a3.6 3.6 0 1 0 0-7.2 3.6 3.6 0 0 0 0 7.2Z"/><path d="M19.2 12a7.5 7.5 0 0 0-.1-1.2l2-1.6-2-3.4-2.5 1a8 8 0 0 0-2.1-1.2L14.1 3h-4.2l-.4 2.6a8 8 0 0 0-2.1 1.2l-2.5-1-2 3.4 2 1.6a8 8 0 0 0 0 2.4l-2 1.6 2 3.4 2.5-1a8 8 0 0 0 2.1 1.2l.4 2.6h4.2l.4-2.6a8 8 0 0 0 2.1-1.2l2.5 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z"/></svg></button>
         <button id="headerQuit" class="icon-button icon-button--exit" aria-label="Exit to desktop" title="Exit to desktop" type="button">×</button>
       </div>
       <div class="exit-toolbar" id="exitToolbar" hidden role="dialog" aria-modal="true" aria-label="Confirm exit">
@@ -51,21 +51,29 @@
         <div class="home-layout">
           <div class="home-primary">
             <div class="home-top-row">
-              <button class="quick-browse home-tile" id="homeBrowse" type="button"><span class="quick-browse__art" aria-hidden="true"><span class="quick-browse__grid"></span><span class="quick-browse__skyline"></span></span><span class="quick-browse__top">EXPLORE SAN ANDREAS</span><span class="quick-browse__title">Find your next<br>server<span>.</span></span><span class="quick-browse__bottom">BROWSE SERVERS <b>↗</b></span></button>
+              <button class="quick-browse home-tile" id="homeBrowse" type="button"><span class="quick-browse__art" aria-hidden="true"><span class="quick-browse__grid"></span><span class="quick-browse__skyline"></span></span><span class="quick-browse__top"><i class="signal-pulse"></i> SKR ENHANCED / NETWORK</span><span class="quick-browse__title">YOUR WORLD.<br><em>YOUR RULES.</em></span><span class="quick-browse__sub">One launcher. Every way to play San Andreas multiplayer.</span><span class="quick-browse__bottom">DISCOVER SERVERS <b>↗</b></span></button>
               <div class="last-server home-tile"><div class="tile-heading">LAST SERVER<span class="tiny-pill" id="lastServerBadge">NONE</span></div><div id="lastServerContent" class="last-server__content"><div class="placeholder-icon">⌁</div><div><strong>No recent sessions</strong><small>Your latest server launch will show here.</small></div></div><div class="last-server__footer"><span id="lastServerMeta">Ready for multiplayer</span><button type="button" id="lastServerConnect" data-action="connect" data-server-id="" class="button button--outline" data-connectable="false" disabled>Connect ↗</button></div></div>
               <div class="home-side-stack"><button id="homeFavorites" class="home-mini home-tile" type="button"><span>FAVORITES</span><b>♡</b><small id="favoritesCount">Save servers you love</small></button><button id="homeHistory" class="home-mini home-tile" type="button"><span>HISTORY</span><b>↺</b><small id="historyCount">Recently launched servers</small></button></div>
             </div>
-            <div class="section-heading"><div><span class="section-heading__kicker">THE MULTIPLAYER WORLD</span><h2>DISCOVER SERVERS <span class="online-pip"></span></h2></div><button class="subtle-link" id="homeViewAll" type="button">View all servers <span>↗</span></button></div>
-            <div class="featured-server" id="featuredServer"><div id="featuredServerBanner" class="featured-server__banner" hidden></div><div class="featured-server__ambient"></div><div class="featured-server__content"><span class="featured-server__tag">DISCOVER A PUBLIC SERVER</span><div class="featured-server__identity"><div class="featured-server__logo">SKR</div><div><h3>Make San Andreas yours.</h3><p>Choose a community and start playing.</p></div></div><p class="featured-server__desc" id="featuredDescription">Discover servers, save favorites and connect directly from SKR Client.</p><div class="featured-server__meta" id="featuredMeta"><span>Live server directory</span><span>Multiplayer</span></div></div><div class="featured-server__bottom"><button id="featuredConnect" type="button" class="button button--outline" data-action="connect" data-connectable="false" data-server-id="" disabled>Connect ↗</button><button id="featuredDetails" type="button" class="feature-detail">Browse servers →</button></div></div>
-            <div class="home-lower"><div class="home-info-strip"><span class="dot dot--green"></span><span id="homeDirectoryStatus">Checking server directory…</span><button id="homeRefresh" class="small-refresh" type="button" title="Refresh servers">↻</button></div><button class="home-create" id="homeAddServer" type="button"><span>DIRECT CONNECT</span><small>Have a server address? Add it here.</small><b>↗</b></button></div>
+            <div class="section-heading"><div><span class="section-heading__kicker">01 / EXPLORE THE NETWORK</span><h2>FEATURED COMMUNITY <span class="online-pip"></span></h2></div><button class="subtle-link" id="homeViewAll" type="button">View all servers <span>↗</span></button></div>
+            <div class="featured-server" id="featuredServer"><div id="featuredServerBanner" class="featured-server__banner" hidden></div><div class="featured-server__ambient"></div><div class="featured-server__content"><span class="featured-server__tag">◆ LIVE FROM THE DIRECTORY</span><div class="featured-server__identity"><div class="featured-server__logo"><span>MP</span></div><div><h3>Make San Andreas yours.</h3><p>Choose a community and start playing.</p></div></div><p class="featured-server__desc" id="featuredDescription">Explore multiplayer servers with SKR Enhanced. Standard SA-MP/open.mp support, with enhanced features on compatible runtimes.</p><div class="featured-server__meta" id="featuredMeta"><span>Live server directory</span><span>Multiplayer</span></div></div><div class="featured-server__bottom"><button id="featuredConnect" type="button" class="button button--outline" data-action="connect" data-connectable="false" data-server-id="" disabled>Connect ↗</button><button id="featuredDetails" type="button" class="feature-detail">Browse servers →</button></div></div>
+            <div class="home-lower"><div class="home-info-strip"><span class="dot dot--green"></span><span id="homeDirectoryStatus">Checking server directory…</span><button id="homeRefresh" class="small-refresh" type="button" title="Refresh servers">↻</button></div><div class="home-server-actions"><button class="home-create" id="homeAddServer" type="button"><span>DIRECT CONNECT</span><small>Connect to an existing server.</small><b>↗</b></button><button class="home-create home-create--new" id="homeCreateServer" type="button"><span>CREATE A SERVER</span><small>Server portal · Coming Soon</small><b class="create-server-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg></b></button></div></div>
           </div>
-          <aside class="home-aside"><div class="aside-heading"><span>SKR CLIENT</span><span class="aside-live">MULTIPLAYER</span></div><div class="aside-feature"><div class="aside-emblem">S<span>K</span>R<span class="emblem-dot">.</span></div><div class="aside-feature__bottom"><span>WELCOME TO SKR CLIENT</span><h3>Your game.<br>Your servers.</h3><p>A dedicated launcher for exploring San Andreas multiplayer. Fast access to servers, favorites and your next session.</p></div></div><div class="aside-row"><span>SERVER BROWSER</span><span>OPEN.MP / SA-MP</span></div><div class="aside-row"><span>CLIENT STATUS</span><span class="status-ready"><i></i> READY</span></div><div class="aside-bottom"><span>BUILT FOR THE GAME.</span><small>Not another web dashboard.</small></div></aside>
+          <aside class="home-aside"><div class="aside-heading"><span>02 / THE PLATFORM</span><span class="aside-live">ENHANCED · V1</span></div><div class="aside-feature"><div class="aside-feature__bottom"><span>AN EXTENSION. NOT A REPLACEMENT.</span><h3>Classic roots.<br>Next-level worlds.</h3><p>Connect to SA-MP/open.mp servers normally. SKR Runtime servers can unlock advanced client features after compatibility verification.</p></div></div><div class="ecosystem-panel" aria-label="Compatible multiplayer ecosystem"><div class="ecosystem-panel__header"><span>COMPATIBLE ECOSYSTEM</span><span class="ecosystem-panel__marker">↗</span></div><div class="ecosystem-tiles"><a href="https://open.mp/" target="_blank" rel="noopener noreferrer" class="ecosystem-tile"><span class="ecosystem-tile__mark omp-mark">open<span>.</span>mp</span><small>OPEN MULTIPLAYER</small></a><a href="https://www.sa-mp.com/" target="_blank" rel="noopener noreferrer" class="ecosystem-tile"><span class="ecosystem-tile__mark samp-mark">SA<span>:</span>MP</span><small>CLASSIC MULTIPLAYER</small></a></div><p class="ecosystem-disclaimer">Independent SKR project · compatibility references, not official endorsements.</p></div><div class="aside-bottom"><span><i class="signal-pulse"></i> PLATFORM STATUS</span><small>SKR Enhanced interface · v1.0.0 design</small></div></aside>
         </div>
       </section>
 
       <section class="page servers-page" data-page="servers" hidden>
-        <div class="server-toolbar"><div class="server-toolbar__title"><span class="eyebrow">EXPLORE MULTIPLAYER</span><h1>Browse servers<span class="title-dot">.</span></h1><p><span class="catalog-dot"></span><span id="directoryStatus">Checking server directory…</span></p></div><div class="server-tools"><button class="server-filter active" type="button" data-server-filter="all">All servers</button><button class="server-filter" type="button" data-server-filter="recommended">Featured</button><button class="server-filter" type="button" data-server-filter="favorites">Favorites</button><button class="server-filter" type="button" data-server-filter="history">History</button><label class="server-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg><input id="serverSearch" type="search" placeholder="Search servers…" aria-label="Search servers"></label><button class="server-add" id="addServerButton" type="button" aria-haspopup="dialog"><span>＋</span> Add server</button><button class="directory-refresh" id="refreshServers" type="button" aria-label="Refresh server list">↻</button></div></div>
-        <div class="inline-server-panel"><div class="inline-server-heading"><span>SERVER</span><span>MODE</span><span>PLAYERS</span><span>LATENCY</span><span id="serverCount">0 SERVERS</span></div><div class="public-server-list public-server-list--inline" id="publicServerList"><div class="server-list-state">Loading multiplayer servers…</div></div></div>
+        <div class="browser-heading">
+          <div class="browser-heading__copy"><span class="eyebrow">SKR ENHANCED / SERVER DIRECTORY</span><h1>Find your next <em>world.</em></h1><p>Discover SA-MP and open.mp communities. Connect to any compatible server.</p></div>
+          <div class="browser-heading__actions"><div class="browser-live"><span class="catalog-dot"></span><span id="directoryStatus">Checking server directory…</span></div><button class="directory-refresh" id="refreshServers" type="button" aria-label="Refresh server list" title="Refresh server list">↻</button><button class="server-add" id="addServerButton" type="button" aria-haspopup="dialog"><span>＋</span> Add server</button></div>
+        </div>
+        <div class="browser-workspace">
+          <div class="browser-filterbar"><div class="browser-filterbar__tabs" aria-label="Server filters"><button class="server-filter active" type="button" data-server-filter="all">All servers</button><button class="server-filter" type="button" data-server-filter="recommended">Featured</button><button class="server-filter" type="button" data-server-filter="favorites">Favorites</button><button class="server-filter" type="button" data-server-filter="history">History</button></div><label class="server-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg><input id="serverSearch" type="search" placeholder="Search by name, mode or language…" aria-label="Search servers"></label></div>
+          <div class="browser-results-bar"><div><span class="browser-results-icon">▦</span><strong>AVAILABLE WORLDS</strong><span class="browser-results-note">Live directory and your saved servers</span></div><strong id="serverCount">0 SERVERS</strong></div>
+          <div class="inline-server-panel"><div class="inline-server-heading"><span>SERVER / COMMUNITY</span><span>GAMEMODE</span><span>PLAYERS</span><span>LATENCY</span><span>ACTIONS</span></div><div class="public-server-list public-server-list--inline" id="publicServerList"><div class="server-list-state">Loading multiplayer servers…</div></div></div>
+          <div class="browser-bottom"><span><i></i> Independent launcher · SA-MP / open.mp ecosystem</span><span>Choose a community and connect ↗</span></div>
+        </div>
       </section>
 
       <section class="page server-details" data-page="details" hidden aria-labelledby="detailsName">
@@ -76,6 +84,7 @@
           <div class="server-details__identity"><span class="eyebrow">SERVER DETAILS</span><h1 id="detailsName" tabindex="-1"></h1><p id="detailsDescription"></p><p id="detailsStatus" role="status"></p></div>
           <dl id="detailsFacts" class="server-details__facts"></dl>
           <div id="detailsLinks" class="server-details__links" hidden></div>
+          <div class="server-details__sidebar">
           <section class="server-details__resources" aria-labelledby="detailsResourcesTitle">
             <div class="server-details__resources-heading">
               <div><span class="eyebrow">SERVER CONTENT</span><h2 id="detailsResourcesTitle">Resources</h2></div>
@@ -84,6 +93,14 @@
             <div id="detailsResources" class="server-details__resources-list" aria-live="polite"></div>
             <p class="server-details__resources-note">Server-advertised capabilities only — not a downloadable resource manifest.</p>
           </section>
+          <section class="server-details__client-access" aria-labelledby="detailsClientAccessTitle" hidden>
+            <div class="server-details__client-access-heading">
+              <div><span class="eyebrow">CLIENT COMPATIBILITY</span><h2 id="detailsClientAccessTitle">Client Access</h2></div>
+            </div>
+            <div id="detailsClientAccess" class="server-details__client-badges"></div>
+            <p class="server-details__client-access-note">Advertised by the server — your client must match one of these types to connect.</p>
+          </section>
+          </div>
           <div class="server-details__actions">
             <button id="detailsConnect" class="button button--gold" type="button" data-action="connect">Connect ↗</button>
             <button id="detailsFavorite" class="button button--secondary" type="button">Favorite</button>
@@ -92,25 +109,50 @@
           <p id="detailsCopyStatus" role="status"></p>
         </div>
       </section>
-      <section class="page" data-page="settings" hidden><div class="page-heading"><div><span class="eyebrow">MAKE IT YOURS</span><h1>Settings<span class="title-dot">.</span></h1></div><p>Adjust your launcher and game preferences.</p></div><div class="settings-layout"><aside class="categories" aria-label="Settings categories"><button data-tab="graphics" class="category active"><span class="category__number">01</span><span>Graphics<small>Display &amp; performance</small></span><i>↗</i></button><button data-tab="audio" class="category"><span class="category__number">02</span><span>Audio<small>Sound &amp; volume</small></span><i>↗</i></button><button data-tab="controls" class="category"><span class="category__number">03</span><span>Controls<small>Keyboard &amp; mouse</small></span><i>↗</i></button><button data-tab="interface" class="category"><span class="category__number">04</span><span>Interface<small>HUD &amp; display</small></span><i>↗</i></button><div class="category-note">GAME SETTINGS<span>Only settings supported by the current native adapter can be applied.</span></div></aside><div class="settings-panel"><div class="panel-heading"><div><span class="eyebrow" id="tabEyebrow">DISPLAY &amp; PERFORMANCE</span><h2 id="tabTitle">Graphics</h2></div><span class="panel-index" id="tabIndex">01 / 04</span></div><div id="settingsFields"></div>
-<div id="fpsEnginePanel" class="fps-engine-panel" hidden>
+      <section class="page" data-page="map" hidden><div class="page-heading"><div><span class="eyebrow">SAN ANDREAS</span><h1>Map<span class="title-dot">.</span></h1></div></div><div class="map-placeholder"><h2>In-game map</h2><p>The native GTA map adapter isn't connected yet.</p></div></section>
+      <section class="page resume" data-page="resume" hidden><span class="eyebrow">SKR ENHANCED</span><h1>BACK TO THE<br>GAME<span class="title-dot">.</span></h1><p>Resume your session.</p><button class="button button--gold" data-action="open-settings">Open settings</button></section>
+    </main>
+    <footer class="enhanced-footer">
+      <span class="footer-escape"><kbd>ESC</kbd> <span id="escapeLabel">Exit to desktop</span></span>
+      <div class="footer-ecosystem" aria-label="Multiplayer foundations: open.mp and SA-MP">
+        <span class="footer-ecosystem__caption">BUILT ON THE MULTIPLAYER LEGACY OF</span>
+        <a class="footer-partner" href="https://open.mp/" target="_blank" rel="noopener noreferrer" aria-label="open.mp website"><img src="assets/openmp-logo.png" alt="" class="footer-partner__image" data-partner-logo><span class="footer-partner__fallback">open<span>.</span>mp</span></a>
+        <span class="footer-ecosystem__divider" aria-hidden="true"></span>
+        <a class="footer-partner" href="https://www.sa-mp.com/" target="_blank" rel="noopener noreferrer" aria-label="SA-MP website"><img src="assets/samp-logo.png" alt="" class="footer-partner__image" data-partner-logo><span class="footer-partner__fallback">SA<span>:</span>MP</span></a>
+      </div>
+      <span class="footer-brand">SKR ENHANCED <b>V1.0.0</b></span>
+    </footer>
+  </div>
+  <!-- Fixed drawer: kept outside main scroll / shell stacking contexts. -->
+      <section class="page skr-settings-overlay" data-page="settings" hidden role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+        <div class="settings-layout" tabindex="-1">
+          <aside class="categories" aria-label="Settings categories">
+            <div class="settings-drawer-heading"><span class="settings-mark" aria-hidden="true">◈</span><span>SETTINGS</span></div>
+            <span class="settings-side-label">PREFERENCES</span>
+            <button data-tab="interface" class="category active" type="button"><span class="category__number">01</span><span>Interface<small>Appearance &amp; motion</small></span></button>
+            <button data-tab="browser" class="category" type="button"><span class="category__number">02</span><span>Server browser<small>Directory &amp; discovery</small></span></button>
+            <button data-tab="privacy" class="category" type="button"><span class="category__number">03</span><span>Privacy<small>Visibility preferences</small></span></button>
+            <div class="settings-sidebar-bottom"><span class="settings-status-dot"></span> SKR Enhanced · v1.0.0</div>
+          </aside>
+          <div class="settings-panel">
+            <div class="settings-modal-top"><div><span class="eyebrow">PREFERENCES / PERSONALIZATION</span><h1 id="settingsModalTitle">Settings<span class="title-dot">.</span></h1><p>Make SKR Enhanced feel like yours.</p></div><button id="closeSettings" class="settings-close" type="button" aria-label="Close settings">×</button></div>
+            <div class="panel-heading"><div><span class="eyebrow" id="tabEyebrow">APPEARANCE &amp; MOTION</span><h2 id="tabTitle">Interface</h2></div><span class="panel-index" id="tabIndex">01 / 05</span></div>
+            <div class="settings-scroll"><div id="settingsFields"></div></div>
+<div class="settings-native-legacy" hidden aria-hidden="true"><div id="fpsEnginePanel" class="fps-engine-panel" hidden>
   <div class="fps-engine-head"><div><span class="eyebrow">SKR FPS ENGINE</span><h3>Frame Rate</h3></div><small>Native GTA D3D9</small></div>
   <label class="fps-engine-row" for="fpsCounterEnabled"><span><b>Show FPS counter</b><small>Measures actual GTA Present calls, not WebView2 FPS.</small></span><input id="fpsCounterEnabled" type="checkbox" checked></label>
   <label class="fps-engine-row" for="fpsCapSetting"><span><b>SKR frame cap</b><small>Experimental cap; does not override GTA/SA-MP or VSync limits.</small></span><select id="fpsCapSetting" class="setting-input"><option value="0">Game default (no SKR cap)</option><option value="30">30 FPS</option><option value="60">60 FPS</option><option value="90">90 FPS</option><option value="120">120 FPS — experimental</option><option value="144">144 FPS — experimental</option><option value="165">165 FPS — experimental</option><option value="240">240 FPS — experimental</option></select></label>
   <p class="fps-engine-note">To exceed GTA's current limit, disable Frame Limiter in GTA display settings; VSync and SA-MP may still impose a lower limit. High FPS can alter GTA physics. Changes apply on next GTA launch.</p>
   <div class="fps-engine-actions"><span id="fpsSettingsStatus" role="status">Loading FPS preferences…</span><button id="saveFpsSettings" class="button button--secondary" type="button">Save FPS preferences</button></div>
 </div>
+</div>
 <div class="panel-actions"><span class="change-status" id="changeStatus" role="status">No pending changes</span><button class="button button--secondary" id="resetChanges">Discard</button><button class="button button--gold" id="applyChanges" disabled>Apply changes <span>↗</span></button></div></div></div></section>
 
-      <section class="page" data-page="map" hidden><div class="page-heading"><div><span class="eyebrow">SAN ANDREAS</span><h1>Map<span class="title-dot">.</span></h1></div></div><div class="map-placeholder"><h2>In-game map</h2><p>The native GTA map adapter isn't connected yet.</p></div></section>
-      <section class="page resume" data-page="resume" hidden><span class="eyebrow">SKR CLIENT</span><h1>BACK TO THE<br>GAME<span class="title-dot">.</span></h1><p>Resume your session.</p><button class="button button--gold" data-action="open-settings">Open settings</button></section>
-    </main>
-    <footer><span><kbd>ESC</kbd> <span id="escapeLabel">Exit to desktop</span></span><span>SKR CLIENT <b>ALPHA BUILD</b></span></footer>
-  </div>
+
   <div id="externalLinkModal" class="modal-backdrop external-link" hidden>
     <section class="modal external-link__dialog" role="dialog" aria-modal="true" aria-labelledby="externalLinkTitle" aria-describedby="externalLinkExplanation externalLinkLimit">
-      <span class="eyebrow">EXTERNAL WEBSITE</span><h2 id="externalLinkTitle">You are leaving SKR Client</h2>
-      <p id="externalLinkExplanation">This website is outside SKR Client. Check the full destination before continuing. The website may redirect you elsewhere.</p>
+      <span class="eyebrow">EXTERNAL WEBSITE</span><h2 id="externalLinkTitle">You are leaving SKR Enhanced</h2>
+      <p id="externalLinkExplanation">This website is outside SKR Enhanced. Check the full destination before continuing. The website may redirect you elsewhere.</p>
       <strong id="externalLinkHost"></strong><p id="externalLinkUrl" class="external-link__url"></p>
       <p id="externalLinkLimit" role="status"></p>
       <div class="external-link__actions"><button id="externalLinkVisit" class="button button--gold" type="button">Visit Site</button><button id="externalLinkCancel" class="button button--secondary" type="button">Cancel</button></div>
@@ -120,6 +162,15 @@
 
   <div class="modal-backdrop" id="confirmModal" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><span class="eyebrow">CONFIRMATION</span><h2 id="modalTitle"></h2><p id="modalText"></p><div><button class="button button--secondary" id="cancelModal">Cancel</button><button class="button button--gold" id="confirmModalButton">Continue</button></div></section></div>
   <div class="modal-backdrop" id="addServerModal" hidden><form class="modal add-server-form" id="addServerForm" role="dialog" aria-modal="true" aria-labelledby="addServerTitle" novalidate><span class="eyebrow">CUSTOM SERVER</span><h2 id="addServerTitle">Add a server</h2><p>Add a server address to your personal list.</p><label class="field-label" for="addServerAddress">Server address</label><input class="nickname-input" id="addServerAddress" type="text" maxlength="260" autocomplete="off" spellcheck="false" placeholder="e.g. 127.0.0.1:7777" aria-describedby="addServerHint addServerError"><label class="field-label" for="addServerName">Display name <small>(optional)</small></label><input class="nickname-input" id="addServerName" type="text" maxlength="64" autocomplete="off" spellcheck="false" placeholder="My server"><div class="nickname-feedback"><span id="addServerHint">Format: host:port — IPv4 or hostname, port 1–65535.</span><span class="nickname-error" id="addServerError" role="status"></span></div><div><button class="button button--secondary" id="cancelAddServer" type="button">Cancel</button><button class="button button--gold" id="confirmAddServer" type="submit" disabled>Add server</button></div></form></div>
+  <div class="modal-backdrop" id="createServerModal" hidden>
+    <section class="modal create-server-coming-soon" role="dialog" aria-modal="true" aria-labelledby="createServerTitle" aria-describedby="createServerDescription">
+      <div class="create-server-coming-soon__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg></div>
+      <span class="eyebrow">SKR ENHANCED / SERVER PORTAL</span>
+      <h2 id="createServerTitle">Coming Soon<span class="title-dot">.</span></h2>
+      <p id="createServerDescription">Create a Server will open the SKR Server Portal when it becomes available. You'll be able to continue setup there.</p>
+      <div class="create-server-coming-soon__footer"><span>SERVER PORTAL · IN DEVELOPMENT</span><button class="button button--gold" id="cancelCreateServer" type="button">Got it</button></div>
+    </section>
+  </div>
   <div class="modal-backdrop connection-backdrop" id="connectionModal" hidden><section class="modal connection-modal" role="status" aria-live="polite" aria-labelledby="connectionTitle"><span class="eyebrow">JOINING SESSION</span><h2 id="connectionTitle">Starting your session…</h2><div class="connection-server"><strong id="connectionServer">Server</strong><span id="connectionAddress"></span></div><ol class="connection-steps" id="connectionSteps"><li data-step="launch"><i></i><span>Starting game</span></li><li data-step="world"><i></i><span>Loading world</span></li><li data-step="server"><i></i><span>Contacting server</span></li><li data-step="download"><i></i><span>Downloading resources<small id="connectionDownload"></small></span></li><li data-step="join"><i></i><span>Joining session</span></li></ol><p class="connection-text" id="connectionText"></p></section></div>
   <div class="toast" id="toast" hidden role="status"></div>
 </body>

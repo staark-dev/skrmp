@@ -179,6 +179,22 @@ body.view-servers .public-server-list::-webkit-scrollbar-thumb{background:#454d4
 .launch-cover__progress-labels span:first-child{color:#b9d4ad}
 .launch-cover__footer{position:absolute;left:clamp(28px,4.2vw,80px);right:clamp(28px,4.2vw,80px);bottom:32px;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #314033;padding-top:22px;color:#859785;font-size:10px;font-weight:750;letter-spacing:1.1px}
 .launch-cover__footer i{font-style:normal;color:#79b25e;margin:0 6px}
+/* ── Launch progress steps (Task #20A) ── */
+.launch-cover__steps{list-style:none;margin:26px 0 0;padding:0;display:flex;flex-direction:column;gap:9px;max-width:550px}
+.launch-step{display:grid;grid-template-columns:18px 1fr;align-items:center;gap:10px;font-size:12px;font-weight:650;letter-spacing:.2px;color:#6f7f6e}
+.launch-step i{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-style:normal;font-weight:800;border:1px solid #334033;background:#1b241c;color:#7fc45f}
+.launch-step small{grid-column:2;font-size:10px;font-weight:500;letter-spacing:.1px;color:#8a9a88;margin-top:1px}
+.launch-step--done{color:#9db898}
+.launch-step--done i{border-color:#4e7a44;background:#22331f;color:#8fd06a}
+.launch-step--active{color:#eaf2e6}
+.launch-step--active i{border-color:#8acf67;background:#243323;box-shadow:0 0 14px #8acf6755}
+.launch-step--active i::after{content:'';width:7px;height:7px;border-radius:50%;background:#8dcc6a;animation:launch-indicator 1.5s infinite alternate}
+.launch-step--pending{opacity:.55}
+.launch-step--failed{color:#e7a499}
+.launch-step--failed i{border-color:#a65e53;background:#2e1e1c;color:#e7a499;box-shadow:none}
+@media(max-height:760px){.launch-cover__steps{gap:6px;margin-top:16px}.launch-step small{display:none}}
+@media(max-height:610px){.launch-cover__steps{display:none}}
+@media(prefers-reduced-motion:reduce){.launch-step--active i::after{animation:none}}
 #skrLaunchCancel{margin:0;padding:12px 18px;border:1px solid #576e55;border-radius:6px;background:#1c2920;color:#d1e9c8;font-size:12px;font-weight:750;white-space:nowrap}
 #skrLaunchCancel span{margin-left:16px;font-size:17px;line-height:0;vertical-align:-1px}
 #skrLaunchCancel:hover{background:#2d4030;border-color:#85b677}
@@ -234,6 +250,24 @@ body.view-servers .public-server-list::-webkit-scrollbar-thumb{background:#454d4
 .server-details__resource strong {font-size:11px;color:#dfe9da}
 .server-details__resource span {font-size:10px;color:#9eb799;overflow-wrap:anywhere}
 .server-details__resources-note {font-size:9px;color:#819180!important;margin:9px 0 0;line-height:1.45}
+.server-details__sidebar {grid-column:1/-1;min-width:0;display:flex;flex-direction:column;gap:12px}
+/* ── Client Access panel ── */
+.server-details__client-access {grid-column:1/-1;min-width:0;padding:13px 14px;border:1px solid #303c32;
+  border-radius:6px;background:#171c18}
+.server-details__client-access-heading {display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap;margin-bottom:10px}
+.server-details__client-access-heading h2 {font-size:13px;letter-spacing:.05px;margin:3px 0 0;color:var(--text)}
+.server-details__client-access-heading .eyebrow {font-size:8px}
+.server-details__client-badges {display:flex;flex-wrap:wrap;gap:8px}
+.client-badge {display:inline-flex;align-items:center;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.03em;line-height:1}
+.badge--samp {background:rgba(218,165,32,.15);color:#daa520;border:1px solid rgba(218,165,32,.25)}
+.badge--skr {background:rgba(120,200,120,.13);color:#7ec87e;border:1px solid rgba(120,200,120,.22)}
+.badge--omp {background:rgba(100,160,255,.13);color:#6ea0ff;border:1px solid rgba(100,160,255,.22)}
+.badge--generic {background:rgba(255,255,255,.07);color:#b0c4a8;border:1px solid rgba(255,255,255,.1)}
+.client-badge--mode {margin-left:4px;text-transform:uppercase;font-size:10px;letter-spacing:.06em}
+.badge--hybrid {background:rgba(200,140,255,.14);color:#c88cff;border:1px solid rgba(200,140,255,.26)}
+.badge--enhanced {background:rgba(120,200,120,.13);color:#7ec87e;border:1px solid rgba(120,200,120,.22)}
+.badge--standard {background:rgba(255,255,255,.07);color:#9fb098;border:1px solid rgba(255,255,255,.1)}
+.server-details__client-access-note {font-size:9px;color:#819180!important;margin:9px 0 0;line-height:1.45}
 @media(min-width:1001px) {
   .server-details__panel {grid-template-columns:82px minmax(0,1fr) minmax(210px,255px);align-items:start;gap:17px 22px}
   .server-details__icon {width:82px;height:82px;grid-column:1;grid-row:1}
@@ -242,10 +276,11 @@ body.view-servers .public-server-list::-webkit-scrollbar-thumb{background:#454d4
   .server-details__links {grid-column:1/3;grid-row:3}
   .server-details__actions {grid-column:1/3;grid-row:4}
   #detailsCopyStatus {grid-column:1/3;grid-row:5}
-  .server-details__resources {grid-column:3;grid-row:1/span 4;align-self:start}
+  .server-details__sidebar {grid-column:3;grid-row:1/span 5;align-self:start}
+  .server-details__resources, .server-details__client-access {grid-column:auto;grid-row:auto}
 }
 @media(max-width:1000px) {
-  .server-details__resources {grid-column:1/-1}
+  .server-details__sidebar {grid-column:1/-1}
   .server-details__resources-list {flex-direction:row;flex-wrap:wrap}
   .server-details__resource {flex:0 1 235px}
 }
@@ -271,3 +306,299 @@ body.view-servers .public-server-list::-webkit-scrollbar-thumb{background:#454d4
 .fps-engine-note{color:#9baa97;font-size:10px;line-height:1.6;margin:12px 0}
 .fps-engine-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:10px;color:#a7b4a2}
 @media(max-width:720px){.fps-engine-row{align-items:stretch;flex-direction:column;gap:9px}.fps-engine-row select{width:100%}.fps-engine-actions{align-items:stretch;flex-direction:column}}
+
+
+/* SKR Enhanced v1.0.0 branding — independent open.mp / SA-MP ecosystem compatibility. */
+.brand strong {letter-spacing:-1.8px}
+.brand>span {letter-spacing:1.4px;font-size:9px}
+.brand small {letter-spacing:.75px;font-size:8px}
+.ecosystem-label {font-size:8px;font-weight:850;letter-spacing:1.2px;color:#758777;white-space:nowrap}
+.aside-emblem {position:relative;display:flex;align-items:center;justify-content:center;gap:0;padding-bottom:23px}
+.enhanced-emblem-caption {position:absolute;bottom:0;left:50%;transform:translateX(-50%);font:850 11px/1.2 'Segoe UI',Arial,sans-serif;letter-spacing:5px;color:#a3d08c;text-shadow:none;white-space:nowrap}
+.footer-brand {letter-spacing:1px}
+.footer-brand b {color:var(--green)}
+.footer-separator {color:#59675a;margin:0 7px}
+.footer-compat {color:#7e9383;font-size:9px}
+@media(max-width:1180px) {.ecosystem-label{display:none}.footer-compat{display:none}}
+
+
+/* ━━━━━━━━━━━ SKR ENHANCED 1.0 / NEW VISUAL SYSTEM ━━━━━━━━━━━ */
+:root{--bg:#070b11;--tile:#101821;--tile2:#17212b;--panel:#101821;--text:#f4f8fa;--muted:#94a3b2;--dim:#6d8391;--line:#263747;--green:#a8ee65;--green-hover:#c1ff84;--danger:#f08a83;color-scheme:dark}
+body,body.in-game{background:radial-gradient(ellipse at 50% -27%,#17364b 0%,#070b11 53%);color:#f4f8fa}
+body:after{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background-image:linear-gradient(#b5e9ec05 1px,transparent 1px),linear-gradient(90deg,#b5e9ec05 1px,transparent 1px);background-size:76px 76px;mask-image:linear-gradient(to bottom,#0008,transparent 70%)}
+.shell{padding:0 clamp(22px,3vw,62px)}
+.header{flex-basis:90px;border-bottom:1px solid #253544;gap:15px}
+.brand{gap:13px}.brand-symbol{height:41px;width:42px;display:flex;align-items:center;justify-content:center;gap:3px;transform:skew(-15deg);border-radius:8px 2px 8px 2px;background:linear-gradient(160deg,#adf179,#66bd8e);box-shadow:0 0 28px #a8ee6530}
+.brand-symbol i{height:17px;width:5px;background:#0b1822;transform:skew(-8deg)}.brand-symbol i:nth-child(2){height:25px}.brand-symbol i:nth-child(3){height:12px}
+.brand-wordmark{display:flex;align-items:center;gap:13px}.brand-wordmark>span{display:flex;flex-direction:column;padding-left:13px;border-left:1px solid #405465;color:#f2f7f7;letter-spacing:1.9px;font-size:10px;font-weight:850;line-height:1.2}.brand-wordmark small{font-size:8px;letter-spacing:1.2px;margin-top:5px;color:#8ba2b0}.brand strong{font-size:31px;letter-spacing:-2px}.brand strong span{color:var(--green)}
+.nav-button{font-size:11px;letter-spacing:.3px;border-radius:7px}.nav-button.active{color:#baff82;background:#a8ee6516;box-shadow:inset 0 0 0 1px #a8ee6535}.nav-button:hover{background:#243443}
+.header-links{gap:15px}.header-links a{border-left:1px solid #354756;padding-left:12px;color:#b9c9cd}.header-links a span{color:#a8ee65}.ecosystem-label{color:#7396a5}
+.player-profile__button,.icon-button{background:#14202b;border-color:#283b47;border-radius:9px}.player-avatar{background:linear-gradient(135deg,#3f6444,#1d3f3c);color:#cff8a9;border-radius:7px}
+main{padding-top:22px}.home-layout{gap:20px;grid-template-columns:minmax(0,1fr) minmax(300px,25.5%)}.home-primary{gap:0}.home-top-row{grid-template-columns:1.35fr 1fr .72fr;min-height:236px;gap:12px}.home-tile{background:linear-gradient(150deg,#14202a,#101923);border:1px solid #293d4a;border-radius:12px;overflow:hidden}
+.quick-browse{padding:24px 27px;background:linear-gradient(120deg,#193443,#0c2229 70%);border-color:#477467;position:relative;isolation:isolate}.quick-browse__art{background:radial-gradient(ellipse at 80% 30%,#a8ee6530,transparent 60%),repeating-linear-gradient(115deg,transparent 0 65px,#a8ee6509 66px 67px)}.quick-browse:after{background:linear-gradient(95deg,#0a1924a6,#0c222a55)}.quick-browse__skyline{opacity:.25;filter:hue-rotate(60deg)}.quick-browse__top{color:#b5f2a9;font-size:9px}.quick-browse__title{font-family:Bahnschrift,'Arial Narrow','Segoe UI',sans-serif;font-size:clamp(26px,2.65vw,46px);font-weight:900;line-height:.96;letter-spacing:-1.3px;color:#f8fffd}.quick-browse__title em{font-style:normal;color:#a8ee65}.quick-browse__sub{max-width:280px;color:#bbcfca;font-size:11px;line-height:1.45}.quick-browse__bottom{border-top:1px solid #a8ee6540;padding-top:11px;color:#b8fa85}.quick-browse__bottom b{font-size:26px}
+.signal-pulse{display:inline-block;vertical-align:middle;margin-right:5px;width:7px;height:7px;border-radius:50%;background:#b2fc78;box-shadow:0 0 0 4px #a8ee651a,0 0 12px #a8ee65}
+.last-server{padding:23px}.tile-heading,.home-mini>span{color:#b1c5cf;letter-spacing:1px}.tiny-pill{border-color:#40535d;color:#92b5b9}.last-server__content strong{color:#fff}.placeholder-icon{border-color:#436351;background:#1e3832;color:#b9f98a;border-radius:10px}.home-mini{padding:20px}.home-mini b{color:#baff82}.home-mini:hover,.last-server:hover{background:#1a2b35}
+.section-heading{margin:23px 0 13px}.section-heading__kicker,.eyebrow{color:#90bfb4}.section-heading h2{letter-spacing:1px;font-size:12px}.section-heading .online-pip{background:#b2fa74}
+.featured-server{height:clamp(240px,32vh,330px);border:1px solid #30515c;border-radius:13px;background:linear-gradient(107deg,#12262f,#142d35 55%,#1b302e)}.featured-server__ambient{background:radial-gradient(ellipse at 84% 58%,#a8ee651c,transparent 48%),linear-gradient(100deg,transparent,#c6f9f804)}.featured-server__ambient:after{border-color:#b5eea111;box-shadow:0 0 0 35px #cbffb807,0 0 0 78px #cbffb804}.featured-server__tag{color:#c3f0ad;border-color:#5b8863;background:#a8ee6512;border-radius:5px}.featured-server__logo{width:77px;height:77px;border-radius:13px;background:#253d40;border:1px solid #639b70;color:#d8ffc0;transform:rotate(-5deg);box-shadow:0 10px 25px #0007}.featured-server__logo span{transform:rotate(5deg)}.featured-server__identity h3{font-size:clamp(24px,2.4vw,36px)}.featured-server__desc{color:#afc3c9}.featured-server__bottom{padding-bottom:21px}
+.button--gold{background:#aeef72;color:#09171b;border-radius:7px}.button--gold:hover:not(:disabled){background:#ccff9c}.button--outline{border-color:#92c783;border-radius:7px}.home-create,.inline-server-panel{background:#121d26;border-color:#30414d;border-radius:9px}.home-create b{color:#b5ef75}
+.home-aside{padding:22px;min-height:0;border:1px solid #2d454f;border-radius:13px;background:linear-gradient(170deg,#152630,#101b23)}.aside-heading{letter-spacing:1px;color:#c8d6dc}.aside-live{color:#b1f589;background:#a8ee6510;border-color:#466c57;border-radius:5px}
+.aside-feature{min-height:255px;padding:20px 20px 18px;border:1px solid #42665e;border-radius:10px;background:radial-gradient(ellipse at 50% 26%,#2b5951,#12252d 65%)}.aside-feature:before{background:radial-gradient(circle at 50% 22%,#bff48822,transparent 60%)}.aside-emblem{height:122px;padding-bottom:17px;margin-top:1px;transform:none;letter-spacing:normal;color:inherit;text-shadow:none}.emblem-hex{position:relative;display:grid;place-items:center;width:112px;height:100px;border:2px solid #b7f18b;clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);background:linear-gradient(160deg,#b1ee7326,#a8ee6505);font:900 35px/1 Bahnschrift,sans-serif;color:#e8ffdc;letter-spacing:-2px}.emblem-hex b{position:absolute;right:14px;bottom:15px;color:#baff7c;font-size:19px}.enhanced-emblem-caption{bottom:-5px;letter-spacing:2px;font-size:8px;color:#bce4b2}.aside-feature__bottom>span{color:#b4f591}.aside-feature__bottom h3{font-size:27px}.aside-feature__bottom p{color:#b2c6ca;font-size:11px}
+.ecosystem-panel{margin-top:16px;padding:13px 0 2px}.ecosystem-panel__header{display:flex;justify-content:space-between;align-items:center;color:#9db3bd;font-size:9px;font-weight:900;letter-spacing:1.1px;margin-bottom:11px}.ecosystem-panel__marker{font-size:16px;color:#b8fa7f}.ecosystem-tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}.ecosystem-tile{min-width:0;min-height:82px;display:flex;flex-direction:column;justify-content:center;gap:7px;padding:13px;border:1px solid #3b5561;border-radius:9px;background:#1d3039;transition:background .15s,border-color .15s}.ecosystem-tile:hover{background:#26434a;border-color:#91d19a}.ecosystem-tile__mark{font:900 23px/1 Bahnschrift,'Segoe UI',sans-serif;letter-spacing:-1px;color:#f4f8f6}.omp-mark span,.samp-mark span{color:#b4ee78}.ecosystem-tile small{font-size:8px;letter-spacing:.6px;color:#9fb9c5}.ecosystem-disclaimer{color:#718d99;font-size:9px;line-height:1.45;margin:9px 0 0}.aside-bottom{border-top:1px solid #314852;padding-top:16px;margin-top:auto}.aside-bottom span{color:#deeedf}
+.inline-server-row{background:#121d26;border-color:#273e49}.inline-server-row:hover{background:#1d333e}.inline-server-heading{background:#1b2a34;border-color:#324a54}.server-toolbar__title h1,.page-heading h1{font-family:Bahnschrift,'Segoe UI',sans-serif;font-weight:900;letter-spacing:-1.1px}.server-filter.active,.server-filter:hover{background:#a8ee6517;color:#b7f57d}.server-search,.server-add,.directory-refresh{background:#15242e;border-color:#34505e}.server-add{color:#cbf5bb}.settings-panel,.categories,.server-details__panel{background:#121e28;border-color:#2e4956;border-radius:12px}.category.active{border-color:#81b56b;color:#bff28d}
+footer{border-top:1px solid #263b48;color:#819cab}.footer-brand{font-weight:850;letter-spacing:1px}.footer-brand b{color:#b7f57d}.footer-compat{color:#83a7ad}.mode-label{color:#b9ef94}.mode-label:before{background:#b9ef94}
+.splash{background:radial-gradient(ellipse at 50% 38%,#244639,#070b11 58%)}.splash__logo span{color:#b9f581}.splash__sub{color:#a7d8ba}
+@media(max-width:1450px){.home-layout{grid-template-columns:minmax(0,1fr) 290px}.home-top-row{grid-template-columns:1.2fr 1fr .66fr}.ecosystem-tile__mark{font-size:20px}.brand-wordmark>span{font-size:9px}.header-links{gap:8px}}
+@media(max-width:1180px){.home-layout{grid-template-columns:minmax(0,1fr)}.home-aside{display:flex;min-height:0;flex-direction:row;flex-wrap:wrap;gap:12px}.home-aside>.aside-heading{width:100%}.home-aside>.aside-feature{flex:1 1 300px;min-height:230px;margin:0}.ecosystem-panel{flex:1 1 300px;margin-top:0}.home-aside>.aside-bottom{width:100%}.brand-wordmark>span{display:none}}
+@media(max-width:850px){.home-aside{display:none}.home-top-row{grid-template-columns:1.1fr 1fr .6fr}.quick-browse__sub{display:none}.header-links{display:none}}
+@media(max-width:650px){.home-top-row{grid-template-columns:1fr 1fr}.brand-symbol{width:34px;height:34px}.brand strong{font-size:26px}.home-top-row .home-side-stack{display:none}}
+
+
+/* SKR Enhanced 1.0.0 — screenshot-based layout corrections, 20 Oct 2026 */
+/* Consistent working column: settings heading and panel no longer have different widths. */
+main{width:100%;min-width:0}
+.page[data-page="settings"]{width:min(100%,1520px);margin:0 auto;padding-bottom:42px}
+.page[data-page="settings"] .page-heading{width:100%;margin:10px 0 24px;align-items:end;gap:20px}
+.page[data-page="settings"] .page-heading p{max-width:325px;text-align:right;line-height:1.5;margin:0 0 5px;color:#9db0bd}
+.settings-layout{width:100%;max-width:none;grid-template-columns:clamp(220px,20%,278px) minmax(0,1fr);gap:18px;align-items:start}
+.settings-panel{min-width:0;padding:26px 30px 0;background:#101c27;border:1px solid #344e5c;border-radius:12px;box-shadow:0 12px 38px #0002}
+.categories{gap:8px}
+.category{background:#111d27;border:1px solid #2a4050;border-radius:10px;color:#d2dfe4;transition:background .15s,border-color .15s}
+.category:hover{background:#1a303b;border-color:#497389}
+.category.active{background:#1a332e;border-color:#76b68a;color:#d9ffba;box-shadow:inset 3px 0 #a8ee65}
+.category-note{padding:15px 13px;border:1px solid #2a4050;border-radius:10px;background:#111d27;color:#a4c2b5}
+.category-note span{color:#90a6b4}
+.setting-row{border-color:#2b4150}
+.setting-hint{color:#9baab6}
+.panel-actions{min-height:76px}
+/* Predictable header resizing, without hiding crucial controls. */
+.header{min-width:0;gap:16px}
+.header__left{flex:1 1 auto;min-width:0;gap:clamp(10px,1vw,20px)}
+.header__right{flex:0 0 auto;min-width:0;gap:clamp(7px,.8vw,14px)}
+.header nav{flex:0 1 auto;min-width:0}
+.header-links{flex:0 1 auto;min-width:0;gap:8px}
+.header-links a{white-space:nowrap}
+.directory-metrics{flex-shrink:0}
+.player-profile{flex-shrink:0}
+/* Popover: clearly layered over the page, aligned with account control. */
+.player-profile__button{min-width:156px}
+.profile-popover{top:calc(100% + 12px);right:0;width:min(340px,calc(100vw - 40px));padding:25px;background:#12212b;border:1px solid #3b5865;border-radius:13px;box-shadow:0 26px 65px #000b;z-index:100}
+.profile-popover h2{color:#f2f7fa}
+.profile-popover p{color:#aabac4}
+.profile-popover .nickname-input{background:#0b151d;border-color:#3e5966}
+.profile-popover .nickname-feedback{color:#a8bac2}
+.profile-popover .profile-save{background:#a8ee65;color:#0c1b20;border:0;border-radius:7px}
+.profile-popover .profile-save:disabled{opacity:.45}
+@media(max-width:1550px){.header-links{gap:5px}.header-links a{padding-left:8px}.directory-metrics{gap:9px}}
+@media(max-width:1280px){.header-links{display:none}.settings-layout{grid-template-columns:235px minmax(0,1fr)}}
+@media(max-width:1050px){.directory-metrics{display:none}.page[data-page="settings"] .page-heading p{max-width:220px}.settings-panel{padding:22px 22px 0}}
+@media(max-width:740px){.page[data-page="settings"] .page-heading{align-items:start;flex-direction:column;gap:7px}.page[data-page="settings"] .page-heading p{text-align:left;max-width:none}.settings-layout{grid-template-columns:minmax(0,1fr)}.categories{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.category{min-height:62px;padding:10px}.category-note{grid-column:1/-1}.settings-panel{padding:18px}.setting-row{grid-template-columns:minmax(0,1fr);gap:10px}.setting-row>:last-child{justify-self:stretch}.profile-popover{right:0}.header__right{gap:5px}}
+
+/* v1.0.0: remove oversized brand watermark, retain functional header branding. */
+.aside-emblem,.emblem-hex,.enhanced-emblem-caption{display:none!important}
+.aside-feature{min-height:220px;justify-content:flex-end;background:radial-gradient(ellipse at 88% 12%,#2b595132,transparent 70%),linear-gradient(150deg,#132d32,#12232b)}
+.aside-feature__bottom{padding-top:12px}
+/* Footer: locally supplied official wordmark files, with automatic text fallback. */
+.enhanced-footer{display:grid;grid-template-columns:minmax(150px,1fr) auto minmax(150px,1fr);gap:18px;align-items:center;min-height:63px;flex-basis:63px}
+.enhanced-footer .footer-brand{justify-self:end;white-space:nowrap}
+.footer-ecosystem{display:flex;align-items:center;justify-content:center;gap:17px;min-width:0}
+.footer-ecosystem__caption{font-size:9px;letter-spacing:1.1px;font-weight:800;color:#8aa6b4;white-space:nowrap}
+.footer-partner{min-width:77px;min-height:36px;display:inline-flex;align-items:center;justify-content:center;gap:0;border:1px solid #304955;border-radius:7px;background:#14232d;padding:5px 11px;color:#e3f2ed;transition:border-color .15s,background .15s}
+.footer-partner:hover{border-color:#a8ee65;background:#1b3438}
+.footer-partner__image{display:none;max-width:115px;max-height:29px;width:auto;height:auto;object-fit:contain}
+.footer-partner.has-logo .footer-partner__image{display:block}
+.footer-partner.has-logo .footer-partner__fallback{display:none}
+.footer-partner__fallback{font-size:15px;font-weight:900;letter-spacing:-.5px;white-space:nowrap}
+.footer-partner__fallback span{color:#a8ee65}
+.footer-ecosystem__divider{width:1px;height:19px;background:#34505b}
+@media(max-width:1250px){.footer-ecosystem__caption{display:none}.enhanced-footer{gap:10px}.footer-ecosystem{gap:9px}}
+@media(max-width:810px){.enhanced-footer{grid-template-columns:auto 1fr;gap:10px}.footer-ecosystem{justify-content:flex-end}.enhanced-footer .footer-brand{display:none}.footer-partner{min-width:64px;padding:5px 7px}.footer-partner__fallback{font-size:12px}}
+
+
+/* SKR Enhanced — finished desktop Settings overlay. Keep this last to override legacy page rules. */
+.shell.settings-open .header,.shell.settings-open .enhanced-footer {filter:brightness(.6)}
+.shell.settings-open main {overflow:visible}
+.skr-settings-overlay:not([hidden]) {position:fixed!important;inset:0!important;z-index:110!important;display:flex!important;justify-content:center;align-items:center;min-height:0!important;margin:0!important;padding:clamp(18px,3vh,36px) clamp(18px,4vw,64px)!important;width:100%!important;max-width:none!important;overflow:hidden;background:rgba(3,8,13,.73);backdrop-filter:blur(9px)}
+.skr-settings-overlay .settings-layout {position:relative;width:min(1220px,100%)!important;max-width:none!important;height:min(790px,86vh);min-height:440px;display:grid!important;grid-template-columns:238px minmax(0,1fr)!important;gap:0!important;align-items:stretch!important;background:#0e1923;border:1px solid #314759;border-radius:16px;overflow:hidden;box-shadow:0 36px 120px rgba(0,0,0,.78),0 0 0 1px rgba(255,255,255,.025)}
+.skr-settings-overlay .categories {display:flex!important;flex-direction:column!important;gap:3px!important;min-width:0;min-height:0;padding:26px 15px 18px;background:#111d28;border:0!important;border-right:1px solid #293e4b!important;border-radius:0!important;overflow-y:auto}
+.settings-identity{display:flex;gap:10px;align-items:center;margin:1px 6px 39px;font-weight:850;font-size:14px;color:#eef5f7;letter-spacing:.4px}
+.settings-mark{width:35px;height:35px;display:grid;place-items:center;border:1px solid #649b77;border-radius:9px;background:#1b3430;font-size:21px;color:#b9f57e}
+.settings-identity b{color:#b9f57e;font-size:11px}.settings-identity small{display:block;font-size:8px;letter-spacing:1px;color:#7993a0;font-weight:700;margin-top:4px}
+.settings-side-label{padding:0 13px;margin:0 0 9px;color:#6d8998;font-weight:850;font-size:9px;letter-spacing:1.8px}
+.skr-settings-overlay .category {width:100%;min-height:58px!important;flex:0 0 auto;display:flex;gap:13px;padding:12px 13px!important;background:transparent!important;border:1px solid transparent!important;border-radius:9px!important;box-shadow:none!important;color:#adbfc9!important;transition:background .16s,color .16s}
+.skr-settings-overlay .category:hover{background:#1b303d!important;color:#fff!important}
+.skr-settings-overlay .category.active{background:#213932!important;border-color:#42675d!important;color:#d4f7bb!important;box-shadow:inset 3px 0 #a8ee65!important}
+.skr-settings-overlay .category__number{font-size:10px;color:#75949c;font-variant-numeric:tabular-nums}
+.skr-settings-overlay .category>span:nth-child(2){font-size:12px;font-weight:750}
+.skr-settings-overlay .category small{margin-top:2px;font-size:10px;color:#79929d}
+.settings-sidebar-bottom{margin-top:auto;padding:19px 10px 2px;color:#728c99;font-size:10px;border-top:1px solid #293c49;white-space:nowrap}
+.settings-status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#b6ec83;margin-right:5px}
+.skr-settings-overlay .settings-panel {min-height:0;display:flex;flex-direction:column;padding:0!important;background:#0e1923!important;border:0!important;border-radius:0!important;box-shadow:none!important}
+.settings-modal-top{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:31px 39px 25px;border-bottom:1px solid #263945}
+.settings-modal-top h1{margin:8px 0 2px;font-size:36px;line-height:1.15;font-family:Bahnschrift,'Segoe UI',sans-serif;letter-spacing:-1.3px;color:#f6f9fa}
+.settings-modal-top p{margin:6px 0 0;font-size:12px;color:#829ba8}
+.settings-close{display:grid;place-items:center;width:38px;height:38px;flex:0 0 38px;font-size:26px;font-weight:300;line-height:1;background:#1b2b36;border:1px solid #324756;border-radius:9px;color:#bacbd2}
+.settings-close:hover{background:#29414e;color:white}
+.skr-settings-overlay .panel-heading {flex:0 0 auto;padding:24px 39px 17px!important;margin:0!important;border-bottom:1px solid #263945!important}
+.skr-settings-overlay .panel-heading h2{font-size:20px;margin:5px 0 0}
+.skr-settings-overlay .panel-index{color:#698291;font-size:11px;font-variant-numeric:tabular-nums}
+.settings-scroll{min-height:0;flex:1 1 auto;overflow:auto;padding:3px 39px 24px;scrollbar-color:#37505b transparent;scrollbar-width:thin}
+.skr-settings-overlay .setting-row{min-height:88px;padding:19px 0;grid-template-columns:minmax(0,1fr) minmax(140px,220px);gap:24px;border-bottom:1px solid #233743}
+.skr-settings-overlay .setting-title{font-size:13px;color:#e5eef2;font-weight:760}
+.skr-settings-overlay .setting-hint{font-size:11px;line-height:1.6;color:#829aa7;max-width:410px;margin-top:5px}
+.skr-settings-overlay .switch{gap:13px;color:#90a7b3;font-size:11px}
+.skr-settings-overlay .switch input{appearance:none;-webkit-appearance:none;position:relative;width:43px;height:24px;flex:0 0 43px;border-radius:20px;background:#334653;border:1px solid #49606b;cursor:pointer;outline-offset:3px;transition:background .15s}
+.skr-settings-overlay .switch input:before{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#d2e0e5;transition:transform .15s}
+.skr-settings-overlay .switch input:checked{background:#678f4c;border-color:#9ccf74}
+.skr-settings-overlay .switch input:checked:before{transform:translateX(19px);background:#f6fff0}
+.skr-settings-overlay .panel-actions{flex:0 0 auto;min-height:77px;padding:15px 39px;gap:10px;background:#101f2b;border-top:1px solid #2b404d}
+.skr-settings-overlay .panel-actions .button{min-height:41px;padding:10px 20px;font-size:11px}
+.skr-settings-overlay .change-status{font-size:11px;color:#829ba8}
+.skr-settings-overlay .change-status.dirty{color:#b7f58b}
+@media(max-width:850px){.skr-settings-overlay:not([hidden]){padding:12px!important}.skr-settings-overlay .settings-layout{grid-template-columns:190px minmax(0,1fr)!important;height:92vh}.skr-settings-overlay .categories{padding:20px 9px}.settings-identity{font-size:12px;margin:0 4px 25px}.settings-modal-top{padding:23px 23px 19px}.skr-settings-overlay .panel-heading{padding:19px 23px 14px!important}.settings-scroll{padding:2px 23px 15px}.skr-settings-overlay .panel-actions{padding:12px 23px}.skr-settings-overlay .setting-row{grid-template-columns:minmax(0,1fr);gap:11px}.skr-settings-overlay .switch{justify-content:flex-start}}
+@media(max-width:610px){.skr-settings-overlay .settings-layout{grid-template-columns:150px minmax(0,1fr)!important}.settings-identity small{display:none}.skr-settings-overlay .category{gap:7px;padding:10px 6px!important}.skr-settings-overlay .category small{font-size:9px}.settings-modal-top h1{font-size:27px}.settings-modal-top .eyebrow{font-size:8px}.skr-settings-overlay .panel-actions{flex-wrap:wrap}.skr-settings-overlay .change-status{width:100%;flex-basis:100%}.skr-settings-overlay .panel-actions .button{flex:1}}
+
+
+/* v1.0.0 revision — user-required RIGHT slide-out settings and rebuilt Servers */
+.brand .brand-wordmark{display:none!important}
+.brand{gap:0!important;min-width:38px!important}
+.brand .brand-symbol{display:flex!important}
+.skr-settings-overlay:not([hidden]){position:fixed!important;inset:0!important;z-index:110!important;display:flex!important;align-items:stretch!important;justify-content:flex-end!important;padding:0!important;background:rgba(2,7,14,.50)!important;backdrop-filter:blur(4px)!important;overflow:hidden!important}
+.skr-settings-overlay .settings-layout{width:min(850px,calc(100vw - 64px))!important;height:100vh!important;min-height:0!important;max-height:none!important;margin:0!important;border-radius:0!important;border:0!important;border-left:1px solid #3c5364!important;box-shadow:-24px 0 75px rgba(0,0,0,.65)!important;grid-template-columns:190px minmax(0,1fr)!important;animation:skrDrawerIn .29s cubic-bezier(.18,.84,.23,1) both}
+@keyframes skrDrawerIn{from{transform:translateX(100%);opacity:.9}to{transform:translateX(0);opacity:1}}
+.skr-settings-overlay .categories{padding:30px 12px 18px!important}
+.skr-settings-overlay .category{min-height:60px!important}
+.skr-settings-overlay .settings-modal-top{padding:32px 32px 22px!important}
+.skr-settings-overlay .panel-heading{padding:21px 32px 14px!important}
+.skr-settings-overlay .settings-scroll{padding:2px 32px 20px!important}
+.skr-settings-overlay .panel-actions{padding:14px 32px!important}
+/* Rebuilt Servers: hero, filters, results workspace and more readable rows */
+body.view-servers .servers-page{gap:0!important;padding-top:0!important;overflow:hidden!important}
+.browser-heading{flex:0 0 auto;display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:32px 2px 29px}
+.browser-heading__copy .eyebrow{color:#a6e5a5;font-size:10px;letter-spacing:2px}
+.browser-heading h1{font-size:clamp(32px,3.7vw,54px);line-height:1.05;letter-spacing:-2px;margin:12px 0 10px;font-weight:850;color:#f2f7fb}
+.browser-heading h1 em{color:#b9ef9b;font-style:normal}
+.browser-heading__copy p{color:#91a7b5;margin:0;font-size:12px;line-height:1.7}
+.browser-heading__actions{display:flex;gap:10px;align-items:center;padding-bottom:5px}
+.browser-live{display:flex;gap:9px;align-items:center;font-size:11px;color:#9db4c0;padding:11px 13px;border:1px solid #2b4654;border-radius:9px;background:#10212e;white-space:nowrap}
+.browser-workspace{flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid #2a4555;background:#0d1924;border-radius:14px;overflow:hidden;box-shadow:0 16px 40px #0002}
+.browser-filterbar{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:16px 20px;border-bottom:1px solid #263a49;background:#101e2a}
+.browser-filterbar__tabs{display:flex;align-items:center;gap:5px}
+.browser-filterbar .server-filter{height:38px;padding:0 17px;border-radius:8px;color:#91a9b7;font-size:12px;font-weight:700}
+.browser-filterbar .server-filter.active{background:#254234!important;color:#d0f5b8!important;box-shadow:inset 0 0 0 1px #46775780}
+.browser-filterbar .server-search{width:clamp(210px,26vw,380px);height:40px;background:#081722;border:1px solid #304957;border-radius:9px}
+.browser-filterbar .server-search input{font-size:12px}
+.browser-results-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:18px 23px 14px}
+.browser-results-bar>div{display:flex;align-items:center;gap:11px;min-width:0}
+.browser-results-bar strong{font-size:10px;letter-spacing:1.2px;font-weight:850;color:#d3e2e7}
+.browser-results-icon{display:grid;place-items:center;width:30px;height:30px;background:#1b3541;color:#aedcba;border-radius:7px;font-size:18px}
+.browser-results-note{font-size:11px;color:#738e9e;letter-spacing:0}
+#serverCount{color:#b8e994;font-variant-numeric:tabular-nums;white-space:nowrap}
+body.view-servers .inline-server-panel{flex:1;min-height:0;margin:0 13px;border-radius:10px!important;background:#101f2b!important;border-color:#2b4050!important}
+body.view-servers .inline-server-heading{background:#182b38!important;padding:12px 17px!important;border-color:#32495a!important;letter-spacing:1.25px;color:#8fa9b5}
+body.view-servers .inline-server-row{background:#101e29!important;min-height:84px;padding:12px 17px!important;border-bottom:1px solid #263b49!important;transition:background .15s ease,border .15s ease}
+body.view-servers .inline-server-row:nth-child(even){background:#132532!important}
+body.view-servers .inline-server-row:hover{background:#203a46!important}
+body.view-servers .server-mark--banner{width:72px;height:52px;flex-basis:72px;border-radius:8px;background:linear-gradient(145deg,#26495a,#102732)}
+body.view-servers .server-name-line strong,body.view-servers .server-details-link{color:#ecf3f7;font-size:13px;font-weight:750}
+body.view-servers .server-copy>small{font-size:10px;color:#8fa5b0;margin-top:5px}
+body.view-servers .inline-server-actions .inline-connect{border-radius:7px;padding:10px 16px;font-weight:800}
+.browser-bottom{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 22px;color:#6f8a9a;font-size:10px}
+.browser-bottom i{display:inline-block;width:6px;height:6px;border-radius:50%;background:#9bd37c;margin-right:6px}
+@media(max-width:1080px){.browser-heading{padding:22px 0}.browser-live{display:none}.browser-results-note{display:none}}
+@media(max-width:750px){.browser-heading{align-items:flex-start;gap:12px}.browser-heading__actions{align-self:center}.browser-heading h1{font-size:31px;letter-spacing:-1px}.browser-heading__copy p{max-width:300px}.browser-filterbar{flex-direction:column;align-items:stretch;padding:12px}.browser-filterbar__tabs{overflow-x:auto}.browser-filterbar .server-filter{flex-shrink:0}.browser-filterbar .server-search{width:100%}.browser-results-bar{padding:10px 14px}.browser-bottom{padding:10px 14px}}
+@media(max-width:610px){.skr-settings-overlay .settings-layout{width:100vw!important;grid-template-columns:140px minmax(0,1fr)!important}.skr-settings-overlay .settings-modal-top{padding:22px 16px 15px!important}.skr-settings-overlay .panel-heading{padding:16px!important}.skr-settings-overlay .settings-scroll{padding:0 16px 14px!important}.skr-settings-overlay .panel-actions{padding:10px 16px!important}}
+@media(prefers-reduced-motion:reduce){.skr-settings-overlay .settings-layout{animation:none!important}}
+
+
+/* UI clean-up r2: remove legacy visual artifacts, keep native IDs/events. */
+.player-profile__chevron{display:none!important}
+.player-profile__button{min-width:154px;gap:9px;padding:5px 12px 5px 5px;border:1px solid #2e4856;background:#12232e;border-radius:10px;box-shadow:none;transition:background .16s,border-color .16s}
+.player-profile__button:hover,.player-profile__button[aria-expanded="true"]{background:#192f3a;border-color:#577689}
+.player-avatar{border-radius:8px;background:#2b5148;color:#b9f5a0}
+.player-profile__copy strong{color:#f1f7f9}
+/* Profile editor is a compact anchored flyout, not a second giant modal. */
+.profile-popover:not([hidden]){display:block}
+.profile-popover{right:0;top:calc(100% + 10px);width:min(306px,calc(100vw - 28px));padding:18px!important;background:#101e28!important;border:1px solid #314a5a!important;border-radius:12px!important;box-shadow:0 18px 54px rgba(0,0,0,.5)!important;z-index:120;overflow:hidden}
+.profile-popover:before,.profile-popover:after{content:none!important;display:none!important}
+.profile-popover__header{display:flex;align-items:center;gap:11px;padding:0 0 14px;margin-bottom:14px;border-bottom:1px solid #263d4a}
+.profile-popover__avatar{width:34px;height:34px;display:grid;place-items:center;border-radius:9px;background:#1d3b36;color:#b6ef99;border:1px solid #395f52;font-size:19px;flex:none}
+.profile-popover .profile-popover__header h2{margin:0!important;font-size:14px!important;font-weight:800;letter-spacing:0;color:#eef6fa}
+.profile-popover .profile-popover__header p{margin:2px 0 0!important;font-size:10px!important;color:#94abb8;line-height:1.5}
+.profile-popover>label{font-size:11px;font-weight:700;margin:0 0 7px}
+.profile-popover .nickname-input{height:40px;background:#0a1822;border-radius:7px!important;border:1px solid #3a5360}
+.profile-popover .nickname-feedback{min-height:29px;margin-top:7px;font-size:10px;line-height:1.4}
+.profile-popover .profile-save{min-height:39px;border-radius:8px!important;font-size:11px}
+/* Prevent old launcher page sections and grid lines bleeding through Settings. */
+.skr-settings-overlay:not([hidden]){background:rgba(4,11,17,.88)!important;backdrop-filter:blur(7px)!important}
+.skr-settings-overlay .settings-layout{background:#101d27!important;border-left:1px solid #314957!important;box-shadow:-25px 0 95px #000b!important}
+.skr-settings-overlay .categories{background:#111e28!important;border:0!important;border-right:1px solid #293f4d!important;box-shadow:none!important}
+.settings-drawer-heading{display:flex;align-items:center;gap:10px;padding:0 9px;margin:2px 0 36px;color:#e4eef1;font-size:12px;font-weight:800;letter-spacing:1.5px}
+.settings-drawer-heading .settings-mark{height:30px;width:30px;font-size:17px;border-radius:8px;flex:none}
+.skr-settings-overlay .category{background:transparent!important;border-color:transparent!important;box-shadow:none!important}
+.skr-settings-overlay .category.active{background:#20382f!important;border-color:#3d6952!important;box-shadow:inset 3px 0 #b5ec84!important}
+.skr-settings-overlay .settings-panel{background:#101d27!important}
+/* True fixed drawer height even when main scroll/layout changes. */
+.skr-settings-overlay{isolation:isolate}
+@media(max-width:610px){.settings-drawer-heading{font-size:10px;gap:5px;padding:0 3px}.settings-drawer-heading .settings-mark{width:25px;height:25px}}
+
+/* SKR Enhanced Launcher v3.1 — isolated fixed right drawer and browser polish.
+   Settings is a body child, never clipped by main's scroll container. */
+.skr-settings-overlay:not([hidden]) {
+  position:fixed!important;inset:0!important;z-index:500!important;
+  display:flex!important;justify-content:flex-end!important;align-items:stretch!important;
+  background:rgba(2,8,13,.60)!important;backdrop-filter:blur(5px)!important;
+  padding:0!important;overflow:hidden!important;
+}
+.skr-settings-overlay .settings-layout {
+  width:min(780px,calc(100vw - 48px))!important;
+  height:100dvh!important;max-height:100dvh!important;
+  margin:0 0 0 auto!important;border-radius:0!important;
+  display:grid!important;grid-template-columns:188px minmax(0,1fr)!important;
+  overflow:hidden!important;animation:skrDrawerIn .26s cubic-bezier(.2,.8,.2,1) both!important;
+}
+.skr-settings-overlay .settings-panel {min-height:0!important;overflow:hidden!important}
+.skr-settings-overlay .settings-scroll {overflow-y:auto!important;min-height:0!important}
+.skr-settings-overlay .settings-close:focus-visible {outline:2px solid #b7e998;outline-offset:3px}
+/* Give Servers a full-height workspace without shrinking directory rows to tiny text. */
+body.view-servers main {display:flex;flex-direction:column;min-height:0}
+body.view-servers .servers-page:not([hidden]) {flex:1;min-height:0;display:flex;flex-direction:column}
+body.view-servers .browser-workspace{min-height:0;flex:1}
+body.view-servers .inline-server-panel{min-height:0;flex:1;display:flex;flex-direction:column}
+body.view-servers .public-server-list{flex:1;min-height:150px;max-height:none;overflow-y:auto}
+body.view-servers .browser-filterbar{flex-shrink:0}
+body.view-servers .inline-server-row{min-height:60px}
+/* Profile: one compact trigger, no legacy arrow/outline boxes. */
+.player-profile__button {box-shadow:none!important;border:1px solid #283f4c!important;background:#12232c!important}
+.player-profile__button:focus-visible{outline:2px solid #a7d58b;outline-offset:3px}
+.player-profile__chevron{display:none!important}
+@media(max-width:820px){
+  .skr-settings-overlay .settings-layout{width:calc(100vw - 24px)!important;grid-template-columns:162px minmax(0,1fr)!important}
+  .skr-settings-overlay .settings-modal-top,.skr-settings-overlay .panel-heading{padding-left:20px!important;padding-right:20px!important}
+  .skr-settings-overlay .settings-scroll,.skr-settings-overlay .panel-actions{padding-left:20px!important;padding-right:20px!important}
+}
+@media(max-width:620px){.skr-settings-overlay .settings-layout{grid-template-columns:132px minmax(0,1fr)!important}}
+@media(prefers-reduced-motion:reduce){.skr-settings-overlay .settings-layout{animation:none!important}}
+
+/* Restore Create a Server alongside Direct Connect, without changing other UI. */
+.home-server-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;min-width:min(510px,100%)}
+.home-server-actions .home-create{min-width:0;width:100%;min-height:66px;padding-right:35px}
+.home-create--new{background:linear-gradient(115deg,#1c2b25,#132128);border-color:#3b5845}
+.home-create--new:hover{border-color:#9bd275;background:#21362b}
+.home-create--new b{font-size:23px}
+.create-server-form{width:min(490px,calc(100vw - 36px));max-height:90vh;overflow:auto}
+.create-server-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.create-server-notice{font-size:11px;color:#b4bdb6;line-height:1.6;padding:12px;background:#182421;border:1px solid #34463c;border-radius:7px;margin-top:18px}
+.create-server-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px}
+@media(max-width:1100px){.home-lower{flex-wrap:wrap}.home-server-actions{width:100%}}
+@media(max-width:650px){.home-server-actions{grid-template-columns:1fr}.create-server-grid{grid-template-columns:1fr}}
+
+/* Server Portal — coming soon (no installer/submit until portal launch). */
+.home-create--new .create-server-icon{display:grid;place-items:center;top:19px;right:13px;color:#a0d298;font-size:initial}
+.create-server-icon svg{width:23px;height:23px}
+.create-server-coming-soon{width:min(450px,calc(100vw - 36px));padding:30px!important}
+.create-server-coming-soon__icon{width:50px;height:50px;border:1px solid #416249;border-radius:10px;background:#203629;color:#a8d695;display:grid;place-items:center;margin-bottom:20px}
+.create-server-coming-soon__icon svg{width:27px;height:27px}
+.create-server-coming-soon h2{font-size:32px;letter-spacing:-1px;margin:12px 0}
+.create-server-coming-soon p{font-size:13px;line-height:1.7;color:#a8b5aa}
+.create-server-coming-soon__footer{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:28px;padding-top:19px;border-top:1px solid #304039}
+.create-server-coming-soon__footer span{font-size:9px;letter-spacing:1px;color:#849587;font-weight:700}

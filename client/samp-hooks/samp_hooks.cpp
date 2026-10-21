@@ -94,35 +94,6 @@ static void ScanAndPatchStrings(uintptr_t base, size_t imageSize) {
     }
 }
 
-// Raw byte patch: replace version bytes without requiring null terminator.
-// This catches the CLIENT_JOIN version field even if it's embedded or
-// composed at runtime from a const.
-struct RawPatch {
-    const char* find;
-    int findLen;
-    const char* replace;
-    int replaceLen;
-};
-
-static constexpr RawPatch kRawPatches[] = {
-    {"0.3.7-R5", 8, "SKR-R1\0\0", 8},
-    {"0.3.7-R4", 8, "SKR-R1\0\0", 8},
-    {"0.3.7-R3", 8, "SKR-R1\0\0", 8},
-    {"0.3.7-R2", 8, "SKR-R1\0\0", 8},
-    {"0.3.DL-R1", 9, "SKR-R1\0\0\0", 9},
-};
-
-static void ScanAndPatchRaw(uintptr_t base, size_t imageSize) {
-    for (const auto& p : kRawPatches) {
-        auto* start = reinterpret_cast<const uint8_t*>(base);
-        for (size_t off = 0; off + p.findLen <= imageSize; ++off) {
-            if (memcmp(start + off, p.find, p.findLen) == 0) {
-                PatchString(base + off, p.findLen, p.replace);
-            }
-        }
-    }
-}
-
 static size_t GetModuleImageSize(HMODULE mod) {
     auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(mod);
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
@@ -220,7 +191,6 @@ DWORD WINAPI SampHookThread(LPVOID) {
     uintptr_t sampAddr = reinterpret_cast<uintptr_t>(g_sampBase);
     if (imageSize > 0) {
         ScanAndPatchStrings(sampAddr, imageSize);
-        ScanAndPatchRaw(sampAddr, imageSize);
         PatchChatLineLength(sampAddr);
     }
 

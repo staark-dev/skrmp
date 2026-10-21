@@ -29,6 +29,7 @@ struct ServerInfo {
     std::string discord;      // UTF-8
     bool rulesKnown = false;  // the 'r' (rules) reply arrived
     std::string skrClient;    // value of the "skr_client" rule; empty = no native SKR support
+    std::string skrMode;      // value of the "skr_mode" rule: hybrid | enhanced | standard
 };
 
 // Blocking; call off the game thread. `timeoutMs` per server.

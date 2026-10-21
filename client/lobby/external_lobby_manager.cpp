@@ -3,6 +3,9 @@
 #include "cef-local/cef_local_loader.h"
 #include "escape-menu/escape_menu.h"
 #include "protocol/session_info.h"
+#include "../../shared/exit_codes.h"
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <atomic>
 namespace skr::lobby {
     namespace { std::atomic<int> mode{-1}; std::atomic<bool> gameplay{false}; }
@@ -19,6 +22,10 @@ namespace skr::lobby {
     void ResetEnhancedSession() { mode.store(-1); gameplay.store(false); skr::escape_menu::Disable(); }
     void OnSessionInfo(uint8_t value) {
         mode.store(value == static_cast<uint8_t>(skr::protocol::SessionMode::CefIntro) ? 1 : 0);
+    }
+    void OnConnectionRejected(skr::protocol::RejectionReason reason, uint8_t supportedClients) {
+        if (!skr::protocol::IsValidRejectionReason(reason)) return;
+        ExitProcess(skr::ExitCodeForRejection(reason, supportedClients));
     }
 
     bool IsSkrSession() { return mode.load() >= 0; }

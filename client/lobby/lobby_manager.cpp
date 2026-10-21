@@ -1071,6 +1071,14 @@ void OnSessionInfo(uint8_t mode) {
     Log("session info (rpc 241): mode %d (%s)", value, value ? "server CEF intro" : "none");
 }
 
+void OnConnectionRejected(protocol::RejectionReason reason, uint8_t supportedClients) {
+    if (!protocol::IsValidRejectionReason(reason)) return;
+    const std::string message = protocol::RejectionDisplayText(reason, supportedClients);
+    skr::cef::CefBridge::Instance().EmitEventString("skr:connection:rejected", message.c_str());
+    Log("connection rejected: code=%s supported_mask=0x%02X",
+        protocol::RejectionCode(reason), static_cast<unsigned>(supportedClients));
+}
+
 bool ServerPageFocused() {
     using FocusFn = bool(__cdecl*)(uint32_t);
     static FocusFn fn = reinterpret_cast<FocusFn>(

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "protocol/rejection.h"
 
 struct IDirect3DDevice9;
 
@@ -30,6 +31,9 @@ void OnNetGameState(int sampState);
 
 // Server session info (RPC 241, shared/protocol/session_info.h). Game thread.
 void OnSessionInfo(uint8_t mode);
+// Displays a validated, server-originated rejection reason. External-launcher
+// builds return to the launcher using the existing process exit-code channel.
+void OnConnectionRejected(protocol::RejectionReason reason, uint8_t supportedClients);
 void ResetEnhancedSession();
 
 // True once the server sent RPC 241, i.e. it runs the SKR Gate. SKR-only
