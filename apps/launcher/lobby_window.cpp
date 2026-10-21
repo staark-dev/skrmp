@@ -5,6 +5,7 @@
 #include "lobby/public_directory.h"
 #include "lobby/server_query.h"
 #include "performance/fps_settings.h"
+#include "../../shared/exit_codes.h"
 #include <objbase.h>
 #include <WebView2.h>
 #include <wrl.h>
@@ -17,12 +18,47 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
+#include <mutex>
 
 using Microsoft::WRL::ComPtr;
 using Microsoft::WRL::Callback;
 namespace skr::launcher {
 namespace {
 constexpr wchar_t kPage[] = L"https://skr-launcher.invalid/lobby.html";
+// Must match IDI_SKRLAUNCHER in apps/launcher/SKRLauncher.rc.
+constexpr int kAppIconResourceId = 1;
+
+// ── Launch progress state machine ───────────────
+// Stages are strictly ordered and only ever move forward, so a late or
+// duplicated signal can never mark a later stage as reached. Every stage is
+// entered because a real event was observed -- nothing here is estimated,
+// and no stage implies resource or world state it cannot see.
+enum class LaunchStage : uint8_t {
+    Idle = 0,
+    Preflight,     // native UDP query in flight
+    Starting,      // CreateProcessW succeeded; game suspended
+    Injecting,     // SKR.Client.dll loaded into the game
+    ClientReady,   // SkrRemoteInit acknowledged
+    WaitingFrame,  // game resumed; awaiting the first cover Present
+    Handoff,       // frameReady observed; screen handed to the game
+    SessionReady,  // sessionReady observed; the world is up
+    Failed
+};
+const char* LaunchStageKey(LaunchStage s) {
+    switch (s) {
+        case LaunchStage::Idle:         return "idle";
+        case LaunchStage::Preflight:    return "preflight";
+        case LaunchStage::Starting:     return "starting";
+        case LaunchStage::Injecting:    return "injecting";
+        case LaunchStage::ClientReady:  return "client-ready";
+        case LaunchStage::WaitingFrame: return "waiting-frame";
+        case LaunchStage::Handoff:      return "handoff";
+        case LaunchStage::SessionReady: return "session-ready";
+        case LaunchStage::Failed:       return "failed";
+    }
+    return "idle";
+}
 std::wstring Wide(const std::string& s) {
     int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), nullptr, 0);
     std::wstring out(n, 0);
@@ -70,6 +106,12 @@ struct Window {
     std::vector<std::string> queuedVisiblePings;
     LaunchConfig config;
     bool canLaunch = false, launching = false, handedOver = false, sessionReady = false, cancelling = false;
+    LaunchStage stage = LaunchStage::Idle;
+    // Written by the launch worker, read by the UI timer. Never emit from the worker.
+    std::mutex stepMutex;
+    LaunchStage stepInbox = LaunchStage::Idle;
+    std::atomic<int> serverMode{-1}; // -1 pending, 1 enhanced, 0 standard, 2 inconclusive
+    bool serverModeEmitted = false;
     std::future<Started> launch;
     HANDLE process = nullptr, frame = nullptr, takeover = nullptr, ready = nullptr;
     DWORD pid = 0;
@@ -80,10 +122,45 @@ struct Window {
         if (takeover) CloseHandle(takeover);
         if (ready) CloseHandle(ready);
     }
+    // Monotonic: a stage is never un-reached and never replayed.
+    void Advance(LaunchStage next) {
+        if (stage == LaunchStage::Failed || next <= stage) return;
+        stage = next;
+        Emit("skr:launch:stage", LaunchStageKey(next));
+    }
+    // Called from the launch worker thread: records only, never emits.
+    void ReportStep(LaunchStage next) {
+        std::lock_guard<std::mutex> lock(stepMutex);
+        if (next > stepInbox) stepInbox = next;
+    }
+    // UI-thread pump: walks every intermediate stage in order so the UI can
+    // never skip one, then publishes the preflight verdict exactly once.
+    void PumpLaunchProgress() {
+        LaunchStage pending;
+        { std::lock_guard<std::mutex> lock(stepMutex); pending = stepInbox; }
+        while (stage < pending && stage != LaunchStage::Failed)
+            Advance(static_cast<LaunchStage>(static_cast<uint8_t>(stage) + 1));
+        if (!serverModeEmitted) {
+            const int mode = serverMode.load(std::memory_order_relaxed);
+            if (mode >= 0) {
+                serverModeEmitted = true;
+                Emit("skr:launch:server-mode",
+                     mode == 1 ? "enhanced" : mode == 0 ? "standard" : "unknown");
+            }
+        }
+    }
+    void ResetStage() {
+        stage = LaunchStage::Idle;
+        serverMode.store(-1, std::memory_order_relaxed);
+        serverModeEmitted = false;
+        std::lock_guard<std::mutex> lock(stepMutex);
+        stepInbox = LaunchStage::Idle;
+    }
     void ReturnToLobby(const std::string& error = {}) {
         if (process) { CloseHandle(process); process = nullptr; }
         launching = handedOver = sessionReady = cancelling = false;
         ipc::TraceHandoff("lobby-restored");
+        ResetStage();
         // Restore WebView2 visibility (hidden during handoff).
         if (controller) controller->put_IsVisible(TRUE);
         SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -107,19 +184,32 @@ struct Window {
         config.serverAddress = host; config.serverPort = port; config.playerName = Wide(nickname);
         config.frameReady = frame; config.takeover = takeover; config.sessionReady = ready;
         launching = true; handedOver = sessionReady = cancelling = false;
+        ResetStage();
         ipc::TraceHandoff("launch-started");
         deadline = GetTickCount64() + 120000;
         Emit("skr:launch:loading");
+        Advance(LaunchStage::Preflight);
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        launch = std::async(std::launch::async, [c = config]() mutable {
+        config.onStep = [this](LaunchStep s) {
+            switch (s) {
+                case LaunchStep::ProcessCreated: ReportStep(LaunchStage::Starting); break;
+                case LaunchStep::ClientInjected: ReportStep(LaunchStage::Injecting); break;
+                case LaunchStep::ClientReady:    ReportStep(LaunchStage::ClientReady); break;
+                case LaunchStep::GameResumed:    ReportStep(LaunchStage::WaitingFrame); break;
+            }
+        };
+        launch = std::async(std::launch::async, [this, c = config]() mutable {
             const auto discovery = lobby::QueryServer(c.serverAddress + ":" + std::to_string(c.serverPort), 1500, true);
             c.enhancedAdvertised = discovery.rulesKnown && discovery.skrClient == "2";
+            serverMode.store(!discovery.rulesKnown ? 2 : (c.enhancedAdvertised ? 1 : 0),
+                             std::memory_order_relaxed);
             Started r{LaunchResult::ProcessCreateFailed, 0, nullptr};
             r.result = LaunchGame(c, r.pid, r.process);
             return r;
         });
     }
     void TickLaunch() {
+        PumpLaunchProgress();
         if (launch.valid() && launch.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             try {
                 auto r = launch.get(); process = r.process; pid = r.pid;
@@ -129,7 +219,16 @@ struct Window {
         if (!process) return;
         if (cancelling) TerminateProcess(process, 1);
         if (WaitForSingleObject(process, 0) == WAIT_OBJECT_0) {
-            ReturnToLobby(sessionReady ? "" : "Jocul s-a închis înainte de finalizarea încărcării."); return;
+            DWORD exitCode = 0;
+            GetExitCodeProcess(process, &exitCode);
+            const auto rejection = skr::RejectionForExitCode(exitCode);
+            if (rejection != protocol::RejectionReason::None) {
+                ReturnToLobby(protocol::RejectionDisplayText(
+                    rejection, skr::SupportedClientsForExitCode(exitCode)));
+            } else {
+                ReturnToLobby(sessionReady ? "" : "Jocul s-a închis înainte de finalizarea încărcării.");
+            }
+            return;
         }
         if (!handedOver && WaitForSingleObject(frame, 0) == WAIT_OBJECT_0) {
             // Child signalled only after a successful Present of the SKR cover.
@@ -179,12 +278,15 @@ struct Window {
             SetEvent(takeover);
             ipc::TraceHandoff("frame-confirmed-window-hidden");
         }
+        if (handedOver) Advance(LaunchStage::Handoff);
         if (!sessionReady && WaitForSingleObject(ready, 0) == WAIT_OBJECT_0) {
             sessionReady = true; ipc::TraceHandoff("session-visual-ready");
+            Advance(LaunchStage::SessionReady);
         }
         if (!sessionReady && GetTickCount64() >= deadline) {
             TerminateProcess(process, 1);
             ipc::TraceHandoff("handoff-timeout");
+            stage = LaunchStage::Failed;
             // Keep monitoring until the child has actually exited before another launch.
             deadline = GetTickCount64() + 10000;
             SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -391,14 +493,27 @@ LobbyResult ShowLobbyWindow(HINSTANCE instance, const std::wstring& lobbyDir, bo
     if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return {true};
     auto state = std::make_shared<Window>();
     if (launchConfig) { state->config = *launchConfig; state->canLaunch = true; }
+    // Application icon embedded by apps/launcher/SKRLauncher.rc (IDI_SKRLAUNCHER).
+    // Explorer reads it straight off the executable, but the taskbar and Alt+Tab
+    // use the *window* icon, so it has to be set on the class and the HWND too.
+    // LR_SHARED handles are owned by the system and must not be destroyed.
+    const HINSTANCE iconModule = instance ? instance : GetModuleHandleW(nullptr);
+    const HICON iconBig = static_cast<HICON>(LoadImageW(iconModule, MAKEINTRESOURCEW(kAppIconResourceId),
+        IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED));
+    const HICON iconSmall = static_cast<HICON>(LoadImageW(iconModule, MAKEINTRESOURCEW(kAppIconResourceId),
+        IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
+
     WNDCLASSW wc{};
     wc.lpfnWndProc = Proc; wc.hInstance = instance; wc.lpszClassName = L"SKRExternalLobby";
     wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
     wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    wc.hIcon = iconBig;
     RegisterClassW(&wc);
     state->hwnd = CreateWindowExW(0, wc.lpszClassName, L"SKR Launcher experimental", WS_POPUP,
         0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), nullptr, nullptr, instance, state.get());
     if (!state->hwnd) { CoUninitialize(); return {true}; }
+    if (iconBig) SendMessageW(state->hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(iconBig));
+    if (iconSmall) SendMessageW(state->hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(iconSmall));
     ShowWindow(state->hwnd, SW_SHOW);
     SetTimer(state->hwnd, 1, 100, nullptr);
     PWSTR local = nullptr;

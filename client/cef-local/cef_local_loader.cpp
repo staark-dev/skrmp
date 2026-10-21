@@ -64,38 +64,75 @@ bool Resolve(HMODULE mod, const char* name, T& out) {
     return true;
 }
 
+// Directory holding this module (SKR.Client.dll), with a trailing slash.
+// The bundled, self-contained CEF runtime sits in "cef\\" beside it.
+std::wstring SelfDir() {
+    HMODULE self = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(&SelfDir), &self);
+    wchar_t p[MAX_PATH];
+    DWORD n = GetModuleFileNameW(self, p, MAX_PATH);
+    if (!n || n >= MAX_PATH) return {};
+    std::wstring s(p, n);
+    auto slash = s.find_last_of(L'\\');
+    if (slash == std::wstring::npos) return {};
+    return s.substr(0, slash + 1);
+}
+
+// Directory of the hosting process (gta_sa.exe), without a trailing slash.
+// Used only to locate an existing CEF install; nothing is ever written here.
+std::wstring GameDir() {
+    wchar_t exe[MAX_PATH]{};
+    DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    if (!n || n >= MAX_PATH) return {};
+    std::wstring dir(exe, n);
+    auto slash = dir.rfind(L'\\');
+    if (slash == std::wstring::npos) return {};
+    dir.resize(slash);
+    return dir;
+}
+
+// client.dll imports libcef.dll implicitly, so libcef must resolve from the
+// same folder. LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR does that without altering
+// the process-wide search path.
+HMODULE LoadCefModule(const std::wstring& path) {
+    if (path.empty()) return nullptr;
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return nullptr;
+    Log("loading omp-cef from %ls", path.c_str());
+    HMODULE mod = LoadLibraryExW(path.c_str(), nullptr,
+                                 LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if (!mod) Log("LoadLibraryExW failed: error %lu", GetLastError());
+    return mod;
+}
+
 } // namespace
 
 bool TryLoad() {
     std::lock_guard<std::mutex> lk(g_loadMutex);
     if (g_loaded.load()) return true;
 
-    // omp-cef's client.dll lives in <gta_dir>/cef/client.dll.
-    // It's loaded by cef.asi before we get here; try GetModuleHandle first.
+    // Load order, deliberately:
+    //   1. A client.dll already in this process -- a player's own omp-cef
+    //      install, loaded by cef.asi. It owns the CEF runtime, so we use it
+    //      and never load a second libcef alongside it.
+    //   2. Our bundled, self-contained runtime beside SKR.Client.dll.
+    //   3. The classic <gta_dir>\\cef\\client.dll layout.
+    // Nothing is installed into, written to or removed from the GTA directory.
     HMODULE mod = GetModuleHandleW(L"client.dll");
-    if (!mod) {
-        // Load from <gta_dir>/cef/client.dll.
-        // client.dll depends on libcef.dll which lives in the same cef/ folder.
-        // Resolve siblings without changing the process-wide DLL search path.
-        wchar_t exe[MAX_PATH]{};
-        DWORD length = GetModuleFileNameW(nullptr, exe, MAX_PATH);
-        if (!length || length >= MAX_PATH) return false;
-        std::wstring dir(exe);
-        auto slash = dir.rfind(L'\\');
-        if (slash != std::wstring::npos) dir.resize(slash);
-        std::wstring cefDir = dir + L"\\cef";
-        std::wstring path = cefDir + L"\\client.dll";
-        Log("loading omp-cef from %ls", path.c_str());
-        mod = LoadLibraryExW(path.c_str(), nullptr,
-                             LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    const bool foreignRuntime = mod != nullptr;
+    if (mod) {
+        Log("a CEF runtime is already loaded in this process; using it");
+    } else {
+        mod = LoadCefModule(SelfDir() + L"cef\\client.dll");
         if (!mod) {
-            DWORD err = GetLastError();
-            Log("LoadLibraryW failed: error %lu", err);
+            const std::wstring gameDir = GameDir();
+            if (!gameDir.empty()) mod = LoadCefModule(gameDir + L"\\cef\\client.dll");
         }
     }
 
     if (!mod) {
-        Log("omp-cef client.dll not found");
+        Log("omp-cef client.dll not found (bundled or game directory)");
         return false;
     }
 
@@ -118,7 +155,13 @@ bool TryLoad() {
     ok &= Resolve(mod, "skr_cef_gta_window_active",  g_api.cef_gta_window_active);
 
     if (!ok) {
-        Log("one or more omp-cef exports missing — falling back to samp-cef path");
+        if (foreignRuntime)
+            Log("incompatible CEF runtime already loaded in this process: required SKR exports "
+                "are missing. Enhanced CEF is disabled for this session. The bundled runtime is "
+                "deliberately NOT loaded, because two libcef instances in one process would crash "
+                "the game. Ordinary play is unaffected.");
+        else
+            Log("one or more omp-cef exports missing — falling back to samp-cef path");
         memset(&g_api, 0, sizeof(g_api));
         return false;
     }

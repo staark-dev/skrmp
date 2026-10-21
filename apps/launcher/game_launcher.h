@@ -7,8 +7,22 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace skr::launcher {
+
+// Coarse launch milestones, reported while LaunchGame runs. Each one is a
+// fact observed in this process -- never an estimate and never a percentage.
+enum class LaunchStep : uint8_t {
+    ProcessCreated,  // CreateProcessW returned; the game is suspended
+    ClientInjected,  // SKR.Client.dll is loaded in the target process
+    ClientReady,     // SkrRemoteInit returned 0 (hooks installed, AC up)
+    GameResumed      // main thread resumed; the cover can start rendering
+};
+
+// Invoked on the caller's (worker) thread as each milestone is reached. It
+// must not block or touch UI: the launcher marshals these onto its UI timer.
+using LaunchProgressCallback = std::function<void(LaunchStep)>;
 
 struct LaunchConfig {
     std::wstring gtaSaPath;      // Full path to gta_sa.exe
@@ -22,6 +36,7 @@ struct LaunchConfig {
     HANDLE sessionReady = nullptr;
     bool enhancedAdvertised = false; // Fresh native query, not a UI claim.
     bool localHandoffTest = false; // Explicit launcher-only development switch.
+    LaunchProgressCallback onStep; // Optional progress sink; empty = no reporting.
 };
 
 enum class LaunchResult : uint8_t {

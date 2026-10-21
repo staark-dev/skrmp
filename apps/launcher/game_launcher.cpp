@@ -83,6 +83,10 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
     pidOut = 0;
     hProcessOut = nullptr;
 
+    // Progress is reported only after the corresponding step actually
+    // succeeded, so a milestone can never run ahead of the real state.
+    auto step = [&config](LaunchStep s) { if (config.onStep) config.onStep(s); };
+
     // Validate paths
     if (GetFileAttributesW(config.gtaSaPath.c_str()) == INVALID_FILE_ATTRIBUTES)
         return LaunchResult::GtaNotFound;
@@ -142,6 +146,7 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
         return LaunchResult::ProcessCreateFailed;
 
     pidOut = pi.dwProcessId;
+    step(LaunchStep::ProcessCreated);
 
     // Inject SKR.Client.dll — lobby, AC, CEF overlay
     HMODULE remoteModule = InjectDll(pi.hProcess, config.clientDllPath.c_str());
@@ -158,6 +163,7 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
         CloseHandle(pi.hProcess);
         return LaunchResult::StartupFilesFailed;
     }
+    step(LaunchStep::ClientInjected);
 
     // Find SkrRemoteInit in the remote process (same DLL, different base address)
     auto remoteInit = FindRemoteExport(remoteModule, config.clientDllPath.c_str(), "SkrRemoteInit");
@@ -237,6 +243,7 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
         CloseHandle(pi.hProcess);
         return LaunchResult::InjectionFailed;
     }
+    step(LaunchStep::ClientReady);
 
     // Resume game's main thread — D3D9 hooks are installed, intro will render
     if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1)) {
@@ -245,6 +252,8 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
         CloseHandle(pi.hProcess);
         return LaunchResult::ResumeThreadFailed;
     }
+
+    step(LaunchStep::GameResumed);
 
     CloseHandle(pi.hThread);
     hProcessOut = pi.hProcess;
