@@ -1,0 +1,13 @@
+// SKR Enhanced Launcher - Windows resource script.
+//
+// Application icon only. No behavioural or versioning resources are declared
+// here, so adding this file cannot change how the launcher runs.
+//
+// Explorer, the taskbar and Alt+Tab display the ICON resource with the lowest
+// numeric id, so IDI_SKRLAUNCHER is deliberately 1.
+//
+// The path is resolved relative to this .rc file by the resource compiler.
+
+#define IDI_SKRLAUNCHER 1
+
+IDI_SKRLAUNCHER ICON "../../assets/SKRLauncher.ico"
