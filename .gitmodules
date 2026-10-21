@@ -1,0 +1,3 @@
+[submodule "deps/omp-cef"]
+	path = deps/omp-cef
+	url = https://github.com/staark-dev/omp-cef.git
