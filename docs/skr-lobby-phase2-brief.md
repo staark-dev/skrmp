@@ -4,7 +4,7 @@ Target audience: a fresh agent (or human engineer) picking up Phase 2 of the
 in-game SKR lobby after Phase 1 lands. This document carries every piece of
 context Phase 2 needs so no earlier conversation has to be replayed.
 
-Branch snapshot this brief describes: `claude/skr-lobby-phase1-40099c` at
+Branch snapshot this brief describes: `skr-lobby-phase1` at
 commit `9953029` (Phase 1 bug-fix commit). All paths are relative to that
 checkout.
 
@@ -283,9 +283,9 @@ flag) so SA-MP's auto-connect args don't skip CMenuManager.
 ## 7. Shared workspaces
 
 - Repository root (worktree):
-  `C:\Users\Staark\Desktop\SKR Platform\.claude\worktrees\skr-lobby-phase1-40099c`
+  `C:\Users\Staark\Desktop\SKR Platform` (Phase 1 worktree)
 - Parent session's shared notes:
-  `C:\Users\Staark\AppData\Roaming\Claude\side-session-notes\local_adcad4a1-f249-4c78-86ec-bdd96009afe5\`
+  `docs/phase1-handover/` (Phase 1 development notes)
   — `skr-lobby-phase1.md` has the chronological Phase 1 handover (what
   landed, what was broken, how it was fixed).
 - SA-MP reverse-engineering reference: `D:\SA-MP Reverse\` and
