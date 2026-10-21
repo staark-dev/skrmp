@@ -15,11 +15,12 @@ struct EnhancedSession {
     ClientMode mode = ClientMode::Standard;
     uint32_t token = 0;
     uint64_t deadline = 0;
-    bool Begin(uint8_t version, uint8_t capabilities, uint32_t generation, uint64_t now) {
+    bool Begin(uint8_t version, uint8_t capabilities, uint32_t generation, uint64_t now,
+               uint64_t timeoutMs = kEnhancedTimeoutMs) {
         if (mode != ClientMode::Standard || version != kEnhancedVersion ||
-            capabilities != kEnhancedCapabilities || !generation) return false;
+            capabilities != kEnhancedCapabilities || !generation || !timeoutMs) return false;
         mode = ClientMode::EnhancedCandidate; token = generation;
-        deadline = now + kEnhancedTimeoutMs;
+        deadline = now + timeoutMs;
         return true;
     }
     bool Confirm(uint8_t version, uint8_t capabilities, uint32_t echoed, uint64_t now) {

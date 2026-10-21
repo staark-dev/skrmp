@@ -50,6 +50,10 @@ add_executable(SKRLauncher WIN32
   apps/launcher/inventory.cpp
   apps/launcher/game_launcher.cpp
 )
+# Windows application icon (resource-only; no behavioural change).
+if(WIN32)
+  target_sources(SKRLauncher PRIVATE apps/launcher/SKRLauncher.rc)
+endif()
 target_include_directories(SKRLauncher PRIVATE
   ${CMAKE_SOURCE_DIR}/apps/launcher
   ${CMAKE_SOURCE_DIR}/shared

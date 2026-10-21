@@ -88,8 +88,9 @@ bool SkrClientStateHandler::onReceive(IPlayer& peer, NetworkBitStream& bs) {
 // ── RPC 25 filter: block non-SKR clients at join ────────
 
 // Standard layout: open.mp 3d20f3dc Shared/NetCode/core.hpp PlayerConnect.
-bool SkrJoinFilter::onReceive(IPlayer&, NetworkBitStream& bs) {
-    return protocol::ValidateStandardJoin(bs);
+bool SkrJoinFilter::onReceive(IPlayer& peer, NetworkBitStream& bs) {
+    if (!protocol::ValidateStandardJoin(bs)) return false;
+    return gate_ && gate_->AdmitInitial(peer);
 }
 
 bool SkrRadarRectHandler::onReceive(IPlayer& peer, NetworkBitStream& bs) {
@@ -232,6 +233,15 @@ void SkrGateComponent::onLoad(ICore* c) {
     core_ = c;
     g_gate = this;
     core_->printLn("SKR Gate component loaded (v0.1.0)");
+
+    if (!clientPolicy_.LoadFromFile("skr-runtime.json", clientPolicyError_)) {
+        core_->logLn(LogLevel::Error, "[SKR ClientPolicy] initialization failed: %s",
+                     clientPolicyError_.c_str());
+        core_->logLn(LogLevel::Error, "[SKR ClientPolicy] fail-closed: all new clients will be rejected");
+    }
+    for (const std::string& warning : clientPolicy_.Warnings()) {
+        core_->logLn(LogLevel::Warning, "[SKR ClientPolicy] %s", warning.c_str());
+    }
 }
 
 void SkrGateComponent::onInit(IComponentList* components) {
@@ -246,7 +256,7 @@ void SkrGateComponent::onInit(IComponentList* components) {
     core_->getEventDispatcher().addEventHandler(this);
 
     // Register per-RPC handler for CLIENT_JOIN (RPC 25) — high priority to run first
-    joinFilter_.setCore(core_);
+    joinFilter_.setOwner(this);
     core_->addPerRPCInEventHandler<kRPC_ClientJoin>(&joinFilter_, EventPriority_FairlyHigh);
 
     clientStateHandler_.setOwner(this, core_);
@@ -262,15 +272,47 @@ void SkrGateComponent::onInit(IComponentList* components) {
 void SkrGateComponent::onReady() {
     core_->printLn("SKR Gate: ready, enforcing ticket-based auth");
 
-    // Advertise native SKR support in the query rules (shared/protocol/query_rules.h).
-    bool published = false;
+    // Advertise only the effective, enforced policy. LegacyNetwork keeps the
+    // branded version rule and allows this trusted component to update allowed_clients.
+    bool skrPublished = false;
+    bool clientsPublished = false;
+    bool modePublished = false;
+    bool artworkPublished = false;
+    const std::string advertised = clientPolicy_.AdvertisedClients();
+    const auto& artwork = clientPolicy_.Artwork();
     for (INetwork* network : core_->getNetworks()) {
         if (auto* query = queryExtension<INetworkQueryExtension>(network)) {
-            published = query->addRule(protocol::kSkrQueryRule, protocol::kSkrQueryRuleValue) || published;
+            skrPublished = query->addRule(protocol::kSkrQueryRule, protocol::kSkrQueryRuleValue) || skrPublished;
+            clientsPublished = query->addRule("allowed_clients", advertised) || clientsPublished;
+            modePublished = query->addRule("skr_mode", clientPolicy_.ModeName()) || modePublished;
+            if (artwork.HasArtwork()) {
+                if (!artwork.bannerUrl.empty())
+                    query->addRule("banner", artwork.bannerUrl);
+                if (!artwork.logoUrl.empty())
+                    query->addRule("logo", artwork.logoUrl);
+                artworkPublished = true;
+            }
         }
     }
     core_->printLn("SKR Gate: query rule %s=%s %s", protocol::kSkrQueryRule,
-                   protocol::kSkrQueryRuleValue, published ? "published" : "NOT published");
+                   protocol::kSkrQueryRuleValue, skrPublished ? "published" : "NOT published");
+    core_->printLn("SKR Gate: query rule allowed_clients=%s %s", advertised.c_str(),
+                   clientsPublished ? "published" : "NOT published");
+    core_->printLn("SKR Gate: query rule skr_mode=%s %s", clientPolicy_.ModeName(),
+                   modePublished ? "published" : "NOT published");
+    if (artwork.HasArtwork()) {
+        core_->printLn("SKR Gate: artwork rules published (logo=%s, banner=%s)",
+                       artwork.logoUrl.empty() ? "(none)" : "yes",
+                       artwork.bannerUrl.empty() ? "(none)" : "yes");
+    }
+
+    core_->printLn("[SKR ClientPolicy] Mode: %s", clientPolicy_.ModeName());
+    core_->printLn("[SKR ClientPolicy] SA-MP 0.3.7: %s", clientPolicy_.AllowsSamp037() ? "allowed" : "denied");
+    core_->printLn("[SKR ClientPolicy] SKR Enhanced: %s", clientPolicy_.AllowsEnhanced() ? "allowed" : "denied");
+    core_->printLn("[SKR ClientPolicy] open.mp Client: %s", clientPolicy_.AllowsOpenMp() ? "allowed" : "denied");
+    core_->printLn("[SKR ClientPolicy] SA-MP 0.3.DL: %s", clientPolicy_.AllowsSamp03DL() ? "allowed" : "denied");
+    core_->printLn("[SKR ClientPolicy] Enhanced negotiation timeout: %llu ms",
+                   static_cast<unsigned long long>(clientPolicy_.EnhancedTimeoutMs()));
 }
 
 void SkrGateComponent::onFree(IComponent* component) {
@@ -289,9 +331,105 @@ void SkrGateComponent::reset() {
 
 // ── Player events ────────────────────────────────────────
 
+AdmissionDecision SkrGateComponent::EvaluateClient(const IPlayer& player) const {
+    // open.mp's own access/encryption handshake sets isUsingOmp(); this is not
+    // derived from the arbitrary version-name string supplied in RPC 25.
+    if (player.isUsingOmp() || player.getClientVersion() == ClientVersion::ClientVersion_openmp)
+        return clientPolicy_.Evaluate(WireClientType::OpenMp);
+
+    switch (player.getClientVersion()) {
+        case ClientVersion::ClientVersion_SAMP_037:
+            return clientPolicy_.Evaluate(WireClientType::Samp037);
+        case ClientVersion::ClientVersion_SAMP_03DL:
+            return clientPolicy_.Evaluate(WireClientType::Samp03DL);
+        default:
+            return clientPolicy_.Evaluate(WireClientType::Unsupported);
+    }
+}
+
+void SkrGateComponent::RejectForClientPolicy(IPlayer& player, AdmissionDecision decision) {
+    const protocol::RejectionReason reason = decision == AdmissionDecision::DenyUnsupported
+        ? protocol::RejectionReason::UnsupportedClientVersion
+        : protocol::RejectionReason::ClientVersionNotAllowed;
+    core_->logLn(LogLevel::Warning, "[SKR ClientPolicy] Rejected player %d: %s",
+                 player.getID(), AdmissionReason(decision));
+    RejectWithReason(player, reason);
+}
+
+uint8_t SkrGateComponent::SupportedClientMask() const {
+    uint8_t mask = 0;
+    if (clientPolicy_.AllowsSamp037()) mask |= protocol::SupportedSamp037;
+    if (clientPolicy_.AllowsEnhanced()) mask |= protocol::SupportedSkrEnhanced;
+    if (clientPolicy_.AllowsOpenMp()) mask |= protocol::SupportedOpenMp;
+    if (clientPolicy_.AllowsSamp03DL()) mask |= protocol::SupportedSamp03DL;
+    return mask;
+}
+
+bool SkrGateComponent::SendEnhancedRejection(IPlayer& player, protocol::RejectionReason reason) {
+    const protocol::RejectionMessage message {
+        protocol::kEnhancedMarker,
+        protocol::kEnhancedRejectionStep,
+        protocol::kRejectionVersion,
+        static_cast<uint8_t>(reason),
+        SupportedClientMask(),
+        {0, 0, 0}
+    };
+    NetworkBitStream bs;
+    bs.Write(reinterpret_cast<const char*>(&message), sizeof(message));
+    return player.sendRPC(protocol::kRpcSessionInfo,
+        Span<uint8_t>(bs.GetData(), bs.GetNumberOfBitsUsed()), OrderingChannel_SyncRPC);
+}
+
+bool SkrGateComponent::SendLegacyRejection(IPlayer& player, protocol::RejectionReason reason) {
+    const NewConnectionResult result =
+        (reason == protocol::RejectionReason::UnsupportedClientVersion ||
+         reason == protocol::RejectionReason::ClientVersionNotAllowed)
+        ? NewConnectionResult_VersionMismatch : NewConnectionResult_BadMod;
+    NetworkBitStream bs;
+    bs.writeUINT8(static_cast<uint8_t>(result));
+    return player.sendRPC(130, Span<uint8_t>(bs.GetData(), bs.GetNumberOfBitsUsed()),
+                          OrderingChannel_SyncRPC);
+}
+
+void SkrGateComponent::RejectWithReason(IPlayer& player, protocol::RejectionReason reason,
+                                         bool forceEnhancedNotice) {
+    bool enhancedCapable = forceEnhancedNotice;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(player.getID());
+        if (it != players_.end()) {
+            enhancedCapable = enhancedCapable ||
+                it->second.enhanced.mode == protocol::ClientMode::EnhancedCandidate ||
+                it->second.enhanced.mode == protocol::ClientMode::Enhanced;
+            it->second.state = SkrPlayerState::Rejected;
+        }
+    }
+    const bool enhancedSent = enhancedCapable && SendEnhancedRejection(player, reason);
+    const bool legacySent = SendLegacyRejection(player, reason);
+    core_->logLn(LogLevel::Warning,
+        "[SKR Rejection] player=%d code=%s supported=\"%s\" enhanced_notice=%s legacy_notice=%s",
+        player.getID(), protocol::RejectionCode(reason),
+        protocol::SupportedClientsText(SupportedClientMask()).c_str(),
+        enhancedSent ? "sent" : "unavailable", legacySent ? "sent" : "failed");
+    player.kick();
+}
+
+bool SkrGateComponent::AdmitInitial(IPlayer& player) {
+    const AdmissionDecision decision = EvaluateClient(player);
+    if (decision == AdmissionDecision::Allow || decision == AdmissionDecision::RequireEnhanced)
+        return true;
+    RejectForClientPolicy(player, decision);
+    return false;
+}
+
 void SkrGateComponent::onIncomingConnection(IPlayer& player, StringView ipAddress,
                                              unsigned short port) {
     int id = player.getID();
+    const AdmissionDecision decision = EvaluateClient(player);
+    if (decision != AdmissionDecision::Allow && decision != AdmissionDecision::RequireEnhanced) {
+        RejectForClientPolicy(player, decision);
+        return;
+    }
     core_->printLn("SKR Gate: incoming connection from %.*s:%u (id %d)",
                    static_cast<int>(ipAddress.length()), ipAddress.data(), port, id);
 
@@ -299,10 +437,21 @@ void SkrGateComponent::onIncomingConnection(IPlayer& player, StringView ipAddres
     auto& data = players_[id];
     data.Reset();
     data.generation = ++generationCounter_;
+    if (decision == AdmissionDecision::RequireEnhanced) {
+        data.enhancedRequired = true;
+        data.enhancedAdmissionDeadlineMs = NowMs() + clientPolicy_.EnhancedTimeoutMs();
+    }
 }
 
 void SkrGateComponent::onPlayerConnect(IPlayer& player) {
-    core_->printLn("SKR Gate: player %d connected in hybrid mode (not authenticated)", player.getID());
+    bool enhancedRequired = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(player.getID());
+        if (it != players_.end()) enhancedRequired = it->second.enhancedRequired;
+    }
+    core_->printLn("SKR Gate: player %d connected in %s mode (not authenticated)",
+                   player.getID(), enhancedRequired ? "enhanced-pending" : clientPolicy_.ModeName());
 }
 
 void SkrGateComponent::onPlayerDisconnect(IPlayer& player, PeerDisconnectReason reason) {
@@ -439,27 +588,38 @@ void SkrGateComponent::onTick(Microseconds elapsed, TimePoint /*now*/) {
 
     uint64_t nowEpoch = static_cast<uint64_t>(std::time(nullptr));
 
-    std::vector<int> toKick;
+    struct PendingKick { int id; protocol::RejectionReason reason; };
+    std::vector<PendingKick> toKick;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto& [id, data] : players_) {
+            if (data.enhancedRequired && data.enhanced.mode == protocol::ClientMode::Enhanced) {
+                data.enhancedRequired = false;
+                data.enhancedAdmissionDeadlineMs = 0;
+            }
+            if (data.enhancedRequired && data.enhancedAdmissionDeadlineMs > 0 &&
+                NowMs() >= data.enhancedAdmissionDeadlineMs) {
+                data.state = SkrPlayerState::Rejected;
+                const auto reason = data.enhanced.mode == protocol::ClientMode::EnhancedCandidate
+                    ? protocol::RejectionReason::EnhancedNegotiationTimeout
+                    : protocol::RejectionReason::EnhancedRequired;
+                toKick.push_back({id, reason});
+                continue;
+            }
             data.enhanced.Expire(NowMs());
             if (data.state == SkrPlayerState::Challenged &&
                 data.challengeExpiresAt > 0 &&
                 nowEpoch > data.challengeExpiresAt) {
                 data.state = SkrPlayerState::Rejected;
-                toKick.push_back(id);
+                toKick.push_back({id, protocol::RejectionReason::AuthenticationFailed});
             }
         }
     }
 
-    for (int id : toKick) {
-        auto* player = core_->getPlayers().get(id);
+    for (const PendingKick& pending : toKick) {
+        auto* player = core_->getPlayers().get(pending.id);
         if (player) {
-            core_->printLn("SKR Gate: kicking player %d (auth timeout)", id);
-            player->sendClientMessage(Colour::FromRGBA(0xFF4444FF),
-                "Connection rejected: SKR Client required.");
-            player->kick();
+            RejectWithReason(*player, pending.reason);
         }
     }
 }
@@ -480,6 +640,13 @@ void SkrGateComponent::Negotiate(IPlayer& player, NetworkBitStream& bs) {
     uint32_t token = 0;
     if (!bs.readUINT8(marker) || !bs.readUINT8(step) || !bs.readUINT8(version) ||
         !bs.readUINT8(caps) || !bs.readUINT32(token) || marker != protocol::kEnhancedMarker) return;
+    const bool validStep = step == static_cast<uint8_t>(protocol::EnhancedStep::Hello) ||
+                           step == static_cast<uint8_t>(protocol::EnhancedStep::Confirm);
+    if (validStep && !clientPolicy_.AllowsEnhanced()) {
+        RejectWithReason(player, protocol::RejectionReason::ClientVersionNotAllowed,
+                         true /* valid SKR Enhanced envelope received */);
+        return;
+    }
     bool offer = false, confirmed = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -490,10 +657,14 @@ void SkrGateComponent::Negotiate(IPlayer& player, NetworkBitStream& bs) {
         if (step == static_cast<uint8_t>(protocol::EnhancedStep::Hello) && token == 0) {
             uint32_t generation = static_cast<uint32_t>(++generationCounter_);
             if (!generation) generation = static_cast<uint32_t>(++generationCounter_);
-            offer = session.Begin(version, caps, generation, NowMs());
+            offer = session.Begin(version, caps, generation, NowMs(), clientPolicy_.EnhancedTimeoutMs());
             token = session.token;
         } else if (step == static_cast<uint8_t>(protocol::EnhancedStep::Confirm)) {
             confirmed = session.Confirm(version, caps, token, NowMs());
+            if (confirmed) {
+                it->second.enhancedRequired = false;
+                it->second.enhancedAdmissionDeadlineMs = 0;
+            }
         }
     }
     if (offer) {
@@ -513,7 +684,13 @@ bool SkrGateComponent::IssueChallenge(int playerId,
                                        protocol::ChallengeMessage& challengeOut) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto& data = players_[playerId];
+    const protocol::EnhancedSession enhanced = data.enhanced;
+    const bool enhancedRequired = data.enhancedRequired;
+    const uint64_t enhancedDeadline = data.enhancedAdmissionDeadlineMs;
     data.Reset();
+    data.enhanced = enhanced;
+    data.enhancedRequired = enhancedRequired;
+    data.enhancedAdmissionDeadlineMs = enhancedDeadline;
     data.generation = ++generationCounter_;
 
     crypto_.RandomBytes(data.connectionId, protocol::kConnectionIdSize);
@@ -584,25 +761,11 @@ void SkrGateComponent::AuthorizePlayer(int playerId, uint32_t accountId) {
     }
 }
 
-void SkrGateComponent::RejectPlayer(int playerId, const char* reason) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = players_.find(playerId);
-    if (it == players_.end()) return;
-
-    it->second.state = SkrPlayerState::Rejected;
-
-    if (core_) {
-        core_->printLn("SKR Gate: player %d rejected (%s)", playerId,
-                       reason ? reason : "unknown");
-
-        // Send reject message and kick
-        auto* player = core_->getPlayers().get(playerId);
-        if (player) {
-            player->sendClientMessage(Colour::FromRGBA(0xFF0000FF),
-                "This server requires SKR Client.");
-            player->kick();
-        }
-    }
+void SkrGateComponent::RejectPlayer(int playerId, protocol::RejectionReason reason) {
+    if (!protocol::IsValidRejectionReason(reason))
+        reason = protocol::RejectionReason::AuthenticationFailed;
+    IPlayer* player = core_ ? core_->getPlayers().get(playerId) : nullptr;
+    if (player) RejectWithReason(*player, reason);
 }
 
 uint8_t SkrGateComponent::ProcessAcHeartbeat(int playerId,

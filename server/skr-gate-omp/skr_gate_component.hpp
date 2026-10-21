@@ -9,7 +9,9 @@
 #include "protocol/query_rules.h"
 #include "protocol/radar_style.h"
 #include "protocol/radar_rect.h"
+#include "protocol/rejection.h"
 #include "crypto/crypto.h"
+#include "client_policy.hpp"
 #include <bitstream.hpp>
 
 #include <cstdint>
@@ -34,6 +36,8 @@ struct SkrPlayerData {
     uint8_t nonce[protocol::kNonceSize]{};
     uint64_t generation = 0;
     uint64_t challengeExpiresAt = 0;
+    uint64_t enhancedAdmissionDeadlineMs = 0;
+    bool enhancedRequired = false;
     uint32_t accountId = 0;
 
     bool sessionInfoSent = false;
@@ -58,6 +62,8 @@ struct SkrPlayerData {
         state = SkrPlayerState::Connected;
         generation = 0;
         challengeExpiresAt = 0;
+        enhancedAdmissionDeadlineMs = 0;
+        enhancedRequired = false;
         accountId = 0;
         sessionInfoSent = false;
         radarStyle = protocol::RadarStyle::Round;
@@ -73,15 +79,15 @@ struct SkrPlayerData {
     }
 };
 
+class SkrGateComponent;
+
 class SkrJoinFilter final : public SingleNetworkInEventHandler {
 public:
     bool onReceive(IPlayer& peer, NetworkBitStream& bs) override;
-    void setCore(ICore* c) { core_ = c; }
+    void setOwner(SkrGateComponent* gate) { gate_ = gate; }
 private:
-    ICore* core_ = nullptr;
+    SkrGateComponent* gate_ = nullptr;
 };
-
-class SkrGateComponent;
 
 // RPC 240 (shared/protocol/client_state.h): display-only client state from SKRClient.dll.
 // Validated, rate-limited and exposed to scripts as player variables (PVars):
@@ -154,13 +160,14 @@ public:
     bool VerifyProof(int playerId, const protocol::ProofMessage& proof,
                      const uint8_t publicKey[crypto::kKeySize]);
     void AuthorizePlayer(int playerId, uint32_t accountId);
-    void RejectPlayer(int playerId, const char* reason);
+    void RejectPlayer(int playerId, protocol::RejectionReason reason);
     uint8_t ProcessAcHeartbeat(int playerId, const protocol::AcHeartbeatMessage& beat,
                                 uint64_t nowMs);
 
     const SkrPlayerData* GetPlayerData(int playerId) const;
     bool IsAuthorized(int playerId) const;
     bool IsEnhanced(int playerId) const;
+    bool AdmitInitial(IPlayer& player);
     void Negotiate(IPlayer& player, NetworkBitStream& bs);
     void SendSessionInfo(IPlayer& player);
     bool ScriptsHaveIntro();
@@ -176,10 +183,19 @@ public:
 private:
     // Sends the stored radar state if the player is authorized and has session info.
     void SendRadarStyle(int playerId);
+    AdmissionDecision EvaluateClient(const IPlayer& player) const;
+    void RejectForClientPolicy(IPlayer& player, AdmissionDecision decision);
+    void RejectWithReason(IPlayer& player, protocol::RejectionReason reason,
+                          bool forceEnhancedNotice = false);
+    bool SendEnhancedRejection(IPlayer& player, protocol::RejectionReason reason);
+    bool SendLegacyRejection(IPlayer& player, protocol::RejectionReason reason);
+    uint8_t SupportedClientMask() const;
 
     ICore* core_ = nullptr;
     IPawnComponent* pawn_ = nullptr;
     crypto::MockSigningProvider crypto_;
+    ClientPolicy clientPolicy_;
+    std::string clientPolicyError_;
 
     mutable std::mutex mutex_;
     std::unordered_map<int, SkrPlayerData> players_;

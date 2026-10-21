@@ -22,6 +22,7 @@ endif()
 # SKR Gate component — shared library (.dll on Windows, .so on Linux)
 add_library(${PROJECT_NAME} SHARED
     skr_gate_component.cpp
+    client_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/crypto/crypto.cpp
 )
 
@@ -55,3 +56,17 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 add_executable(SKREnhancedTests ../../tests/unit/test_enhanced.cpp)
 target_include_directories(SKREnhancedTests PRIVATE ../../shared ${OMP_NET_DIR})
 target_link_libraries(SKREnhancedTests PRIVATE OMP-SDK OMP-Network)
+
+add_executable(SKRClientPolicyTests
+    ../../tests/unit/test_client_policy.cpp
+    client_policy.cpp
+)
+target_include_directories(SKRClientPolicyTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../shared
+)
+
+add_executable(SKRRejectionTests ../../tests/unit/test_rejection.cpp)
+target_include_directories(SKRRejectionTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../shared
+)
