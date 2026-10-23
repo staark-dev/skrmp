@@ -82,6 +82,46 @@ using GetMaxMultiSamplingFn = int(__cdecl*)();
 using SetMultiSamplingFn = void(__cdecl*)(int);
 
 HWND g_window = nullptr;
+float g_uiScale = 1.0f;        // SKR UI scale multiplier (0.75 – 1.50)
+bool  g_uiScaleLoaded = false;
+
+// ── SKR UI scale persistence (file-based, not GTA engine) ──────────
+static char g_uiScalePath[MAX_PATH] = {};
+
+static const char* GetUiScalePath() {
+    if (g_uiScalePath[0]) return g_uiScalePath;
+    DWORD n = GetModuleFileNameA(nullptr, g_uiScalePath, MAX_PATH);
+    if (!n || n >= MAX_PATH) return nullptr;
+    char* slash = strrchr(g_uiScalePath, '\\');
+    if (!slash) return nullptr;
+    snprintf(slash + 1, MAX_PATH - (slash + 1 - g_uiScalePath), "SKR\\ui_scale.cfg");
+    return g_uiScalePath;
+}
+
+static void LoadUiScale() {
+    if (g_uiScaleLoaded) return;
+    g_uiScaleLoaded = true;
+    g_uiScale = 1.0f;
+    const char* path = GetUiScalePath();
+    if (!path) return;
+    FILE* f = fopen(path, "r");
+    if (!f) return;
+    float val = 1.0f;
+    if (fscanf(f, "%f", &val) == 1)
+        g_uiScale = std::clamp(val, 0.75f, 1.50f);
+    fclose(f);
+}
+
+static bool SaveUiScale() {
+    const char* path = GetUiScalePath();
+    if (!path) return false;
+    FILE* f = fopen(path, "w");
+    if (!f) return false;
+    fprintf(f, "%.2f\n", g_uiScale);
+    fclose(f);
+    return true;
+}
+
 int g_selectedVideoMode = -1;
 int g_requestedVideoMode = -1;
 bool g_videoRequestPending = false;
@@ -265,6 +305,8 @@ bool Read(Snapshot& out) {
         out.mouseSteering = Ref<bool>(kMouseSteering);
         out.mouseFlying = Ref<bool>(kMouseFlying);
         out.currentVideoMode = reinterpret_cast<GetCurrentVideoModeFn>(kGetCurrentVideoMode)();
+        LoadUiScale();
+        out.uiScale = g_uiScale;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         std::memset(&out, 0, sizeof(out));
@@ -432,5 +474,16 @@ bool SetRadioAutoSelect(bool value) {
 bool SetInvertMouseY(bool value) { return StoreAndSave(kInvertMouseY, value); }
 bool SetMouseSteering(bool value) { return StoreAndSave(kMouseSteering, value); }
 bool SetMouseFlying(bool value) { return StoreAndSave(kMouseFlying, value); }
+
+float GetUiScale() {
+    LoadUiScale();
+    return g_uiScale;
+}
+
+bool SetUiScale(float value) {
+    g_uiScale = std::clamp(value, 0.75f, 1.50f);
+    g_uiScaleLoaded = true;
+    return SaveUiScale();
+}
 
 } // namespace skr::native_pause::settings

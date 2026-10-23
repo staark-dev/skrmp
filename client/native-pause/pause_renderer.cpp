@@ -26,6 +26,7 @@
 #include "native-pause/pause_renderer.h"
 #include "native-pause/pause_input.h"
 #include "native-pause/pause_actions.h"
+#include "native-pause/pause_settings.h"
 
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -346,7 +347,7 @@ ServerInfo GetServerInfo() {
 // ═══════════════════════════════════════════════════════════════════════
 namespace colors {
     // Background / overlay
-    constexpr ImU32 kOverlay         = IM_COL32(0, 0, 0, 180);
+    constexpr ImU32 kOverlay         = IM_COL32(0, 0, 0, 255); // Fully opaque — hides game scene
     constexpr ImU32 kPanelBg         = IM_COL32(12, 12, 16, 235);
     constexpr ImU32 kPanelBorder     = IM_COL32(60, 55, 40, 160);
 
@@ -437,9 +438,81 @@ float GetScreenHeight() {
     return 600.0f;
 }
 
-// Scale relative to 1080p reference
+// ═══════════════════════════════════════════════════════════════════════
+// Resolution-Aware Layout System
+// ═══════════════════════════════════════════════════════════════════════
+// Computed once per frame from the D3D9 viewport.  Every position, size,
+// padding and font scale is derived from this struct — nothing is
+// hardcoded to a specific resolution.
+
+struct LayoutInfo {
+    float sw, sh;                // viewport pixels
+    float aspectRatio;           // sw / sh
+    float dpiScale;              // sh / 1080  (resolution factor)
+    float uiScale;               // user multiplier (0.75 – 1.50)
+    float scale;                 // dpiScale * uiScale (combined)
+
+    // Full-screen panel
+    float panelX, panelY;
+    float panelW, panelH;
+
+    // Content area (horizontally centred, clamped for ultrawide)
+    float contentX;
+    float contentW;
+    float contentMaxW;           // max before clamping
+
+    // Padding
+    float padX;                  // horizontal padding inside content area
+    float padY;                  // vertical padding
+
+    // Font scale multiplier for CFont (applied on top of per-call values)
+    // CFont already scales with resolution (640×448 virtual space maps to
+    // the full viewport), so this carries only the user's UI-scale pref
+    // and a floor for very low resolutions.
+    float fontFactor;
+
+    // Convenience
+    float S(float base) const { return base * scale; }
+};
+
+static LayoutInfo g_layout = {};
+
+static void ComputeLayout() {
+    LayoutInfo& L = g_layout;
+    L.sw = GetScreenWidth();
+    L.sh = GetScreenHeight();
+    L.aspectRatio = (L.sh > 0.0f) ? (L.sw / L.sh) : (16.0f / 9.0f);
+    L.dpiScale = L.sh / 1080.0f;
+    L.uiScale  = settings::GetUiScale();
+    L.scale    = L.dpiScale * L.uiScale;
+
+    // Full-screen panel (covers entire viewport)
+    L.panelX = 0.0f;
+    L.panelY = 0.0f;
+    L.panelW = L.sw;
+    L.panelH = L.sh;
+
+    // Content width: clamp to a max of ~1200 scaled px for ultrawide,
+    // but never wider than 92% of the viewport.
+    L.contentMaxW = fminf(L.sw * 0.92f, L.S(1200.0f));
+    L.contentW    = L.contentMaxW;
+    L.contentX    = (L.sw - L.contentW) * 0.5f;
+
+    // Padding
+    L.padX = L.S(30.0f);
+    L.padY = L.S(10.0f);
+
+    // Font factor: user UI scale, with a floor so text stays readable
+    // at very low resolutions (e.g. 640×480).
+    // At 480p dpiScale ≈ 0.44; floor ensures fontFactor ≥ 0.60.
+    L.fontFactor = fmaxf(L.uiScale, 0.60f / fmaxf(L.dpiScale, 0.01f));
+    // But also cap it so we don't blow up at huge scales
+    L.fontFactor = fminf(L.fontFactor, 2.0f);
+}
+
+// Scale relative to 1080p reference, incorporating user UI scale
 float Scale(float base) {
-    return base * (GetScreenHeight() / 1080.0f);
+    return base * g_layout.scale;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -465,10 +538,11 @@ bool DrawGtaButton(ImDrawList* dl, ImVec2 pos, ImVec2 size, const char* label,
                     colors::kGoldLine, 0.0f, 0, 1.0f);
     }
 
-    // Queue centred text
+    // Queue centred text (apply font factor for UI scale)
+    float ff = g_layout.fontFactor;
     float textX = pos.x + size.x * 0.5f;
     float textY = pos.y + size.y * 0.25f; // offset above centre for CFont baseline
-    QueueText(textX, textY, label, font, fontScaleW, fontScaleH, textColor, true);
+    QueueText(textX, textY, label, font, fontScaleW * ff, fontScaleH * ff, textColor, true);
 
     return clicked;
 }
@@ -479,8 +553,9 @@ bool DrawGtaButton(ImDrawList* dl, ImVec2 pos, ImVec2 size, const char* label,
 void DrawInfoRow(float x, float y, const char* label, const char* value,
                  cfont::CRGBA labelColor = colors::cDimWhite,
                  cfont::CRGBA valueColor = colors::cWhite) {
-    QueueText(x, y, label, cfont::FONT_SUBTITLES, 0.34f, 0.72f, labelColor);
-    QueueText(x + Scale(160.0f), y, value, cfont::FONT_SUBTITLES, 0.34f, 0.72f, valueColor);
+    float ff = g_layout.fontFactor;
+    QueueText(x, y, label, cfont::FONT_SUBTITLES, 0.34f * ff, 0.72f * ff, labelColor);
+    QueueText(x + Scale(160.0f), y, value, cfont::FONT_SUBTITLES, 0.34f * ff, 0.72f * ff, valueColor);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -490,15 +565,16 @@ void DrawInfoRow(float x, float y, const char* label, const char* value,
 void RenderTabMap(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
     float cx = contentPos.x + contentSize.x * 0.5f;
     float cy = contentPos.y;
+    float ff = g_layout.fontFactor;
 
     // Description text
     QueueText(cx, cy + Scale(30.0f),
               "Open the full-screen GTA map",
-              cfont::FONT_SUBTITLES, 0.38f, 0.80f, colors::cDimWhite, true);
+              cfont::FONT_SUBTITLES, 0.38f * ff, 0.80f * ff, colors::cDimWhite, true);
 
     QueueText(cx, cy + Scale(60.0f),
               "Press ENTER or click the button below",
-              cfont::FONT_SUBTITLES, 0.30f, 0.65f, colors::cDimGray, true);
+              cfont::FONT_SUBTITLES, 0.30f * ff, 0.65f * ff, colors::cDimGray, true);
 
     // Open Map button
     ImVec2 btnSize(Scale(280.0f), Scale(50.0f));
@@ -511,12 +587,13 @@ void RenderTabMap(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
 }
 
 void RenderTabGame(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
-    float lx = contentPos.x + Scale(30.0f); // left margin
+    float lx = contentPos.x + g_layout.padX; // left margin
     float cy = contentPos.y;
+    float ff = g_layout.fontFactor;
 
     // Section heading
     QueueText(lx, cy + Scale(15.0f),
-              "GAME INFO", cfont::FONT_GOTHIC, 0.52f, 1.00f, colors::cGold);
+              "GAME INFO", cfont::FONT_GOTHIC, 0.52f * ff, 1.00f * ff, colors::cGold);
 
     // Gold accent line under heading
     float lineY = cy + Scale(42.0f);
@@ -569,14 +646,15 @@ void RenderTabGame(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
 void RenderTabSettings(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
     float cx = contentPos.x + contentSize.x * 0.5f;
     float cy = contentPos.y;
+    float ff = g_layout.fontFactor;
 
     QueueText(cx, cy + Scale(30.0f),
               "Open GTA's native settings menu",
-              cfont::FONT_SUBTITLES, 0.38f, 0.80f, colors::cDimWhite, true);
+              cfont::FONT_SUBTITLES, 0.38f * ff, 0.80f * ff, colors::cDimWhite, true);
 
     QueueText(cx, cy + Scale(60.0f),
               "Video, audio, and control options",
-              cfont::FONT_SUBTITLES, 0.30f, 0.65f, colors::cDimGray, true);
+              cfont::FONT_SUBTITLES, 0.30f * ff, 0.65f * ff, colors::cDimGray, true);
 
     ImVec2 btnSize(Scale(280.0f), Scale(50.0f));
     ImVec2 btnPos(cx - btnSize.x * 0.5f, cy + Scale(110.0f));
@@ -590,10 +668,11 @@ void RenderTabSettings(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
 void RenderTabServers(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
     float cx = contentPos.x + contentSize.x * 0.5f;
     float cy = contentPos.y;
+    float ff = g_layout.fontFactor;
 
     // Heading
     QueueText(cx, cy + Scale(15.0f),
-              "SERVER BROWSER", cfont::FONT_GOTHIC, 0.48f, 0.95f, colors::cGold, true);
+              "SERVER BROWSER", cfont::FONT_GOTHIC, 0.48f * ff, 0.95f * ff, colors::cGold, true);
 
     float lineY = cy + Scale(42.0f);
     dl->AddLine(ImVec2(cx - Scale(80.0f), lineY),
@@ -602,26 +681,27 @@ void RenderTabServers(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
 
     QueueText(cx, cy + Scale(65.0f),
               "Server browser is available from the main lobby.",
-              cfont::FONT_SUBTITLES, 0.32f, 0.68f, colors::cDimWhite, true);
+              cfont::FONT_SUBTITLES, 0.32f * ff, 0.68f * ff, colors::cDimWhite, true);
 
     QueueText(cx, cy + Scale(95.0f),
               "Disconnect to return to the lobby.",
-              cfont::FONT_SUBTITLES, 0.30f, 0.65f, colors::cDimGray, true);
+              cfont::FONT_SUBTITLES, 0.30f * ff, 0.65f * ff, colors::cDimGray, true);
 }
 
 void RenderTabAbout(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
     float cx = contentPos.x + contentSize.x * 0.5f;
-    float lx = contentPos.x + Scale(30.0f);
+    float lx = contentPos.x + g_layout.padX;
     float cy = contentPos.y;
+    float ff = g_layout.fontFactor;
 
     // Title in Pricedown — the GTA accent font
     QueueText(cx, cy + Scale(10.0f),
-              "SKR ENHANCED", cfont::FONT_PRICEDOWN, 0.80f, 1.60f,
+              "SKR ENHANCED", cfont::FONT_PRICEDOWN, 0.80f * ff, 1.60f * ff,
               colors::cGold, true, 2);
 
     // Version in Pricedown smaller
     QueueText(cx, cy + Scale(55.0f),
-              "v0.1.0", cfont::FONT_PRICEDOWN, 0.45f, 0.90f,
+              "v0.1.0", cfont::FONT_PRICEDOWN, 0.45f * ff, 0.90f * ff,
               colors::cLightGold, true, 1);
 
     // Gold line
@@ -634,37 +714,37 @@ void RenderTabAbout(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
     float textY = cy + Scale(100.0f);
     QueueText(cx, textY,
               "A custom multiplayer platform for GTA San Andreas.",
-              cfont::FONT_SUBTITLES, 0.34f, 0.72f, colors::cDimWhite, true);
+              cfont::FONT_SUBTITLES, 0.34f * ff, 0.72f * ff, colors::cDimWhite, true);
 
     textY += Scale(28.0f);
     QueueText(cx, textY,
               "Built with passion for the SA-MP community.",
-              cfont::FONT_SUBTITLES, 0.32f, 0.68f, colors::cDimGray, true);
+              cfont::FONT_SUBTITLES, 0.32f * ff, 0.68f * ff, colors::cDimGray, true);
 
     // Keyboard shortcuts
     textY += Scale(50.0f);
     QueueText(lx, textY,
-              "CONTROLS", cfont::FONT_GOTHIC, 0.42f, 0.85f, colors::cGold);
+              "CONTROLS", cfont::FONT_GOTHIC, 0.42f * ff, 0.85f * ff, colors::cGold);
 
     textY += Scale(30.0f);
-    QueueText(lx, textY, "ESC", cfont::FONT_MENU, 0.35f, 0.72f, colors::cLightGold);
+    QueueText(lx, textY, "ESC", cfont::FONT_MENU, 0.35f * ff, 0.72f * ff, colors::cLightGold);
     QueueText(lx + Scale(100.0f), textY, "Open / Close pause menu",
-              cfont::FONT_SUBTITLES, 0.30f, 0.65f, colors::cDimWhite);
+              cfont::FONT_SUBTITLES, 0.30f * ff, 0.65f * ff, colors::cDimWhite);
 
     textY += Scale(22.0f);
-    QueueText(lx, textY, "Q / LEFT", cfont::FONT_MENU, 0.35f, 0.72f, colors::cLightGold);
+    QueueText(lx, textY, "Q / LEFT", cfont::FONT_MENU, 0.35f * ff, 0.72f * ff, colors::cLightGold);
     QueueText(lx + Scale(100.0f), textY, "Previous tab",
-              cfont::FONT_SUBTITLES, 0.30f, 0.65f, colors::cDimWhite);
+              cfont::FONT_SUBTITLES, 0.30f * ff, 0.65f * ff, colors::cDimWhite);
 
     textY += Scale(22.0f);
-    QueueText(lx, textY, "E / RIGHT", cfont::FONT_MENU, 0.35f, 0.72f, colors::cLightGold);
+    QueueText(lx, textY, "E / RIGHT", cfont::FONT_MENU, 0.35f * ff, 0.72f * ff, colors::cLightGold);
     QueueText(lx + Scale(100.0f), textY, "Next tab",
-              cfont::FONT_SUBTITLES, 0.30f, 0.65f, colors::cDimWhite);
+              cfont::FONT_SUBTITLES, 0.30f * ff, 0.65f * ff, colors::cDimWhite);
 
     textY += Scale(22.0f);
-    QueueText(lx, textY, "ENTER", cfont::FONT_MENU, 0.35f, 0.72f, colors::cLightGold);
+    QueueText(lx, textY, "ENTER", cfont::FONT_MENU, 0.35f * ff, 0.72f * ff, colors::cLightGold);
     QueueText(lx + Scale(100.0f), textY, "Activate selection",
-              cfont::FONT_SUBTITLES, 0.30f, 0.65f, colors::cDimWhite);
+              cfont::FONT_SUBTITLES, 0.30f * ff, 0.65f * ff, colors::cDimWhite);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -672,8 +752,12 @@ void RenderTabAbout(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
 // ═══════════════════════════════════════════════════════════════════════
 
 void RenderPauseMenu() {
-    float sw = GetScreenWidth();
-    float sh = GetScreenHeight();
+    // ── Compute layout from current D3D9 viewport ──────────────────
+    ComputeLayout();
+    const LayoutInfo& L = g_layout;
+    float sw = L.sw;
+    float sh = L.sh;
+    float ff = L.fontFactor;
 
     // ── Fade-in animation (300ms) ───────────────────────────────────
     DWORD now = GetTickCount();
@@ -683,35 +767,33 @@ void RenderPauseMenu() {
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, g_menuAlpha);
     ResetTextQueue();
 
-    // ── Full-screen dark overlay ────────────────────────────────────
+    // ── Full-screen opaque overlay (hides live game scene) ──────────
     ImDrawList* bgDraw = ImGui::GetBackgroundDrawList();
-    uint8_t overlayAlpha = static_cast<uint8_t>(180.0f * g_menuAlpha);
+    uint8_t overlayAlpha = static_cast<uint8_t>(255.0f * g_menuAlpha);
     bgDraw->AddRectFilled(ImVec2(0, 0), ImVec2(sw, sh),
                           IM_COL32(0, 0, 0, overlayAlpha));
 
-    // ── Panel dimensions ────────────────────────────────────────────
-    float panelW = fminf(sw * 0.82f, Scale(880.0f));
-    float panelH = fminf(sh * 0.78f, Scale(640.0f));
-    float panelX = (sw - panelW) * 0.5f;
-    float panelY = (sh - panelH) * 0.5f;
+    // ── Full-screen panel background ────────────────────────────────
+    bgDraw->AddRectFilled(ImVec2(0, 0), ImVec2(sw, sh), colors::kPanelBg);
 
-    // Draw panel background and border
-    ImDrawList* fgDraw = ImGui::GetForegroundDrawList();
-    ImVec2 panelMin(panelX, panelY);
-    ImVec2 panelMax(panelX + panelW, panelY + panelH);
+    // Top gold accent line (full width)
+    bgDraw->AddRectFilled(ImVec2(0, 0), ImVec2(sw, 2.0f), colors::kGoldLine);
 
-    // Main panel bg
-    bgDraw->AddRectFilled(panelMin, panelMax, colors::kPanelBg);
-    // Subtle border
-    bgDraw->AddRect(panelMin, panelMax, colors::kPanelBorder, 0.0f, 0, 1.0f);
-    // Top gold accent line
-    bgDraw->AddRectFilled(ImVec2(panelX, panelY),
-                          ImVec2(panelX + panelW, panelY + 2.0f),
-                          colors::kGoldLine);
+    // ── Content column (centred, clamped for ultrawide) ─────────────
+    float colX = L.contentX;
+    float colW = L.contentW;
 
-    // ── Invisible ImGui window for interaction (hit testing) ────────
-    ImGui::SetNextWindowPos(ImVec2(panelX, panelY));
-    ImGui::SetNextWindowSize(ImVec2(panelW, panelH));
+    // Side borders for content column (visual framing on ultrawide)
+    if (L.aspectRatio > 2.0f) {
+        bgDraw->AddLine(ImVec2(colX, 0), ImVec2(colX, sh),
+                        colors::kPanelBorder, 1.0f);
+        bgDraw->AddLine(ImVec2(colX + colW, 0), ImVec2(colX + colW, sh),
+                        colors::kPanelBorder, 1.0f);
+    }
+
+    // ── Invisible ImGui window for interaction (covers full viewport)
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(sw, sh));
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar |
                              ImGuiWindowFlags_NoResize |
@@ -725,25 +807,25 @@ void RenderPauseMenu() {
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
     // ── Title: "SKR ENHANCED" in FONT_GOTHIC ────────────────────────
-    float titleX = panelX + panelW * 0.5f;
-    float titleY = panelY + Scale(12.0f);
+    float titleX = colX + colW * 0.5f;
+    float titleY = Scale(12.0f);
     QueueText(titleX, titleY, "SKR ENHANCED",
-              cfont::FONT_GOTHIC, 0.68f, 1.35f, colors::cGold, true, 2);
+              cfont::FONT_GOTHIC, 0.68f * ff, 1.35f * ff, colors::cGold, true, 2);
 
     // Gold accent line under title
-    float accentY = panelY + Scale(48.0f);
+    float accentY = Scale(48.0f);
     dl->AddLine(ImVec2(titleX - Scale(80.0f), accentY),
                 ImVec2(titleX + Scale(80.0f), accentY),
                 colors::kGoldLine, 2.0f);
 
-    // ── Tab bar ─────────────────────────────────────────────────────
-    float tabBarY = panelY + Scale(58.0f);
+    // ── Tab bar (spans content column) ──────────────────────────────
+    float tabBarY = Scale(58.0f);
     float tabH    = Scale(34.0f);
-    float tabW    = panelW / kTabCount;
+    float tabW    = colW / kTabCount;
     auto activeTab = input::GetActiveTab();
 
     for (int i = 0; i < kTabCount; ++i) {
-        ImVec2 tabMin(panelX + i * tabW, tabBarY);
+        ImVec2 tabMin(colX + i * tabW, tabBarY);
         ImVec2 tabMax(tabMin.x + tabW - 1.0f, tabBarY + tabH);
         bool isActive  = (i == static_cast<int>(activeTab));
 
@@ -768,7 +850,7 @@ void RenderPauseMenu() {
         float tabCentreX = tabMin.x + (tabW - 1.0f) * 0.5f;
         float tabTextY   = tabBarY + Scale(5.0f);
         QueueText(tabCentreX, tabTextY, kTabNames[i],
-                  cfont::FONT_MENU, 0.40f, 0.82f, tabTextCol, true, 0);
+                  cfont::FONT_MENU, 0.40f * ff, 0.82f * ff, tabTextCol, true, 0);
 
         // Click handling
         if (isHovered && ImGui::IsMouseClicked(0)) {
@@ -776,17 +858,22 @@ void RenderPauseMenu() {
         }
     }
 
-    // Separator below tabs
+    // Separator below tabs (content column width)
     float sepY = tabBarY + tabH + 1.0f;
-    dl->AddLine(ImVec2(panelX, sepY), ImVec2(panelX + panelW, sepY),
+    dl->AddLine(ImVec2(colX, sepY), ImVec2(colX + colW, sepY),
                 colors::kSeparator, 1.0f);
 
-    // ── Tab content area ────────────────────────────────────────────
+    // ── Tab content area (within content column) ────────────────────
     float contentY = sepY + Scale(8.0f);
     float footerH  = Scale(50.0f);
-    float contentH = (panelY + panelH - footerH) - contentY;
-    ImVec2 contentPos(panelX, contentY);
-    ImVec2 contentSize(panelW, contentH);
+    float contentH = (sh - footerH) - contentY;
+    ImVec2 contentPos(colX, contentY);
+    ImVec2 contentSize(colW, contentH);
+
+    // Use an ImGui child window for scrollable content overflow
+    ImGui::SetCursorScreenPos(contentPos);
+    ImGui::BeginChild("##TabContent", contentSize, false,
+                      ImGuiWindowFlags_NoBackground);
 
     switch (input::GetActiveTab()) {
         case input::PauseTab::Map:      RenderTabMap(dl, contentPos, contentSize);      break;
@@ -797,27 +884,29 @@ void RenderPauseMenu() {
         default: break;
     }
 
-    // ── Footer ──────────────────────────────────────────────────────
-    float footerY = panelY + panelH - footerH;
+    ImGui::EndChild();
+
+    // ── Footer (anchored to bottom of viewport) ─────────────────────
+    float footerY = sh - footerH;
 
     // Separator
-    dl->AddLine(ImVec2(panelX, footerY),
-                ImVec2(panelX + panelW, footerY),
+    dl->AddLine(ImVec2(colX, footerY),
+                ImVec2(colX + colW, footerY),
                 colors::kSeparator, 1.0f);
 
     // "ESC to close" — left side (FONT_SUBTITLES, dimmed)
-    QueueText(panelX + Scale(20.0f), footerY + Scale(12.0f),
+    QueueText(colX + Scale(20.0f), footerY + Scale(12.0f),
               "ESC to close",
-              cfont::FONT_SUBTITLES, 0.26f, 0.55f, colors::cDimGray);
+              cfont::FONT_SUBTITLES, 0.26f * ff, 0.55f * ff, colors::cDimGray);
 
     // "Q/E switch tabs" — centre
-    QueueText(panelX + panelW * 0.5f, footerY + Scale(12.0f),
+    QueueText(colX + colW * 0.5f, footerY + Scale(12.0f),
               "Q / E  switch tabs",
-              cfont::FONT_SUBTITLES, 0.26f, 0.55f, colors::cDimGray, true);
+              cfont::FONT_SUBTITLES, 0.26f * ff, 0.55f * ff, colors::cDimGray, true);
 
     // EXIT GAME button — right side
     ImVec2 exitSize(Scale(100.0f), Scale(28.0f));
-    ImVec2 exitPos(panelX + panelW - exitSize.x - Scale(15.0f),
+    ImVec2 exitPos(colX + colW - exitSize.x - Scale(15.0f),
                    footerY + Scale(10.0f));
     if (DrawGtaButton(dl, exitPos, exitSize, "EXIT GAME",
                       colors::kButtonRed, colors::kButtonRedHov,
@@ -853,7 +942,8 @@ bool Initialize(IDirect3DDevice9* device, HWND window) {
 
     // We use ImGui primarily for layout/shapes, not text.
     // Load default font at a reasonable size for the rare fallback case.
-    float fontScale = GetScreenHeight() / 1080.0f;
+    // Incorporate UI scale so ImGui fallback text also respects user pref.
+    float fontScale = (GetScreenHeight() / 1080.0f) * settings::GetUiScale();
     io.Fonts->AddFontDefault();
     io.FontGlobalScale = fmaxf(fontScale, 0.75f);
 

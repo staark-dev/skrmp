@@ -25,6 +25,8 @@ struct Snapshot {
     bool mouseFlying;
 
     int currentVideoMode;
+
+    float uiScale;  // SKR menu UI scale multiplier (0.75 – 1.50)
 };
 
 struct VideoMode {
@@ -65,5 +67,8 @@ bool SetRadioAutoSelect(bool value);
 bool SetInvertMouseY(bool value);
 bool SetMouseSteering(bool value);
 bool SetMouseFlying(bool value);
+
+float GetUiScale();
+bool  SetUiScale(float value);
 
 } // namespace skr::native_pause::settings
