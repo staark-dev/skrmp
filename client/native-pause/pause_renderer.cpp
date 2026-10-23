@@ -26,7 +26,6 @@
 #include "native-pause/pause_renderer.h"
 #include "native-pause/pause_input.h"
 #include "native-pause/pause_actions.h"
-#include "native-pause/pause_settings.h"
 
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -37,7 +36,6 @@
 #include <d3d9.h>
 #include <cstdio>
 #include <cstdint>
-#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -392,14 +390,10 @@ namespace colors {
 // State
 // ═══════════════════════════════════════════════════════════════════════
 bool g_imguiInitialized = false;
-bool g_deviceObjectsValid = false;
 IDirect3DDevice9* g_device = nullptr;
 HWND g_window = nullptr;
 float g_menuAlpha = 0.0f;
 DWORD g_openTime = 0;
-
-enum class SettingsSection : uint8_t { Display, Graphics, Audio, Controls };
-SettingsSection g_settingsSection = SettingsSection::Display;
 
 // ── Tab names ───────────────────────────────────────────────────────
 const char* kTabNames[] = { "MAP", "GAME", "SETTINGS", "SERVERS", "ABOUT" };
@@ -489,59 +483,6 @@ void DrawInfoRow(float x, float y, const char* label, const char* value,
     QueueText(x + Scale(160.0f), y, value, cfont::FONT_SUBTITLES, 0.34f, 0.72f, valueColor);
 }
 
-bool DrawSettingToggle(ImDrawList* dl, float x, float y, float width,
-                       const char* label, bool value) {
-    QueueText(x, y + Scale(5.0f), label, cfont::FONT_SUBTITLES,
-              0.32f, 0.68f, colors::cDimWhite);
-    const ImVec2 size(Scale(86.0f), Scale(28.0f));
-    const ImVec2 pos(x + width - size.x, y);
-    return DrawGtaButton(dl, pos, size, value ? "ON" : "OFF",
-                         value ? colors::kButtonGreen : colors::kButtonBg,
-                         value ? colors::kButtonGreenHov : colors::kButtonHover,
-                         cfont::FONT_MENU, 0.30f, 0.62f,
-                         value ? colors::cWhite : colors::cDimWhite);
-}
-
-bool DrawSettingSlider(ImDrawList* dl, const char* id, float x, float y, float width,
-                       const char* label, float& value, float minValue, float maxValue,
-                       const char* valueText, bool& committed) {
-    QueueText(x, y, label, cfont::FONT_SUBTITLES,
-              0.32f, 0.68f, colors::cDimWhite);
-    QueueText(x + width, y, valueText, cfont::FONT_SUBTITLES,
-              0.30f, 0.64f, colors::cWhite, true);
-
-    const float trackX = x + Scale(170.0f);
-    const float trackY = y + Scale(12.0f);
-    const float trackW = width - Scale(250.0f);
-    const float hitH = Scale(24.0f);
-    ImGui::SetCursorScreenPos(ImVec2(trackX, trackY - hitH * 0.5f));
-    ImGui::InvisibleButton(id, ImVec2(trackW, hitH));
-
-    const bool active = ImGui::IsItemActive();
-    bool changed = false;
-    if (active && ImGui::IsMouseDown(0)) {
-        const float mouseX = ImGui::GetIO().MousePos.x;
-        const float t = std::clamp((mouseX - trackX) / trackW, 0.0f, 1.0f);
-        const float next = minValue + (maxValue - minValue) * t;
-        if (std::fabs(next - value) > 0.000001f) {
-            value = next;
-            changed = true;
-        }
-    }
-    committed = ImGui::IsItemDeactivated();
-
-    const float t = std::clamp((value - minValue) / (maxValue - minValue), 0.0f, 1.0f);
-    dl->AddRectFilled(ImVec2(trackX, trackY - Scale(2.0f)),
-                      ImVec2(trackX + trackW, trackY + Scale(2.0f)),
-                      colors::kButtonBg);
-    dl->AddRectFilled(ImVec2(trackX, trackY - Scale(2.0f)),
-                      ImVec2(trackX + trackW * t, trackY + Scale(2.0f)),
-                      colors::kGoldLine);
-    dl->AddCircleFilled(ImVec2(trackX + trackW * t, trackY), Scale(6.0f),
-                        active ? colors::kTextAccent : colors::kTextPrimary);
-    return changed;
-}
-
 // ═══════════════════════════════════════════════════════════════════════
 // Tab Content Renderers
 // ═══════════════════════════════════════════════════════════════════════
@@ -626,171 +567,24 @@ void RenderTabGame(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
 }
 
 void RenderTabSettings(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
-    const float margin = Scale(24.0f);
-    const float x = contentPos.x + margin;
-    const float width = contentSize.x - margin * 2.0f;
-    float y = contentPos.y + Scale(8.0f);
+    float cx = contentPos.x + contentSize.x * 0.5f;
+    float cy = contentPos.y;
 
-    static const char* sectionNames[] = {"DISPLAY", "GRAPHICS", "AUDIO", "CONTROLS"};
-    const float sectionGap = Scale(5.0f);
-    const float sectionW = (width - sectionGap * 3.0f) / 4.0f;
-    const ImVec2 sectionSize(sectionW, Scale(30.0f));
-    for (int i = 0; i < 4; ++i) {
-        const auto section = static_cast<SettingsSection>(i);
-        const bool active = section == g_settingsSection;
-        if (DrawGtaButton(dl, ImVec2(x + i * (sectionW + sectionGap), y),
-                          sectionSize, sectionNames[i],
-                          active ? colors::kTabActive : colors::kButtonBg,
-                          active ? colors::kButtonActive : colors::kButtonHover,
-                          cfont::FONT_MENU, 0.28f, 0.58f,
-                          active ? colors::cBlack : colors::cWhite)) {
-            g_settingsSection = section;
-        }
-    }
-    y += Scale(42.0f);
+    QueueText(cx, cy + Scale(30.0f),
+              "Open GTA's native settings menu",
+              cfont::FONT_SUBTITLES, 0.38f, 0.80f, colors::cDimWhite, true);
 
-    settings::Snapshot current{};
-    if (!settings::Read(current)) {
-        QueueText(contentPos.x + contentSize.x * 0.5f, y + Scale(20.0f),
-                  "GTA settings are currently unavailable",
-                  cfont::FONT_SUBTITLES, 0.34f, 0.72f, colors::cRed, true);
-    } else {
-        const float rowH = Scale(42.0f);
-        char valueText[64]{};
-        bool committed = false;
+    QueueText(cx, cy + Scale(60.0f),
+              "Video, audio, and control options",
+              cfont::FONT_SUBTITLES, 0.30f, 0.65f, colors::cDimGray, true);
 
-        switch (g_settingsSection) {
-            case SettingsSection::Display: {
-                float brightness = static_cast<float>(current.brightness);
-                snprintf(valueText, sizeof(valueText), "%d", current.brightness);
-                if (DrawSettingSlider(dl, "##brightness", x, y, width, "Brightness",
-                                      brightness, 0.0f, 384.0f, valueText, committed))
-                    settings::SetBrightness(static_cast<int>(brightness + 0.5f), false);
-                if (committed) settings::SetBrightness(static_cast<int>(brightness + 0.5f), true);
-                y += rowH;
+    ImVec2 btnSize(Scale(280.0f), Scale(50.0f));
+    ImVec2 btnPos(cx - btnSize.x * 0.5f, cy + Scale(110.0f));
 
-                if (DrawSettingToggle(dl, x, y, width, "Subtitles", current.subtitles))
-                    settings::SetSubtitles(!current.subtitles);
-                y += rowH;
-                if (DrawSettingToggle(dl, x, y, width, "HUD", current.hud))
-                    settings::SetHud(!current.hud);
-                y += rowH;
-
-                settings::VideoMode mode{};
-                QueueText(x, y + Scale(5.0f), "Resolution", cfont::FONT_SUBTITLES,
-                          0.32f, 0.68f, colors::cDimWhite);
-                if (settings::GetSelectedVideoMode(mode)) {
-                    snprintf(valueText, sizeof(valueText), "%d x %d x %d%s",
-                             mode.width, mode.height, mode.depth,
-                             mode.exclusive ? "" : " windowed");
-                    QueueText(x + width * 0.52f, y + Scale(5.0f), valueText,
-                              cfont::FONT_SUBTITLES, 0.29f, 0.62f, colors::cWhite, true);
-                    const ImVec2 navSize(Scale(34.0f), Scale(28.0f));
-                    if (DrawGtaButton(dl, ImVec2(x + width - Scale(176.0f), y), navSize, "<",
-                                      colors::kButtonBg, colors::kButtonHover))
-                        settings::CycleSelectedVideoMode(-1);
-                    if (DrawGtaButton(dl, ImVec2(x + width - Scale(136.0f), y), navSize, ">",
-                                      colors::kButtonBg, colors::kButtonHover))
-                        settings::CycleSelectedVideoMode(1);
-                    if (DrawGtaButton(dl, ImVec2(x + width - Scale(96.0f), y),
-                                      ImVec2(Scale(96.0f), Scale(28.0f)), "APPLY",
-                                      colors::kButtonGreen, colors::kButtonGreenHov,
-                                      cfont::FONT_MENU, 0.27f, 0.56f))
-                        settings::RequestSelectedVideoMode();
-                }
-                break;
-            }
-
-            case SettingsSection::Graphics: {
-                float lod = current.drawDistance;
-                snprintf(valueText, sizeof(valueText), "%.2f", current.drawDistance);
-                if (DrawSettingSlider(dl, "##drawdistance", x, y, width, "Draw distance",
-                                      lod, 0.925f, 1.8f, valueText, committed))
-                    settings::SetDrawDistance(lod, false);
-                if (committed) settings::SetDrawDistance(lod, true);
-                y += rowH;
-                if (DrawSettingToggle(dl, x, y, width, "Frame limiter", current.frameLimiter))
-                    settings::SetFrameLimiter(!current.frameLimiter);
-                y += rowH;
-                if (DrawSettingToggle(dl, x, y, width, "Widescreen", current.widescreen))
-                    settings::SetWidescreen(!current.widescreen);
-                y += rowH;
-                if (DrawSettingToggle(dl, x, y, width, "Mip mapping", current.mipMapping))
-                    settings::SetMipMapping(!current.mipMapping);
-                y += rowH;
-                const int selectedAa = settings::GetSelectedAntiAliasing();
-                QueueText(x, y + Scale(5.0f), "Anti-aliasing", cfont::FONT_SUBTITLES,
-                          0.32f, 0.68f, colors::cDimWhite);
-                snprintf(valueText, sizeof(valueText), selectedAa <= 1 ? "OFF" : "%dx", selectedAa);
-                QueueText(x + width * 0.52f, y + Scale(5.0f), valueText,
-                          cfont::FONT_SUBTITLES, 0.29f, 0.62f, colors::cWhite, true);
-                const ImVec2 aaButtonSize(Scale(34.0f), Scale(28.0f));
-                if (DrawGtaButton(dl, ImVec2(x + width - Scale(176.0f), y), aaButtonSize, "<",
-                                  colors::kButtonBg, colors::kButtonHover))
-                    settings::CycleSelectedAntiAliasing(-1);
-                if (DrawGtaButton(dl, ImVec2(x + width - Scale(136.0f), y), aaButtonSize, ">",
-                                  colors::kButtonBg, colors::kButtonHover))
-                    settings::CycleSelectedAntiAliasing(1);
-                if (DrawGtaButton(dl, ImVec2(x + width - Scale(96.0f), y),
-                                  ImVec2(Scale(96.0f), Scale(28.0f)), "APPLY",
-                                  colors::kButtonGreen, colors::kButtonGreenHov,
-                                  cfont::FONT_MENU, 0.27f, 0.56f))
-                    settings::RequestSelectedAntiAliasing();
-                break;
-            }
-
-            case SettingsSection::Audio: {
-                float sfx = static_cast<float>(current.sfxVolume);
-                snprintf(valueText, sizeof(valueText), "%d / 64", current.sfxVolume);
-                if (DrawSettingSlider(dl, "##sfxvolume", x, y, width, "SFX volume",
-                                      sfx, 0.0f, 64.0f, valueText, committed))
-                    settings::SetSfxVolume(static_cast<int>(sfx + 0.5f), false);
-                if (committed) settings::SetSfxVolume(static_cast<int>(sfx + 0.5f), true);
-                y += rowH;
-                float radio = static_cast<float>(current.radioVolume);
-                snprintf(valueText, sizeof(valueText), "%d / 64", current.radioVolume);
-                committed = false;
-                if (DrawSettingSlider(dl, "##radiovolume", x, y, width, "Radio volume",
-                                      radio, 0.0f, 64.0f, valueText, committed))
-                    settings::SetRadioVolume(static_cast<int>(radio + 0.5f), false);
-                if (committed) settings::SetRadioVolume(static_cast<int>(radio + 0.5f), true);
-                y += rowH;
-                if (DrawSettingToggle(dl, x, y, width, "Radio EQ", current.radioEq))
-                    settings::SetRadioEq(!current.radioEq);
-                y += rowH;
-                if (DrawSettingToggle(dl, x, y, width, "Auto retune", current.radioAutoSelect))
-                    settings::SetRadioAutoSelect(!current.radioAutoSelect);
-                break;
-            }
-
-            case SettingsSection::Controls: {
-                float sensitivity = current.mouseSensitivity;
-                snprintf(valueText, sizeof(valueText), "%.6f", current.mouseSensitivity);
-                if (DrawSettingSlider(dl, "##mousesensitivity", x, y, width, "Mouse sensitivity",
-                                      sensitivity, 0.0003125f, 0.005f, valueText, committed))
-                    settings::SetMouseSensitivity(sensitivity, false);
-                if (committed) settings::SetMouseSensitivity(sensitivity, true);
-                y += rowH;
-                if (DrawSettingToggle(dl, x, y, width, "Invert mouse Y", current.invertMouseY))
-                    settings::SetInvertMouseY(!current.invertMouseY);
-                y += rowH;
-                if (DrawSettingToggle(dl, x, y, width, "Mouse steering", current.mouseSteering))
-                    settings::SetMouseSteering(!current.mouseSteering);
-                y += rowH;
-                if (DrawSettingToggle(dl, x, y, width, "Mouse flying", current.mouseFlying))
-                    settings::SetMouseFlying(!current.mouseFlying);
-                break;
-            }
-        }
-    }
-
-    const ImVec2 vanillaSize(Scale(190.0f), Scale(28.0f));
-    const ImVec2 vanillaPos(contentPos.x + contentSize.x - margin - vanillaSize.x,
-                            contentPos.y + contentSize.y - vanillaSize.y - Scale(8.0f));
-    if (DrawGtaButton(dl, vanillaPos, vanillaSize, "VANILLA SETTINGS",
-                      colors::kButtonBg, colors::kButtonHover,
-                      cfont::FONT_MENU, 0.28f, 0.58f))
+    if (DrawGtaButton(dl, btnPos, btnSize, "OPEN SETTINGS",
+                      colors::kButtonBg, colors::kButtonHover)) {
         actions::OpenNativeSettings();
+    }
 }
 
 void RenderTabServers(ImDrawList* dl, ImVec2 contentPos, ImVec2 contentSize) {
@@ -902,6 +696,7 @@ void RenderPauseMenu() {
     float panelY = (sh - panelH) * 0.5f;
 
     // Draw panel background and border
+    ImDrawList* fgDraw = ImGui::GetForegroundDrawList();
     ImVec2 panelMin(panelX, panelY);
     ImVec2 panelMax(panelX + panelW, panelY + panelH);
 
@@ -993,13 +788,7 @@ void RenderPauseMenu() {
     ImVec2 contentPos(panelX, contentY);
     ImVec2 contentSize(panelW, contentH);
 
-    static input::PauseTab previousTab = input::PauseTab::Game;
-    const auto currentTab = input::GetActiveTab();
-    if (currentTab == input::PauseTab::Settings && previousTab != currentTab)
-        settings::Refresh();
-    previousTab = currentTab;
-
-    switch (currentTab) {
+    switch (input::GetActiveTab()) {
         case input::PauseTab::Map:      RenderTabMap(dl, contentPos, contentSize);      break;
         case input::PauseTab::Game:     RenderTabGame(dl, contentPos, contentSize);     break;
         case input::PauseTab::Settings: RenderTabSettings(dl, contentPos, contentSize); break;
@@ -1088,7 +877,6 @@ bool Initialize(IDirect3DDevice9* device, HWND window) {
     Log("Initialize: CFont available = %d", cfont::g_cfontAvailable);
 
     g_imguiInitialized = true;
-    g_deviceObjectsValid = true;
     g_openTime = GetTickCount();
     Log("Initialize: ImGui ready, CFont %s (font scale %.2f)",
         cfont::g_cfontAvailable ? "ENABLED" : "FALLBACK",
@@ -1106,7 +894,6 @@ void Shutdown() {
     ImGui::DestroyContext();
 
     g_imguiInitialized = false;
-    g_deviceObjectsValid = false;
     g_device = nullptr;
     g_window = nullptr;
 }
@@ -1114,21 +901,8 @@ void Shutdown() {
 void Render(IDirect3DDevice9* device) {
     if (!g_imguiInitialized || !device) return;
 
-    // SA-MP can replace the live D3D9 device during world handoff. The ImGui
-    // backend owns a device reference, so merely replacing g_device leaves it
-    // issuing resources against the stale device.
-    if (g_device != device) {
-        ImGui_ImplDX9_Shutdown();
-        g_deviceObjectsValid = ImGui_ImplDX9_Init(device);
-        g_device = device;
-        // The verified GTA CFont entry points faulted once after SA-MP swapped
-        // in its proxy device. Keep the menu operational on the ImGui font
-        // path instead of probing CFont again on the replacement device.
-        cfont::g_cfontAvailable = false;
-        Log("Render: D3D9 device changed, backend re-bound (ok=%d)",
-            g_deviceObjectsValid ? 1 : 0);
-    }
-    if (!g_deviceObjectsValid) return;
+    // Update device reference (may change after Reset)
+    g_device = device;
 
     // Reset open time on first frame of a new pause session
     static bool s_wasOpen = false;
@@ -1148,9 +922,8 @@ void Render(IDirect3DDevice9* device) {
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    // The input owner exposes the real Win32 cursor. Keep ImGui's software
-    // cursor disabled so SA-MP/CEF cursor hooks cannot produce a double cursor.
-    ImGui::GetIO().MouseDrawCursor = false;
+    // Show software cursor during pause
+    ImGui::GetIO().MouseDrawCursor = true;
 
     // Render the pause menu layout (queues CFont text entries)
     RenderPauseMenu();
@@ -1171,28 +944,68 @@ void Render(IDirect3DDevice9* device) {
 }
 
 void OnBeforeReset() {
-    if (!g_imguiInitialized || !g_deviceObjectsValid) return;
+    if (!g_imguiInitialized) return;
     ImGui_ImplDX9_InvalidateDeviceObjects();
-    g_deviceObjectsValid = false;
 }
 
 void OnAfterReset(IDirect3DDevice9* device) {
     if (!g_imguiInitialized) return;
-    if (g_device != device) {
-        ImGui_ImplDX9_Shutdown();
-        g_deviceObjectsValid = ImGui_ImplDX9_Init(device);
-        g_device = device;
-        cfont::g_cfontAvailable = false;
-        Log("OnAfterReset: backend moved to replacement device (ok=%d)",
-            g_deviceObjectsValid ? 1 : 0);
-        return;
-    }
     g_device = device;
-    g_deviceObjectsValid = ImGui_ImplDX9_CreateDeviceObjects();
+    ImGui_ImplDX9_CreateDeviceObjects();
 }
 
 bool IsReady() {
     return g_imguiInitialized;
+}
+
+// ── TEST_ONLY: ImGui diagnostic probe ───────────────────────────────
+// Runs a minimal ImGui frame with a single cyan filled rectangle at the
+// top-right corner of the screen.  This verifies that the full ImGui
+// pipeline (NewFrame → draw commands → Render → RenderDrawData) produces
+// visible pixels.  Called every frame, regardless of pause state.
+void RenderDiagnosticProbe(IDirect3DDevice9* device) {
+    if (!g_imguiInitialized || !device) return;
+
+    g_device = device;
+
+    // Save D3D9 state
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    device->CreateStateBlock(D3DSBT_ALL, &stateBlock);
+
+    ImGui_ImplDX9_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+
+    // Draw a 60x40 cyan rectangle near top-right
+    float sw = ImGui::GetIO().DisplaySize.x;
+    ImDrawList* fg = ImGui::GetForegroundDrawList();
+    fg->AddRectFilled(
+        ImVec2(sw - 80.0f, 10.0f),
+        ImVec2(sw - 20.0f, 50.0f),
+        IM_COL32(0, 255, 255, 255));  // Solid cyan
+
+    ImGui::EndFrame();
+    ImGui::Render();
+
+    ImDrawData* dd = ImGui::GetDrawData();
+    ImGui_ImplDX9_RenderDrawData(dd);
+
+    // Throttled diagnostics about draw data
+    static DWORD s_lastLog = 0;
+    DWORD now = GetTickCount();
+    if (now - s_lastLog >= 2000) {
+        s_lastLog = now;
+        Log("DIAG PROBE imgui: CmdLists=%d TotalVtx=%d TotalIdx=%d "
+            "DisplaySize=%.0fx%.0f",
+            dd->CmdListsCount, dd->TotalVtxCount, dd->TotalIdxCount,
+            dd->DisplaySize.x, dd->DisplaySize.y);
+    }
+
+    // Restore D3D9 state
+    if (stateBlock) {
+        stateBlock->Apply();
+        stateBlock->Release();
+    }
 }
 
 } // namespace skr::native_pause::renderer
