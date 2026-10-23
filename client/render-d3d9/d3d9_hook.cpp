@@ -3,6 +3,7 @@
 #include "intro/launch_cover.h"
 #include "lobby/lobby_manager.h"
 #include "render-d3d9/fps_engine.h"
+#include "native-pause/native_pause.h"
 #include <atomic>
 #include <algorithm>
 #include <cstdio>
@@ -13,10 +14,13 @@ namespace {
 
 constexpr uintptr_t kGtaDevicePtr = 0x00C97C28;
 
-EndSceneFn g_origEndScene = nullptr;
-ResetFn    g_origReset    = nullptr;
+std::atomic<EndSceneFn> g_origEndScene{nullptr};
+std::atomic<ResetFn>    g_origReset{nullptr};
 void**     g_hookedVtable = nullptr;
 std::atomic<bool> g_hookInstalled{false};
+std::atomic<bool> g_hookShutdown{false};
+std::atomic<skr::bootstrap::ComponentState> g_hookState{
+    skr::bootstrap::ComponentState::NOT_STARTED};
 HANDLE g_hookThread = nullptr;
 using PresentFn = HRESULT(WINAPI*)(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
 PresentFn g_origPresent = nullptr;
@@ -90,6 +94,15 @@ void DrawFullscreenQuad(IDirect3DDevice9* device, DWORD color) {
 }
 
 bool PatchVtable(void** vtable, int index, void* hook, void** original) {
+    if (!vtable || !hook || !original) return false;
+    void* candidate = vtable[index];
+    if (!candidate || candidate == hook) return false;
+    MEMORY_BASIC_INFORMATION targetInfo{};
+    if (!VirtualQuery(candidate, &targetInfo, sizeof(targetInfo)) ||
+        targetInfo.State != MEM_COMMIT ||
+        (targetInfo.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ |
+                               PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) == 0)
+        return false;
     DWORD oldProtect = 0;
     void* entry = &vtable[index];
     if (!VirtualProtect(entry, sizeof(void*), PAGE_READWRITE, &oldProtect))
@@ -101,6 +114,14 @@ bool PatchVtable(void** vtable, int index, void* hook, void** original) {
 }
 
 HRESULT WINAPI HookedEndScene(IDirect3DDevice9* device) {
+    static thread_local bool inEndScene = false;
+    if (inEndScene) {
+        static std::atomic<bool> reportedRecursion{false};
+        if (!reportedRecursion.exchange(true))
+            fps::Trace("D3D9 EndScene chain recursion blocked");
+        return D3D_OK;
+    }
+    struct Scope { bool& value; explicit Scope(bool& v) : value(v) { value = true; } ~Scope() { value = false; } } scope(inEndScene);
     static bool reported = false;
     if (!reported) { reported = true; fps::Trace("hook EndScene entered"); }
     if (!g_freq.QuadPart) {
@@ -155,17 +176,40 @@ HRESULT WINAPI HookedEndScene(IDirect3DDevice9* device) {
         }
     }
 
-    return g_origEndScene(device);
+    // Native pause menu overlay (renders on top of everything)
+    skr::native_pause::OnEndScene(device);
+
+    EndSceneFn next = g_origEndScene.load(std::memory_order_acquire);
+    if (!next || next == &HookedEndScene) {
+        fps::Trace("D3D9 EndScene chain has no valid downstream target");
+        return D3DERR_INVALIDCALL;
+    }
+    return next(device);
 }
 
 HRESULT WINAPI HookedReset(IDirect3DDevice9* device, D3DPRESENT_PARAMETERS* pp) {
+    static thread_local bool inReset = false;
+    if (inReset) {
+        static std::atomic<bool> reportedRecursion{false};
+        if (!reportedRecursion.exchange(true))
+            fps::Trace("D3D9 Reset chain recursion blocked");
+        return D3DERR_INVALIDCALL;
+    }
+    struct Scope { bool& value; explicit Scope(bool& v) : value(v) { value = true; } ~Scope() { value = false; } } scope(inReset);
+    ResetFn next = g_origReset.load(std::memory_order_acquire);
+    if (!next || next == &HookedReset) {
+        fps::Trace("D3D9 Reset chain has no valid downstream target");
+        return D3DERR_INVALIDCALL;
+    }
     fps::Trace("hook Reset entered");
+    skr::native_pause::OnBeforeReset();
     skr::render::fps::BeforeReset();
     skr::launch_cover::BeforeReset();
     skr::intro::BeforeReset();
-    HRESULT hr = g_origReset(device, pp);
+    HRESULT hr = next(device, pp);
     char message[80]{}; sprintf_s(message, "hook Reset returned 0x%08lX", hr); fps::Trace(message);
     skr::intro::AfterReset(hr);
+    if (SUCCEEDED(hr)) skr::native_pause::OnAfterReset(device);
     return hr;
 }
 
@@ -217,14 +261,18 @@ HRESULT WINAPI HookedPresent(
 }
 
 DWORD WINAPI D3D9HookThread(LPVOID) {
+    g_hookState.store(skr::bootstrap::ComponentState::WAITING, std::memory_order_release);
     auto** ppDevice = reinterpret_cast<IDirect3DDevice9**>(kGtaDevicePtr);
-    for (int i = 0; i < 600; ++i) {
+    for (int i = 0; i < 600 && !g_hookShutdown.load(std::memory_order_acquire); ++i) {
         if (*ppDevice != nullptr) break;
         Sleep(50);
     }
 
     IDirect3DDevice9* device = *ppDevice;
-    if (!device) return 1;
+    if (!device) {
+        g_hookState.store(skr::bootstrap::ComponentState::FAILED, std::memory_order_release);
+        return 1;
+    }
 
     g_hookedVtable = *reinterpret_cast<void***>(device);
 #ifdef SKR_EXTERNAL_LOBBY
@@ -235,16 +283,144 @@ DWORD WINAPI D3D9HookThread(LPVOID) {
 #ifdef SKR_EXTERNAL_LOBBY
     ok &= PatchVtable(g_hookedVtable, 17, reinterpret_cast<void*>(&HookedPresent), reinterpret_cast<void**>(&g_origPresent));
 #endif
-    ok &= PatchVtable(g_hookedVtable, kVtableEndScene,
-                       reinterpret_cast<void*>(&HookedEndScene),
-                       reinterpret_cast<void**>(&g_origEndScene));
-    ok &= PatchVtable(g_hookedVtable, kVtableReset,
-                       reinterpret_cast<void*>(&HookedReset),
-                       reinterpret_cast<void**>(&g_origReset));
+    EndSceneFn initialEndScene = nullptr;
+    ResetFn initialReset = nullptr;
+    const bool endSceneOk = PatchVtable(g_hookedVtable, kVtableEndScene,
+                                        reinterpret_cast<void*>(&HookedEndScene),
+                                        reinterpret_cast<void**>(&initialEndScene));
+    if (endSceneOk)
+        g_origEndScene.store(initialEndScene, std::memory_order_release);
+    const bool resetOk = PatchVtable(g_hookedVtable, kVtableReset,
+                                     reinterpret_cast<void*>(&HookedReset),
+                                     reinterpret_cast<void**>(&initialReset));
+    if (resetOk)
+        g_origReset.store(initialReset, std::memory_order_release);
+    ok &= endSceneOk && resetOk;
+    if (!ok) {
+        auto restore = [vtable = g_hookedVtable](int index, void* hook, void* original) {
+            if (!original || vtable[index] != hook) return;
+            DWORD old = 0;
+            if (VirtualProtect(&vtable[index], sizeof(void*), PAGE_READWRITE, &old)) {
+                vtable[index] = original;
+                VirtualProtect(&vtable[index], sizeof(void*), old, &old);
+            }
+        };
+        if (endSceneOk)
+            restore(kVtableEndScene, reinterpret_cast<void*>(&HookedEndScene),
+                    reinterpret_cast<void*>(initialEndScene));
+        if (resetOk)
+            restore(kVtableReset, reinterpret_cast<void*>(&HookedReset),
+                    reinterpret_cast<void*>(initialReset));
+        g_origEndScene.store(nullptr, std::memory_order_release);
+        g_origReset.store(nullptr, std::memory_order_release);
+    }
 
     g_hookInstalled.store(ok);
+    g_hookState.store(ok ? skr::bootstrap::ComponentState::INSTALLED
+                         : skr::bootstrap::ComponentState::FAILED,
+                      std::memory_order_release);
     fps::Trace(ok ? "D3D9 vtable hooks installed" : "D3D9 vtable hook install failed");
-    return ok ? 0 : 1;
+    if (!ok) return 1;
+
+    // ── Phase 2: One-shot re-chain after SA-MP world initialization ────
+    // SA-MP 0.3.7 R5 overwrites the D3D9 EndScene vtable entry during its
+    // own hook setup, which happens around the time the player enters the
+    // world (game state 5). When SA-MP obtains its "original" EndScene from
+    // a clean temporary device rather than from the live vtable, our hook is
+    // silently discarded. We wait for the world transition, then re-patch
+    // exactly once — saving SA-MP's hook as our new g_origEndScene so the
+    // full chain is preserved: SKR → SA-MP → real EndScene.
+    //
+    // This is NOT a polling loop: the thread exits after a single re-chain.
+
+    // Wait up to 10 minutes for player to enter the world
+    for (int i = 0; i < 6000 && !g_hookShutdown.load(std::memory_order_acquire); ++i) {
+        if (IsPlayerInGame()) break;
+        Sleep(100);
+    }
+
+    if (g_hookShutdown.load(std::memory_order_acquire) || !IsPlayerInGame()) {
+        fps::Trace("D3D9 re-chain: shutdown or world never reached, skipping");
+        return 0;
+    }
+
+    // Let SA-MP finish its hook setup — its initialization continues
+    // briefly after the game state reaches 5.
+    Sleep(1000);
+
+    if (g_hookShutdown.load(std::memory_order_acquire)) return 0;
+
+    // Re-read the device pointer (may have changed if SA-MP uses a proxy)
+    device = *ppDevice;
+    if (!device) {
+        fps::Trace("D3D9 re-chain: device pointer is null after world init");
+        return 0;
+    }
+
+    void** vtableNow = *reinterpret_cast<void***>(device);
+
+    {
+        char msg[300]{};
+        sprintf_s(msg,
+            "D3D9 re-chain check: device=%p vtable_before=%p vtable_now=%p "
+            "es_entry=%p ours=%p reset_entry=%p ours_reset=%p",
+            device, g_hookedVtable, vtableNow,
+            vtableNow[kVtableEndScene],
+            reinterpret_cast<void*>(&HookedEndScene),
+            vtableNow[kVtableReset],
+            reinterpret_cast<void*>(&HookedReset));
+        fps::Trace(msg);
+    }
+
+    bool rechained = false;
+
+    // Re-chain EndScene if it was replaced
+    if (vtableNow[kVtableEndScene] != reinterpret_cast<void*>(&HookedEndScene)) {
+        EndSceneFn sampEndScene = nullptr;
+        if (vtableNow[kVtableEndScene] != nullptr &&
+            PatchVtable(vtableNow, kVtableEndScene,
+                        reinterpret_cast<void*>(&HookedEndScene),
+                        reinterpret_cast<void**>(&sampEndScene))) {
+            g_origEndScene.store(sampEndScene, std::memory_order_release);
+            rechained = true;
+            char msg[200]{};
+            sprintf_s(msg,
+                "D3D9 re-chain: EndScene restored (samp_es=%p now our orig)",
+                reinterpret_cast<void*>(sampEndScene));
+            fps::Trace(msg);
+        } else {
+            fps::Trace("D3D9 re-chain: EndScene VirtualProtect failed");
+        }
+    } else {
+        fps::Trace("D3D9 re-chain: EndScene still intact, no action needed");
+    }
+
+    // Re-chain Reset if it was replaced
+    if (vtableNow[kVtableReset] != reinterpret_cast<void*>(&HookedReset)) {
+        ResetFn sampReset = nullptr;
+        if (vtableNow[kVtableReset] != nullptr &&
+            PatchVtable(vtableNow, kVtableReset,
+                        reinterpret_cast<void*>(&HookedReset),
+                        reinterpret_cast<void**>(&sampReset))) {
+            g_origReset.store(sampReset, std::memory_order_release);
+            rechained = true;
+            char msg[200]{};
+            sprintf_s(msg,
+                "D3D9 re-chain: Reset restored (samp_reset=%p now our orig)",
+                reinterpret_cast<void*>(sampReset));
+            fps::Trace(msg);
+        } else {
+            fps::Trace("D3D9 re-chain: Reset VirtualProtect failed");
+        }
+    }
+
+    // Update the stored vtable pointer (may differ if device changed)
+    g_hookedVtable = vtableNow;
+
+    fps::Trace(rechained
+        ? "D3D9 re-chain COMPLETE — hooks restored after SA-MP init"
+        : "D3D9 re-chain: all hooks were intact, no changes made");
+    return 0;
 }
 
 } // anonymous namespace
@@ -262,6 +438,7 @@ extern "C" __declspec(dllexport) void __cdecl SkrAfterPresentV1(HRESULT result) 
 }
 extern "C" __declspec(dllexport) void __cdecl SkrBeforeResetV1() {
     fps::Trace("CEF real-device Reset entered");
+    skr::native_pause::OnBeforeReset();
     fps::BeforeReset(); skr::launch_cover::BeforeReset(); skr::intro::BeforeReset();
 }
 extern "C" __declspec(dllexport) BOOL __cdecl SkrEnhancedConfirmedV1() {
@@ -269,11 +446,21 @@ extern "C" __declspec(dllexport) BOOL __cdecl SkrEnhancedConfirmedV1() {
 }
 
 bool InstallD3D9Hooks() {
+    if (g_hookThread) return false;
+    g_hookShutdown.store(false, std::memory_order_release);
+    g_hookState.store(skr::bootstrap::ComponentState::WAITING, std::memory_order_release);
     g_hookThread = CreateThread(nullptr, 0, D3D9HookThread, nullptr, 0, nullptr);
+    if (!g_hookThread)
+        g_hookState.store(skr::bootstrap::ComponentState::FAILED, std::memory_order_release);
     return g_hookThread != nullptr;
 }
 
+skr::bootstrap::ComponentState GetD3D9HookState() noexcept {
+    return g_hookState.load(std::memory_order_acquire);
+}
+
 void RemoveD3D9Hooks() {
+    g_hookShutdown.store(true, std::memory_order_release);
     if (g_hookThread) {
         WaitForSingleObject(g_hookThread, 5000);
         CloseHandle(g_hookThread);
@@ -282,7 +469,7 @@ void RemoveD3D9Hooks() {
     skr::render::fps::Shutdown();
     skr::intro::Shutdown();
 
-    if (g_hookInstalled.load() && g_hookedVtable) {
+    if (g_hookedVtable) {
         if (g_origPresent && g_hookedVtable[17] == reinterpret_cast<void*>(&HookedPresent)) {
             DWORD old = 0;
             if (VirtualProtect(&g_hookedVtable[17], sizeof(void*), PAGE_READWRITE, &old)) {
@@ -290,25 +477,30 @@ void RemoveD3D9Hooks() {
                 VirtualProtect(&g_hookedVtable[17], sizeof(void*), old, &old);
             }
         }
-        if (g_origEndScene) {
+        EndSceneFn endScene = g_origEndScene.load(std::memory_order_acquire);
+        ResetFn reset = g_origReset.load(std::memory_order_acquire);
+        if (endScene && g_hookedVtable[kVtableEndScene] == reinterpret_cast<void*>(&HookedEndScene)) {
             DWORD old = 0;
             void* entry = &g_hookedVtable[kVtableEndScene];
             VirtualProtect(entry, sizeof(void*), PAGE_READWRITE, &old);
-            g_hookedVtable[kVtableEndScene] = reinterpret_cast<void*>(g_origEndScene);
+            g_hookedVtable[kVtableEndScene] = reinterpret_cast<void*>(endScene);
             VirtualProtect(entry, sizeof(void*), old, &old);
         }
-        if (g_origReset) {
+        if (reset && g_hookedVtable[kVtableReset] == reinterpret_cast<void*>(&HookedReset)) {
             DWORD old = 0;
             void* entry = &g_hookedVtable[kVtableReset];
             VirtualProtect(entry, sizeof(void*), PAGE_READWRITE, &old);
-            g_hookedVtable[kVtableReset] = reinterpret_cast<void*>(g_origReset);
+            g_hookedVtable[kVtableReset] = reinterpret_cast<void*>(reset);
             VirtualProtect(entry, sizeof(void*), old, &old);
         }
     }
 
-    g_origEndScene = nullptr;
-    g_origReset = nullptr;
+    g_origEndScene.store(nullptr, std::memory_order_release);
+    g_origReset.store(nullptr, std::memory_order_release);
+    g_origPresent = nullptr;
+    g_hookedVtable = nullptr;
     g_hookInstalled.store(false);
+    g_hookState.store(skr::bootstrap::ComponentState::NOT_STARTED, std::memory_order_release);
 }
 
 } // namespace skr::render
