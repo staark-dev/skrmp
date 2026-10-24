@@ -16,13 +16,14 @@ namespace skr::launcher {
 enum class LaunchStep : uint8_t {
     ProcessCreated,  // CreateProcessW returned; the game is suspended
     ClientInjected,  // SKR.Client.dll is loaded in the target process
-    ClientReady,     // SkrRemoteInit returned 0 (hooks installed, AC up)
-    GameResumed      // main thread resumed; the cover can start rendering
+    GameResumed,     // main thread resumed; runtime objects can now be created
+    ClientReady      // native status reports both mandatory hook sets installed
 };
 
 // Invoked on the caller's (worker) thread as each milestone is reached. It
 // must not block or touch UI: the launcher marshals these onto its UI timer.
 using LaunchProgressCallback = std::function<void(LaunchStep)>;
+using NativeInitializationCallback = std::function<void(uint32_t state, uint32_t error)>;
 
 struct LaunchConfig {
     std::wstring gtaSaPath;      // Full path to gta_sa.exe
@@ -34,9 +35,16 @@ struct LaunchConfig {
     HANDLE frameReady = nullptr;
     HANDLE takeover = nullptr;
     HANDLE sessionReady = nullptr;
+    HANDLE gameplayConfirmed = nullptr; // client signals once in world and healthy
+    HANDLE clientInitialized = nullptr; // ipc/launch_milestones.h milestones
+    HANDLE sampLoaded = nullptr;
+    HANDLE sampReady = nullptr;
+    uint64_t sessionId = 0;             // per-launch nonce, echoed by the client
     bool enhancedAdvertised = false; // Fresh native query, not a UI claim.
     bool localHandoffTest = false; // Explicit launcher-only development switch.
+    DWORD nativeInitializationTimeoutMs = 40000; // Harness may shorten; production uses default.
     LaunchProgressCallback onStep; // Optional progress sink; empty = no reporting.
+    NativeInitializationCallback onNativeState; // Optional diagnostics; state changes only.
 };
 
 enum class LaunchResult : uint8_t {
@@ -47,6 +55,8 @@ enum class LaunchResult : uint8_t {
     InjectionFailed,
     PipeFailed,
     ResumeThreadFailed,
+    NativeInitializationFailed,
+    NativeInitializationTimeout,
     StartupFilesFailed
 };
 

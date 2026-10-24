@@ -5,9 +5,9 @@
 #include "game_launcher.h"
 #ifdef SKR_EXTERNAL_LOBBY
 #include "lobby_window.h"
+#include "preflight_window.h"
 #include "lobby/settings_io.h"
-#include <shlobj.h>
-#include <objbase.h>
+#include "preflight/preflight_controller.h"
 #endif
 #include "../../shared/exit_codes.h"
 #include <cstdio>
@@ -77,6 +77,18 @@ static std::wstring ResolveGtaCandidate(const std::wstring& configured) {
     const std::wstring withExe = configured + L"\\gta_sa.exe";
     return IsGtaExe(withExe) ? withExe : std::wstring();
 }
+
+static bool HasCompleteNativeApproval(const skr::preflight::PreflightReport& report) {
+    const skr::preflight::CheckResult* checks[] = {
+        &report.gtaDiscovery, &report.exeVerification, &report.sampInspection,
+        &report.depVerification, &report.bundledRuntime
+    };
+    for (const auto* check : checks) {
+        if (check->status == skr::preflight::CheckStatus::Pending ||
+            skr::preflight::IsBlocking(check->status)) return false;
+    }
+    return true;
+}
 #endif
 
 static constexpr const wchar_t* kGtaSaSearchPaths[] = {
@@ -122,46 +134,10 @@ static std::wstring FindGtaSa(const std::wstring& baseDir) {
     return {};
 }
 
-#ifdef SKR_EXTERNAL_LOBBY
-// Last resort when nothing is saved and nothing is found: ask once, and only
-// accept a folder that really holds gta_sa.exe. Returns empty if the player
-// cancels. COM is initialised and released here because this runs before the
-// lobby window, which does its own CoInitialize.
-static std::wstring AskForGtaSa() {
-    const HRESULT comInit = CoInitializeEx(nullptr,
-        COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    if (FAILED(comInit) && comInit != RPC_E_CHANGED_MODE) return {};
-
-    std::wstring chosen;
-    IFileOpenDialog* dialog = nullptr;
-    if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
-                                   IID_PPV_ARGS(&dialog))) && dialog) {
-        DWORD options = 0;
-        if (SUCCEEDED(dialog->GetOptions(&options)))
-            dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-        dialog->SetTitle(L"Select your GTA San Andreas folder");
-        if (SUCCEEDED(dialog->Show(nullptr))) {
-            IShellItem* item = nullptr;
-            if (SUCCEEDED(dialog->GetResult(&item)) && item) {
-                PWSTR raw = nullptr;
-                if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &raw)) && raw) {
-                    chosen = ResolveGtaCandidate(raw);
-                    if (chosen.empty())
-                        MessageBoxW(nullptr, L"That folder does not contain gta_sa.exe.",
-                                    L"SKR Client", MB_OK | MB_ICONWARNING);
-                    CoTaskMemFree(raw);
-                }
-                item->Release();
-            }
-        }
-        dialog->Release();
-    }
-    if (SUCCEEDED(comInit)) CoUninitialize();
-    return chosen;
-}
-#endif
-
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int) {
+#ifdef SKR_EXTERNAL_LOBBY
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+#endif
     auto baseDir = GetLauncherDir();
     auto stagingDir = baseDir + L"\\.skr-staging";
     auto inventoryPath = baseDir + L"\\.skr-inventory.dat";
@@ -200,17 +176,29 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int) {
     auto gtaPath = FindGtaSa(baseDir);
 
 #ifdef SKR_EXTERNAL_LOBBY
-    if (gtaPath.empty()) {
-        gtaPath = AskForGtaSa();
-        if (!gtaPath.empty()) {
-            // Persisted through the existing settings implementation.
-            // SaveSettings merges, so nickname, personal servers, unrelated
-            // sections and comments in launcher.ini are preserved.
-            skr::lobby::Settings settings;
-            skr::lobby::LoadSettings(settings);
-            settings.gtaPath = PathToUtf8(gtaPath);
-            skr::lobby::SaveSettings(settings);
+    auto preflightUi = skr::launcher::ShowPreflightExperience(
+        instance, baseDir + L"\\SKR\\preflight", baseDir, gtaPath);
+    skr::preflight::PreflightReport preflightReport;
+    if (preflightUi.webViewAvailable) {
+        if (!preflightUi.approved) return 1;
+        preflightReport = preflightUi.report;
+    } else {
+        // If WebView2 cannot initialize, mandatory verification still runs and
+        // the existing native results window remains the safe recovery path.
+        preflightReport = skr::preflight::RunPreflight(baseDir);
+        skr::preflight::WriteDiagnosticLog(
+            preflightReport, preflightReport.gtaDir, baseDir);
+        if (!HasCompleteNativeApproval(preflightReport)) {
+            if (!skr::preflight::ShowPreflightWindow(instance, preflightReport)) return 1;
         }
+    }
+
+    gtaPath = preflightReport.gtaExePath;
+    if (!gtaPath.empty()) {
+        skr::lobby::Settings settings;
+        skr::lobby::LoadSettings(settings);
+        settings.gtaPath = PathToUtf8(gtaPath);
+        skr::lobby::SaveSettings(settings);
     }
 #endif
 
@@ -241,6 +229,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int) {
     };
 
     auto clientDll = findDll(L"SKR.Client.dll");
+#ifdef SKR_EXTERNAL_LOBBY
+    if (!preflightReport.skrClientPath.empty()) clientDll = preflightReport.skrClientPath;
+#endif
 
     if (clientDll.empty()) {
         MessageBoxW(nullptr, L"SKR.Client.dll not found.\nPlace it next to the launcher or in the GTA SA folder.",

@@ -1,6 +1,9 @@
 #include "lobby_window.h"
 #include "game_launcher.h"
+#include "launch_watchdog.h"
 #include "ipc/handoff_trace.h"
+#include "ipc/launch_milestones.h"
+#include "ipc/launch_params.h"
 #include "lobby/settings_io.h"
 #include "lobby/public_directory.h"
 #include "lobby/server_query.h"
@@ -16,10 +19,13 @@
 #include <future>
 #include <memory>
 #include <chrono>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <atomic>
+#include <initializer_list>
 #include <mutex>
+#include <random>
 
 using Microsoft::WRL::ComPtr;
 using Microsoft::WRL::Callback;
@@ -39,8 +45,8 @@ enum class LaunchStage : uint8_t {
     Preflight,     // native UDP query in flight
     Starting,      // CreateProcessW succeeded; game suspended
     Injecting,     // SKR.Client.dll loaded into the game
-    ClientReady,   // SkrRemoteInit acknowledged
-    WaitingFrame,  // game resumed; awaiting the first cover Present
+    WaitingFrame,  // game resumed; runtime hook installation is pending
+    ClientReady,   // mandatory D3D9 and SA-MP hooks are installed
     Handoff,       // frameReady observed; screen handed to the game
     SessionReady,  // sessionReady observed; the world is up
     Failed
@@ -106,6 +112,8 @@ struct Window {
     std::vector<std::string> queuedVisiblePings;
     LaunchConfig config;
     bool canLaunch = false, launching = false, handedOver = false, sessionReady = false, cancelling = false;
+    bool gameplayConfirmed = false, watchdogArmed = false, watchdogKilled = false;
+    ULONGLONG launchStartedAt = 0;
     LaunchStage stage = LaunchStage::Idle;
     // Written by the launch worker, read by the UI timer. Never emit from the worker.
     std::mutex stepMutex;
@@ -113,15 +121,55 @@ struct Window {
     std::atomic<int> serverMode{-1}; // -1 pending, 1 enhanced, 0 standard, 2 inconclusive
     bool serverModeEmitted = false;
     std::future<Started> launch;
-    HANDLE process = nullptr, frame = nullptr, takeover = nullptr, ready = nullptr;
+    HANDLE process = nullptr, frame = nullptr, takeover = nullptr, ready = nullptr, gameplay = nullptr;
+    HANDLE clientInit = nullptr, sampLoaded = nullptr, sampReady = nullptr;
     DWORD pid = 0;
     ULONGLONG deadline = 0;
+    ipc::MilestoneTracker milestones;
+    uint64_t sessionId = 0;
     ~Window() {
         if (process) CloseHandle(process);
-        if (frame) CloseHandle(frame);
-        if (takeover) CloseHandle(takeover);
-        if (ready) CloseHandle(ready);
+        CloseLaunchEvents();
     }
+    // Fresh event objects per launch: a previous GTA process may still hold
+    // duplicates of the old ones and must not be able to signal this launch.
+    void CloseLaunchEvents() {
+        for (HANDLE* h : {&frame, &takeover, &ready, &gameplay, &clientInit, &sampLoaded, &sampReady})
+            if (*h) { CloseHandle(*h); *h = nullptr; }
+    }
+    bool CreateLaunchEvents() {
+        CloseLaunchEvents();
+        for (HANDLE* h : {&frame, &takeover, &ready, &gameplay, &clientInit, &sampLoaded, &sampReady}) {
+            *h = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!*h) { CloseLaunchEvents(); return false; }
+        }
+        return true;
+    }
+    static uint64_t NewSessionId() {
+        std::random_device rd;
+        uint64_t id = (static_cast<uint64_t>(rd()) << 32) ^ rd() ^ GetTickCount64();
+        return id ? id : 1;
+    }
+    // Polls one milestone event and records it once.
+    void PollMilestone(ipc::Milestone m, HANDLE event) {
+        if (!event || milestones.Has(m) || WaitForSingleObject(event, 0) != WAIT_OBJECT_0) return;
+        RecordMilestone(m);
+    }
+    void RecordMilestone(ipc::Milestone m) {
+        const auto r = milestones.Observe(m, sessionId, GetTickCount64());
+        Trace("milestone %s session=%016llx pid=%lu after=%llums %s", ipc::MilestoneName(m),
+              static_cast<unsigned long long>(sessionId), pid,
+              static_cast<unsigned long long>(SinceLaunch()), ipc::ToString(r));
+    }
+    void Trace(const char* fmt, ...) {
+        char line[256];
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(line, sizeof(line), fmt, args);
+        va_end(args);
+        ipc::TraceHandoff(line);
+    }
+    ULONGLONG SinceLaunch() const { return launchStartedAt ? GetTickCount64() - launchStartedAt : 0; }
     // Monotonic: a stage is never un-reached and never replayed.
     void Advance(LaunchStage next) {
         if (stage == LaunchStage::Failed || next <= stage) return;
@@ -159,6 +207,7 @@ struct Window {
     void ReturnToLobby(const std::string& error = {}) {
         if (process) { CloseHandle(process); process = nullptr; }
         launching = handedOver = sessionReady = cancelling = false;
+        gameplayConfirmed = watchdogArmed = watchdogKilled = false;
         ipc::TraceHandoff("lobby-restored");
         ResetStage();
         // Restore WebView2 visibility (hidden during handoff).
@@ -176,17 +225,23 @@ struct Window {
     }
     void Start(const std::string& host, uint16_t port, const std::string& nickname) {
         if (launching || process) return;
-        if (!frame) frame = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!takeover) takeover = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!ready) ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!frame || !takeover || !ready) { Emit("skr:launch:idle", "Nu se poate pregăti comunicarea cu jocul."); return; }
-        ResetEvent(frame); ResetEvent(takeover); ResetEvent(ready);
+        if (!CreateLaunchEvents()) { Emit("skr:launch:idle", "Nu se poate pregăti comunicarea cu jocul."); return; }
         config.serverAddress = host; config.serverPort = port; config.playerName = Wide(nickname);
         config.frameReady = frame; config.takeover = takeover; config.sessionReady = ready;
+        config.gameplayConfirmed = gameplay;
+        config.clientInitialized = clientInit; config.sampLoaded = sampLoaded; config.sampReady = sampReady;
+        sessionId = NewSessionId();
+        config.sessionId = sessionId;
         launching = true; handedOver = sessionReady = cancelling = false;
+        gameplayConfirmed = watchdogKilled = false;
         ResetStage();
-        ipc::TraceHandoff("launch-started");
-        deadline = GetTickCount64() + 120000;
+        launchStartedAt = GetTickCount64();
+        milestones.Reset(sessionId, launchStartedAt);
+        Trace("launch-started session=%016llx ipc=v%u", static_cast<unsigned long long>(sessionId),
+              ipc::kLaunchParamsVersion);
+        deadline = launchStartedAt + kHandoffTimeoutMs;
+        watchdogArmed = true;
+        Trace("watchdog-armed timeout=%llums", static_cast<unsigned long long>(kHandoffTimeoutMs));
         Emit("skr:launch:loading");
         Advance(LaunchStage::Preflight);
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -222,11 +277,18 @@ struct Window {
             DWORD exitCode = 0;
             GetExitCodeProcess(process, &exitCode);
             const auto rejection = skr::RejectionForExitCode(exitCode);
+            const bool sessionUp = sessionReady || gameplayConfirmed;
+            Trace("child-exit pid=%lu code=0x%08lX after=%llums reason=%s", pid, exitCode,
+                  static_cast<unsigned long long>(SinceLaunch()),
+                  cancelling ? "launch-cancelled"
+                  : watchdogKilled ? "watchdog-terminated"
+                  : rejection != protocol::RejectionReason::None ? "server-rejection"
+                  : sessionUp ? "game-exited-after-session" : "game-exited-before-session");
             if (rejection != protocol::RejectionReason::None) {
                 ReturnToLobby(protocol::RejectionDisplayText(
                     rejection, skr::SupportedClientsForExitCode(exitCode)));
             } else {
-                ReturnToLobby(sessionReady ? "" : "Jocul s-a închis înainte de finalizarea încărcării.");
+                ReturnToLobby(sessionUp ? "" : "Jocul s-a închis înainte de finalizarea încărcării.");
             }
             return;
         }
@@ -279,20 +341,59 @@ struct Window {
             ipc::TraceHandoff("frame-confirmed-window-hidden");
         }
         if (handedOver) Advance(LaunchStage::Handoff);
-        if (!sessionReady && WaitForSingleObject(ready, 0) == WAIT_OBJECT_0) {
-            sessionReady = true; ipc::TraceHandoff("session-visual-ready");
+        // Readiness milestones, polled in protocol order (launch_milestones.h).
+        PollMilestone(ipc::Milestone::ClientInitialized, clientInit);
+        PollMilestone(ipc::Milestone::SampLoaded, sampLoaded);
+        PollMilestone(ipc::Milestone::SampReady, sampReady);
+        PollMilestone(ipc::Milestone::GameplayConfirmed, gameplay);
+        PollMilestone(ipc::Milestone::VisualReady, ready);
+        if (!sessionReady && milestones.Has(ipc::Milestone::VisualReady)) {
+            sessionReady = true;
+            Trace("session-visual-ready after=%llums", static_cast<unsigned long long>(SinceLaunch()));
+        }
+        if (!gameplayConfirmed && milestones.Has(ipc::Milestone::GameplayConfirmed)) {
+            gameplayConfirmed = true;
+            Trace("gameplay-confirmed after=%llums", static_cast<unsigned long long>(SinceLaunch()));
+        }
+        if (handedOver && milestones.StartupConfirmed() && !milestones.Has(ipc::Milestone::SessionReady)) {
+            RecordMilestone(ipc::Milestone::SessionReady);
             Advance(LaunchStage::SessionReady);
         }
-        if (!sessionReady && GetTickCount64() >= deadline) {
-            TerminateProcess(process, 1);
-            ipc::TraceHandoff("handoff-timeout");
-            stage = LaunchStage::Failed;
-            // Keep monitoring until the child has actually exited before another launch.
-            deadline = GetTickCount64() + 10000;
-            SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            if (controller) controller->put_IsVisible(TRUE);
-            ShowWindow(hwnd, SW_SHOW);
-            Emit("skr:launch:failed", "GTA sau interfața serverului nu a confirmat încărcarea. Revenim în lobby.");
+        WatchdogInput in;
+        in.armed = watchdogArmed;
+        in.visualReady = sessionReady;
+        in.gameplayConfirmed = gameplayConfirmed;
+        in.now = GetTickCount64();
+        in.deadline = deadline;
+        switch (DecideWatchdog(in)) {
+            case WatchdogAction::None:
+                break;
+            case WatchdogAction::DisarmVisualReady:
+                watchdogArmed = false;
+                Trace("watchdog-disarmed reason=visual-ready after=%llums",
+                      static_cast<unsigned long long>(SinceLaunch()));
+                break;
+            case WatchdogAction::DisarmGameplay:
+                watchdogArmed = false;
+                Trace("watchdog-disarmed reason=gameplay-confirmed (visual-ready not received) after=%llums",
+                      static_cast<unsigned long long>(SinceLaunch()));
+                break;
+            case WatchdogAction::Terminate:
+                watchdogArmed = false;
+                watchdogKilled = !cancelling;
+                if (cancelling)
+                    Trace("watchdog-terminate pid=%lu reason=launch cancelled by user", pid);
+                else
+                    Trace("watchdog-terminate pid=%lu reason=no visual-ready and no gameplay confirmation within %llums",
+                          pid, static_cast<unsigned long long>(kHandoffTimeoutMs));
+                TerminateProcess(process, 1);
+                ipc::TraceHandoff("handoff-timeout");
+                stage = LaunchStage::Failed;
+                SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                if (controller) controller->put_IsVisible(TRUE);
+                ShowWindow(hwnd, SW_SHOW);
+                Emit("skr:launch:failed", "GTA sau interfața serverului nu a confirmat încărcarea. Revenim în lobby.");
+                break;
         }
     }
     void Fail(const wchar_t* message) {

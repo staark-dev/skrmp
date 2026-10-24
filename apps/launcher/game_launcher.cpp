@@ -1,5 +1,6 @@
 #include "game_launcher.h"
 #include "ipc/launch_params.h"
+#include "bootstrap/init_state.h"
 #include <cstdio>
 #include <thread>
 
@@ -15,6 +16,8 @@ const char* LaunchResultToString(LaunchResult r) {
         case LaunchResult::PipeFailed:          return "Named pipe IPC failed";
         case LaunchResult::StartupFilesFailed: return "Startup DLL conflict or restore failed; inspect samp.dll/d3d9.dll and .skr backups";
         case LaunchResult::ResumeThreadFailed:  return "ResumeThread failed";
+        case LaunchResult::NativeInitializationFailed: return "Native hook initialization failed";
+        case LaunchResult::NativeInitializationTimeout: return "Native hook initialization timed out";
     }
     return "Unknown";
 }
@@ -76,6 +79,17 @@ LPTHREAD_START_ROUTINE FindRemoteExport(HMODULE remoteBase,
     uintptr_t rva = localProc - localBase;
     return reinterpret_cast<LPTHREAD_START_ROUTINE>(
         reinterpret_cast<uintptr_t>(remoteBase) + rva);
+}
+
+namespace {
+bool CallRemoteDword(HANDLE process, LPTHREAD_START_ROUTINE proc, DWORD& result) {
+    HANDLE thread = CreateRemoteThread(process, nullptr, 0, proc, nullptr, 0, nullptr);
+    if (!thread) return false;
+    const DWORD wait = WaitForSingleObject(thread, 2000);
+    const BOOL read = wait == WAIT_OBJECT_0 && GetExitCodeThread(thread, &result);
+    CloseHandle(thread);
+    return read == TRUE;
+}
 }
 
 LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
@@ -165,9 +179,12 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
     }
     step(LaunchStep::ClientInjected);
 
-    // Find SkrRemoteInit in the remote process (same DLL, different base address)
+    // Resolve request and status exports. SkrRemoteInit only accepts the
+    // request; it does not claim that runtime-dependent hooks are ready.
     auto remoteInit = FindRemoteExport(remoteModule, config.clientDllPath.c_str(), "SkrRemoteInit");
-    if (!remoteInit) {
+    auto remoteState = FindRemoteExport(remoteModule, config.clientDllPath.c_str(), "SkrGetInitializationState");
+    auto remoteError = FindRemoteExport(remoteModule, config.clientDllPath.c_str(), "SkrGetInitializationError");
+    if (!remoteInit || !remoteState || !remoteError) {
         TerminateProcess(pi.hProcess, 1);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
@@ -181,6 +198,7 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
     params.version = ipc::kLaunchParamsVersion;
     params.serverPort = config.serverPort;
     params.enhancedAdvertised = config.enhancedAdvertised ? 1 : 0;
+    params.sessionId = config.sessionId;
     auto duplicateEvent = [&](HANDLE source, uint32_t& target, DWORD access) {
         if (!source) return true;
         HANDLE remote = nullptr;
@@ -190,7 +208,11 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
     };
     if (!duplicateEvent(config.frameReady, params.frameReadyHandle, EVENT_MODIFY_STATE) ||
         !duplicateEvent(config.takeover, params.takeoverHandle, SYNCHRONIZE) ||
-        !duplicateEvent(config.sessionReady, params.sessionReadyHandle, EVENT_MODIFY_STATE)) {
+        !duplicateEvent(config.sessionReady, params.sessionReadyHandle, EVENT_MODIFY_STATE) ||
+        !duplicateEvent(config.gameplayConfirmed, params.gameplayConfirmedHandle, EVENT_MODIFY_STATE) ||
+        !duplicateEvent(config.clientInitialized, params.clientInitializedHandle, EVENT_MODIFY_STATE) ||
+        !duplicateEvent(config.sampLoaded, params.sampLoadedHandle, EVENT_MODIFY_STATE) ||
+        !duplicateEvent(config.sampReady, params.sampReadyHandle, EVENT_MODIFY_STATE)) {
         TerminateProcess(pi.hProcess, 1);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
@@ -211,7 +233,8 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
         pipeOk = ipc::WriteLaunchParams(pi.dwProcessId, params);
     });
 
-    // Call SkrRemoteInit in the game process — it reads the pipe, hooks D3D9, starts AC
+    // Accept initialization while GTA is suspended. D3D9 and SA-MP cannot
+    // finish until the game runs, so readiness is polled only after resume.
     HANDLE hInitThread = CreateRemoteThread(pi.hProcess, nullptr, 0,
                                             remoteInit, nullptr, 0, nullptr);
     if (!hInitThread) {
@@ -243,9 +266,7 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
         CloseHandle(pi.hProcess);
         return LaunchResult::InjectionFailed;
     }
-    step(LaunchStep::ClientReady);
-
-    // Resume game's main thread — D3D9 hooks are installed, intro will render
+    // Resume GTA so it can create D3D9 and SA-MP runtime objects.
     if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1)) {
         TerminateProcess(pi.hProcess, 1);
         CloseHandle(pi.hThread);
@@ -254,6 +275,59 @@ LaunchResult LaunchGame(const LaunchConfig& config, DWORD& pidOut,
     }
 
     step(LaunchStep::GameResumed);
+
+    const DWORD pollStarted = GetTickCount();
+    bool ready = false;
+    DWORD lastReportedState = MAXDWORD;
+    while (GetTickCount() - pollStarted < config.nativeInitializationTimeoutMs) {
+        DWORD stateValue = 0;
+        if (!CallRemoteDword(pi.hProcess, remoteState, stateValue)) {
+            TerminateProcess(pi.hProcess, 1);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            return LaunchResult::NativeInitializationFailed;
+        }
+        const auto state = static_cast<skr::bootstrap::InitializationState>(stateValue);
+        if (stateValue > static_cast<DWORD>(skr::bootstrap::InitializationState::FAILED)) {
+            TerminateProcess(pi.hProcess, 1);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            return LaunchResult::NativeInitializationFailed;
+        }
+        if (stateValue != lastReportedState) {
+            lastReportedState = stateValue;
+            if (config.onNativeState) config.onNativeState(stateValue, 0);
+        }
+        if (state == skr::bootstrap::InitializationState::HOOKS_INSTALLED) {
+            ready = true;
+            break;
+        }
+        if (state == skr::bootstrap::InitializationState::FAILED) {
+            DWORD errorValue = 0;
+            CallRemoteDword(pi.hProcess, remoteError, errorValue);
+            if (config.onNativeState) config.onNativeState(stateValue, errorValue);
+            char message[128]{};
+            sprintf_s(message, "SKR native initialization failed (error %lu)\n", errorValue);
+            OutputDebugStringA(message);
+            TerminateProcess(pi.hProcess, 1);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            return LaunchResult::NativeInitializationFailed;
+        }
+        Sleep(50);
+    }
+    if (!ready) {
+        if (config.onNativeState) {
+            config.onNativeState(static_cast<uint32_t>(
+                skr::bootstrap::InitializationState::FAILED),
+                static_cast<uint32_t>(skr::bootstrap::InitializationError::INITIALIZATION_TIMEOUT));
+        }
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return LaunchResult::NativeInitializationTimeout;
+    }
+    step(LaunchStep::ClientReady);
 
     CloseHandle(pi.hThread);
     hProcessOut = pi.hProcess;
