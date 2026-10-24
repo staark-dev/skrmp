@@ -1,0 +1,249 @@
+{
+  "generated_utc": "2026-10-24T20:11:16.814696+00:00",
+  "status": "GO for isolated operator runtime test only; unsigned, not deployed, not runtime certified",
+  "workspace_head": "5006a968c530cb4198db06a9c76691afbfc17e70",
+  "artifacts": [
+    {
+      "path": "out/phone-m58-client/Release/SKR.Client.dll",
+      "bytes": 1027072,
+      "sha256": "0f2bc4396b3135d427a0960fd44ce808208cfe5426d1eeced3b35480836b82e8",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRGate.dll",
+      "bytes": 901120,
+      "sha256": "5589b68fc7e5c202164b36d40fa513969c4d1c6e84bc2b72fc9e23c001d36010",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server-legacy/Release/SKRGate.dll",
+      "bytes": 901120,
+      "sha256": "5a11094ffd1306d94811cc5f4e7097afb872be2f71ba276cfd41fdb3ad515a10",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58/results.txt",
+      "bytes": 2573,
+      "sha256": "d450d5ccad065c4e762630ba0bac1033077fbb14b7912a25b086f7e9857350fa"
+    },
+    {
+      "path": "out/phone-m58/sqlite-results.txt",
+      "bytes": 1346,
+      "sha256": "be7dcb451010d570cd65b114a49bd81c14f7c8914f6ca8ac7397d3d9cad6a2cb"
+    },
+    {
+      "path": "out/phone-m58/final-client-build.log",
+      "bytes": 748,
+      "sha256": "802fc7dd63fa953e89b9e46b78f84e2f14b95680214c35c4d8ea2692e525ba65"
+    },
+    {
+      "path": "out/phone-m58/final-server-build.log",
+      "bytes": 220256,
+      "sha256": "233ca27f55c022fbb163d758e842a9e9bce6056a1d69f27c10a5cd5f67fdcb11"
+    },
+    {
+      "path": "out/phone-m58/legacy-build.log",
+      "bytes": 222851,
+      "sha256": "cd7131b9a500f3a5611276be198b490fca95b3da9cebe40026fd7cfd21ab1f08"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRGpsNavigationTests.exe",
+      "bytes": 97280,
+      "sha256": "41cf9ff319892e5534cbbd619a87ca71dc642269cc24c1e8243f477512c33223",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRGpsRoutingTests.exe",
+      "bytes": 85504,
+      "sha256": "2502990e48f29ffc5bd7ecde61a13406f5e2002120f56e82a37c9b0919162ea9",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRGpsTests.exe",
+      "bytes": 11776,
+      "sha256": "268437e304c841d8ccc16d256900cb3833ca9764c2dca0a6fa52d7440054fcba",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRNativeApiTests.exe",
+      "bytes": 23552,
+      "sha256": "7e02ba5aaaed5a4fb09e127db93d4350c4b66a3fc634daccdb17a8468383508b",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRPhoneBackendTests.exe",
+      "bytes": 19456,
+      "sha256": "45de0b632cbfa617da6c18bf48e7d2d0fee05641143e1bc784b976a97741d185",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRPhoneGatewayTests.exe",
+      "bytes": 706560,
+      "sha256": "22e7c2422823f39246dc0afc84607d8a83818219d042c5d7383b71147cf619fd",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRPhoneM2Tests.exe",
+      "bytes": 21504,
+      "sha256": "1511491b657129c6586e18c04e26c652648c8f4cb3b7cc909e2c565d05372537",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRPhoneM3Tests.exe",
+      "bytes": 26112,
+      "sha256": "913889d6f3d40f86dcbf58bda619cc416aafedb462618fad516d61a969c70b8b",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRPhoneM4FTests.exe",
+      "bytes": 23552,
+      "sha256": "155ded8e37d90a921b812df1f3e88f3f192fc30b83e446d68699fc27b6ffafc0",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRPhoneM5Tests.exe",
+      "bytes": 48640,
+      "sha256": "6550cc0575fd43eea94e1cab556b8ad81be6e9728cf69ac6d08b2e6fadf01ca1",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRPhoneProtocolTests.exe",
+      "bytes": 37376,
+      "sha256": "8e9b27ac2e86c5e9ce1a9588b335b19c232989282d0ce28b7c161e91bc2031a0",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRPhoneTests.exe",
+      "bytes": 26624,
+      "sha256": "402f7f2917fe197df76b58282c84e1397a2e33c36d2e9588207a7709a44860cc",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRPhoneWorkerTests.exe",
+      "bytes": 694272,
+      "sha256": "352df0a1e88e8ff0ee8175b1fd9e2c822a6c1700af700a8eec4fba70a58484fd",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRXTests.exe",
+      "bytes": 16384,
+      "sha256": "cdb473777ebe792b371f0c8038e5b11ad25ed5b9cd1f3f1fa98a4b1835252c3c",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m58-server/Release/SKRXVehiclesTests.exe",
+      "bytes": 33280,
+      "sha256": "76c8ac4f11d2288d8607a1fc38196e421b0a472b48bf70cd325991ec7ffe5d7a",
+      "pe_machine": "0x14c"
+    }
+  ],
+  "source_snapshot": [
+    {
+      "path": "dependencies.lock.json",
+      "bytes": 6356,
+      "sha256": "29cf6e1287dda63dafe00e1ae3d994dd7475cb5ba287be971f4869aefa459396"
+    },
+    {
+      "path": "shared/protocol/native_api.h",
+      "bytes": 23043,
+      "sha256": "6d0c7ee7b724d8822190855720db8a4d45cb7a6bc8fac306b35caa39e2031b68"
+    },
+    {
+      "path": "shared/protocol/skrx_gateway.h",
+      "bytes": 5779,
+      "sha256": "6b0d167ea2cd5e58b4e0360038b33055ec1c084744d00c67af1d404a0997919b"
+    },
+    {
+      "path": "shared/protocol/skrx_phone.h",
+      "bytes": 5389,
+      "sha256": "19ae656ce045fb156fa0a13481f304230270c04cfe997f0d254cb8976f97f48c"
+    },
+    {
+      "path": "client/native-api/native_api.cpp",
+      "bytes": 9639,
+      "sha256": "ed034da8aa040e14f94d93a69445e2fa19481cacbc4eebcc3e0c600c51493a7c"
+    },
+    {
+      "path": "client/skrx/skrx_client.cpp",
+      "bytes": 11251,
+      "sha256": "eec5649796151c8f38dc5ae3c638ec15d8a72e350f0442dcae66be22bf4073eb"
+    },
+    {
+      "path": "client/phone/phone_net.h",
+      "bytes": 2297,
+      "sha256": "bc15d6e2eb8b2e169a4d532c98bf7c77aaf79f10e61e67ab0ee3aa8b560f5572"
+    },
+    {
+      "path": "client/phone/phone_net.cpp",
+      "bytes": 34275,
+      "sha256": "890eb595696c3c1ab157869405a5e2dfe3610a5ec02f9994ded178d6c3135b35"
+    },
+    {
+      "path": "server/skr-gate-omp/phone_backend.cpp",
+      "bytes": 13561,
+      "sha256": "8a9bfe89653a4f163a368afcbb58bc1c37b64a204c68cbe9878a2bef4f0cdab5"
+    },
+    {
+      "path": "server/skr-gate-omp/phone_store.cpp",
+      "bytes": 33484,
+      "sha256": "469070bc27bd62044ff474c2dfa2200796e0b4948a2b3a5db0540f80548ef9ba"
+    },
+    {
+      "path": "server/skr-gate-omp/phone_worker.h",
+      "bytes": 3200,
+      "sha256": "5009861a622b801d99607dc1dd23e01721175ae5233ed62aa4b92853737d8bfa"
+    },
+    {
+      "path": "server/skr-gate-omp/phone_worker.cpp",
+      "bytes": 5449,
+      "sha256": "3d78ce3b2e1d0599ac1700016d5e870b8d6f419a64d603eb9bf402bb744880fa"
+    },
+    {
+      "path": "server/skr-gate-omp/skr_gate_component.hpp",
+      "bytes": 15243,
+      "sha256": "900e9a0c72fdcac9d8384751c06d75c5912c5c79ce761a05077f85a5985b5898"
+    },
+    {
+      "path": "server/skr-gate-omp/skr_gate_component.cpp",
+      "bytes": 43570,
+      "sha256": "89bfc54d1473305bb5866b4649be89922a2fd388abd44946d8701749e41b2139"
+    },
+    {
+      "path": "server/skr-gate-omp/native_api_server.cpp",
+      "bytes": 24084,
+      "sha256": "4c5b4b0b0a0ac66f20094516d49b3e6ae9d1c9b3a10e53fe4140318219faa2b7"
+    },
+    {
+      "path": "server/skr-gate-omp/skrx_gateway_server.cpp",
+      "bytes": 10762,
+      "sha256": "47095cfa9318cf767eca4158d4f49351b54abf8afb4d113992cbdafcf58fb44f"
+    },
+    {
+      "path": "server/skr-gate-omp/CMakeLists.txt",
+      "bytes": 11435,
+      "sha256": "10946324b3ad04bbe8d7ebeb84acd27a931e507fa462c95851f8d2e1a88c8e65"
+    },
+    {
+      "path": "tests/unit/test_skrx.cpp",
+      "bytes": 11671,
+      "sha256": "424971bbdda8c18df993ba491e4291a1d3ae75ba0d68056e40aa2bf4fdca863e"
+    },
+    {
+      "path": "tests/unit/test_phone_gateway.cpp",
+      "bytes": 18646,
+      "sha256": "4632432225ad17d54ae65ab6462b8b6f48166497518ebf2f03898afe8bcbfc12"
+    },
+    {
+      "path": "tests/unit/test_phone_worker.cpp",
+      "bytes": 6595,
+      "sha256": "0fb8e611962b38888abefbc53e91bbfcdc2009ddc5d4c9b7b7669a9fc3773a2d"
+    }
+  ],
+  "prior_M5_artifacts_unchanged": true,
+  "native_phone_UI_matches_recorded_M5_source": {
+    "client/phone/phone_renderer.cpp": true,
+    "client/phone/phone_renderer.h": true,
+    "client/phone/phone_input.cpp": true,
+    "client/phone/phone_model.h": true
+  }
+}

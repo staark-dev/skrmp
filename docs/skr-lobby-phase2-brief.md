@@ -58,10 +58,10 @@ handover notes are in Romanian or English — follow the surrounding style.
 5. Post-intro, `d3d9_hook.cpp` hands each EndScene to
    `skr::lobby::OnEndSceneAfterIntro(device)`, which:
    - Logs a one-shot `"first post-intro EndScene frame"` marker.
-   - Calls `PatchGtaMainMenu()` each frame until it sticks → writes `0xC3`
-     at the entries of `CMenuManager::Process` (0x0057B440) and
-     `::DrawFrontEnd` (0x0057B210). Both are `__thiscall void()`, so a bare
-     near-ret cleanly returns to the caller.
+   - Calls `PatchGtaMainMenu()` each frame until it sticks → validates the
+     canonical Hoodlum signature and writes `0xC3` at the one-byte entry
+     instruction of `CMenuManager::Process` (0x0057B440). `0x0057B210` is
+     inside the preceding routine and is never a patch target.
    - Calls `skr::lobby::OnCefTick()` → creates the lobby CEF browser with
      id `skr::cef::BrowserId::kMainMenu` once the intro reports
      `IsFinished()` and `cef_ready()` is true.

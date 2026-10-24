@@ -1,6 +1,6 @@
 {
   "$schema": "SKR dependency lockfile — all fields required for release; UNKNOWN values are blocking.",
-  "locked_at": "2026-10-17T00:00:00Z",
+  "locked_at": "2026-10-23T00:00:00Z",
   "dependencies": [
     {
       "name": "open.mp-server",
@@ -25,16 +25,16 @@
       "license": "MIT"
     },
     {
-      "name": "samp-cef",
-      "repository": "https://github.com/zottce/samp-cef",
-      "commit": "f14fe4fa7f0d036edf445ba02b4bddd4cccac377",
-      "version": "post-v1.4.1 (master 2026-07-14)",
-      "archive_url": "https://github.com/zottce/samp-cef/archive/f14fe4fa7f0d036edf445ba02b4bddd4cccac377.tar.gz",
-      "archive_sha256": "UNKNOWN — compute after download",
+      "name": "omp-cef",
+      "repository": "https://github.com/aurora-mp/omp-cef.git",
+      "commit": "79fb79e19c5f94e9dace4534654de3bed34c0d05",
+      "version": "SKR working checkout",
+      "archive_url": "https://github.com/aurora-mp/omp-cef/archive/79fb79e19c5f94e9dace4534654de3bed34c0d05.tar.gz",
+      "archive_sha256": "N/A — build consumes the clean vendored Git checkout at deps/omp-cef",
       "architecture": "x86 (client plugin)",
       "toolchain": "Rust stable i686-pc-windows-msvc + VS2022 Build Tools + Node.js 20+",
-      "license": "GPL-3.0",
-      "notes": "R2 NOT SUPPORTED natively — supports R1, R3, DL-R1. SKR provides R2 compatibility adapter."
+      "license": "MIT",
+      "notes": "Clean checkout. origin=aurora-mp/omp-cef; additional skr-fork remote=https://github.com/staark-dev/omp-cef.git. This reconciles the previous zottce/samp-cef lock entry without replacing the working dependency."
     },
     {
       "name": "cef-binary",
@@ -49,15 +49,38 @@
       "notes": "Standard distribution — no proprietary codecs (H.264/AAC unavailable)"
     },
     {
-      "name": "plugin-sdk",
-      "repository": "https://github.com/DK22Pac/plugin-sdk",
-      "commit": "UNKNOWN — select and pin",
-      "version": "UNKNOWN",
-      "archive_url": "UNKNOWN",
-      "archive_sha256": "UNKNOWN",
+      "name": "plugin-sdk-SA-LLM",
+      "repository": "local D:/GCMP checkout; subtree deps/plugin-sdk-sa-llm; no remote configured",
+      "commit": "7f36b083ff9d57e8d86c0b3440b1228a69ba1a93",
+      "version": "GTA San Andreas-focused plugin-sdk continuation",
+      "archive_url": "N/A — local pinned Git subtree",
+      "archive_sha256": "N/A — individual controller reference files are hash-pinned below",
       "architecture": "x86",
       "toolchain": "MSVC",
-      "license": "UNKNOWN — verify before linking"
+      "license": "zlib",
+      "source_file_sha256": {
+        "plugin_sa/game_sa/CControllerConfigManager.h": "F21DB04185E6B4374912F3DE77B79F2437EE2555A6686C8C5674AAD56891B989",
+        "plugin_sa/game_sa/CControllerConfigManager.cpp": "24B67E2A9C542764AD20871F236D0F340914AC30DE993DAE58214A3B39A212CC",
+        "plugin_sa/game_sa/rw/skeleton.h": "52556FBC4414C9CD7844EFDB6236A2C325AA7454919F6F054C7C5C6A69827586",
+        "LICENSE": "C097C542F5F806378E28E3866AF83EA1692AE1F0026BCF5BFF4B6637254F22FC"
+      },
+      "notes": "CMake consumes this checkout through deps/plugin-sdk (local directory junction). B.2 uses verified layouts/codes; gta-reversed is additionally cited for native functions missing from this header."
+    },
+    {
+      "name": "samp-sdk-research-r5",
+      "repository": "local D:/GCMP checkout; subtree deps/samp-sdk-master; no remote configured",
+      "commit": "7f36b083ff9d57e8d86c0b3440b1228a69ba1a93",
+      "version": "SA-MP 0.3.7-R5 reverse-engineering reference",
+      "archive_url": "N/A — local pinned Git subtree",
+      "archive_sha256": "N/A — reference files are hash-pinned below",
+      "architecture": "x86",
+      "toolchain": "CMake / MSVC Win32",
+      "license": "MIT except client/reconstructed/decompiled, which is excluded and not consumed",
+      "source_file_sha256": {
+        "README.md": "4F0B6254C44DE3DC4AE37A56EB6C6A203150FADA93F9F14581A6B85BC0032588",
+        "LICENSE": "4DBC5EB7235D5EE2425BE7D8458B0D7444414D6CA0AB2E6A60DA60DC552C9E4E"
+      },
+      "notes": "Reference-only for the pinned SA-MP R5 profile; no decompiled third-party material is copied or linked."
     },
     {
       "name": "Microsoft.Web.WebView2",
@@ -68,6 +91,23 @@
       "toolchain": "MSVC Win32",
       "license": "BSD-3-Clause (package LICENSE.txt)",
       "notes": "Only SKR_EXTERNAL_LOBBY experimental build; no runtime bundled."
+    },
+    {
+      "name": "sqlite3-phone-worker",
+      "repository": "https://sqlite.org/src",
+      "commit": "5c9a6c06871cb9fe42814af9c039eb6da5427a6ec28f187af7ebfb62eafa66e5 (SQLite Fossil source ID)",
+      "version": "3.36.0",
+      "archive_url": "N/A — reuses the existing local Conan SQLite package used by the open.mp build",
+      "archive_sha256": "N/A — local header, static library and license are hash-pinned below",
+      "architecture": "x86 for this server candidate; supply a matching server ABI package for another architecture",
+      "toolchain": "MSVC; CMake FindSQLite3 with explicit include/library paths",
+      "license": "Public domain (package licenses/LICENSE inspected)",
+      "source_file_sha256": {
+        "include/sqlite3.h": "001f26c0b2ca407a9a5d3f5e0690d7e576687b23110e18d2a08014dd774eb71c",
+        "lib/sqlite3.lib": "a1e99137af8a9582a147c7dc69e07085766e35fe53e76e11d7d4116b83ed91dc",
+        "licenses/LICENSE": "452d1e9b9ac57647fd26b9a0eee6a647e0d090f180897b3626ea1278ccb1cf95"
+      },
+      "notes": "M5.8 worker owns its SQLite connection. No open.mp database pool objects cross threads. Existing UNKNOWN open.mp release pins remain unresolved."
     }
   ],
   "removed": [

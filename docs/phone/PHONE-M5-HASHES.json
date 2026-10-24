@@ -1,0 +1,207 @@
+{
+  "generated_at_utc": "2026-10-24T19:28:11.807540+00:00",
+  "status": "unsigned candidate; no GTA runtime certification; not deployed",
+  "workspace_head": "5006a968c530cb4198db06a9c76691afbfc17e70",
+  "artifacts": [
+    {
+      "path": "out/phone-m5-client/Release/SKR.Client.dll",
+      "size": 1022976,
+      "sha256": "0c557d82390afb615aef88987d9f1682bd856c635840518bc498f803bf22c465",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRGate.dll",
+      "size": 311296,
+      "sha256": "768318ba1a3ec691274f4a8fd3b005f3ec1f41246903f3575213a7d232e614ba",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-client/Release/SKR/phone/wallpaper.bmp",
+      "size": 2764854,
+      "sha256": "5d92f1e68a8da3c62356741a1dfb8ce05988640b17dacd50cd216b53287d09ae"
+    },
+    {
+      "path": "out/phone-m5-server/results.txt",
+      "size": 2326,
+      "sha256": "a5afd23ff31065483af0405e25356579cd9cbfc57800d8d0898b0ee891b49ecd"
+    },
+    {
+      "path": "out/phone-m5-server/sqlite-results.txt",
+      "size": 1346,
+      "sha256": "8c73e8695a1b96a52417fdcd9d60eed94e22070e7c594e3aa042c4e2f7765dcb"
+    },
+    {
+      "path": "out/phone-m5-server/preview-final.log",
+      "size": 21019,
+      "sha256": "1e6050174078c0f906cd0ea82d4d0e7daf5e157eaeed876bba5dec9250306efb"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRGpsNavigationTests.exe",
+      "size": 97280,
+      "sha256": "801a02ea88f3f2f9af4a330281e1587004946c836749d7ff72cfb0372751980f",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRGpsRoutingTests.exe",
+      "size": 85504,
+      "sha256": "5ef23bcc119d3b5878b2e071ff8c31b7024501ce10ccc28d9407444a555c98c2",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRGpsTests.exe",
+      "size": 11776,
+      "sha256": "84dc5a728fb40cab6d52775e04989295fa6643e2baf39e64530c84fc485962ed",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRNativeApiTests.exe",
+      "size": 23552,
+      "sha256": "a2a891d7a7f4589530fd5ff05f474509a5402910a6201bcb03e3c59bfea4dbe9",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRPhoneBackendTests.exe",
+      "size": 19456,
+      "sha256": "823241bad5166a98c85b34c400221355ebe631f23608ebaab257032ab6ae1bb2",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRPhoneM2Tests.exe",
+      "size": 21504,
+      "sha256": "ae2798a5097bf8b834eed45bc410451108226775682a1bda1147939f482bd7c8",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRPhoneM3Tests.exe",
+      "size": 26112,
+      "sha256": "337c232bab6929450a3965300373fa6c40da83081753d063cfb001f40cfd333c",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRPhoneM4FTests.exe",
+      "size": 23552,
+      "sha256": "0804dbd41defabceb4ac63ed1891971ebc08372268a3dd22a395d558e4f9c890",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRPhoneM5Tests.exe",
+      "size": 46592,
+      "sha256": "773bc8363edd1c303c9b9431b21bb169aa43cf53c3be4b699a552f0734eb7441",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRPhoneProtocolTests.exe",
+      "size": 37376,
+      "sha256": "5e36d6b5d6a94eb7815276a36122eb9d344bc992855ffd7dbb73657580e15c93",
+      "pe_machine": "0x14c"
+    },
+    {
+      "path": "out/phone-m5-server/Release/SKRPhoneTests.exe",
+      "size": 26624,
+      "sha256": "9157b9b55df90fa0a5487e48fec025b6873b214ed273ab18db5c3f24903bea3a",
+      "pe_machine": "0x14c"
+    }
+  ],
+  "phone_source_snapshot": [
+    {
+      "path": "shared/protocol/native_api.h",
+      "size": 23485,
+      "sha256": "fea451333547b5571635b92eb19a4b373704641e2d6b989439905337ce3a90b2"
+    },
+    {
+      "path": "shared/protocol/phone_profile.h",
+      "size": 1163,
+      "sha256": "386d517973f656c78f96c21281597c47bccf52bc7fb2ef8e3ee60fe5410afd38"
+    },
+    {
+      "path": "shared/protocol/phone_protocol.h",
+      "size": 24190,
+      "sha256": "c2e0fac10963d2cbeef4e6060133fc6d9da5baf7c04c7b0fda69fa89b800e9ae"
+    },
+    {
+      "path": "server/skr-gate-omp/phone_m5_sql.h",
+      "size": 2525,
+      "sha256": "a270b1e892fb75d293d0305e80ce93eace0399842233956f0d3c65e98e8788d1"
+    },
+    {
+      "path": "server/skr-gate-omp/phone_backend.cpp",
+      "size": 50949,
+      "sha256": "914ba4762502ec262c9939944da5032f614ddf7a0ecc9729f0305449efd09635"
+    },
+    {
+      "path": "server/skr-gate-omp/native_api_server.cpp",
+      "size": 24618,
+      "sha256": "af43bb81cf993c7bfc3ee1ad82dee4c8e915ba1ffa3ef74a826a2b1da4b16e42"
+    },
+    {
+      "path": "client/native-api/native_api.cpp",
+      "size": 9579,
+      "sha256": "dc760b2e9182dcfaf58327cd0f35dc5b89f1a50155fea1e7bb2cf74712e46b0e"
+    },
+    {
+      "path": "client/phone/phone_model.h",
+      "size": 6888,
+      "sha256": "ae8d7dd15a065361150391d0895079e2ce0a27c99bd4743b62f238df532abcac"
+    },
+    {
+      "path": "client/phone/phone_net.h",
+      "size": 2181,
+      "sha256": "eaba484ce2e1057e940336b2a52f672b467565c0bf3b1b7bfa6b50d49bfee16b"
+    },
+    {
+      "path": "client/phone/phone_net.cpp",
+      "size": 33926,
+      "sha256": "1c8324e229bba827e9cfbafa82a3167ae6b15ab7223229f6282cab40a05e15bd"
+    },
+    {
+      "path": "client/phone/phone_input.cpp",
+      "size": 47516,
+      "sha256": "a2847d2caab92edc72fde68a7635d5e70a933f02ff7b2897b342f691cca3ba5f"
+    },
+    {
+      "path": "client/phone/phone_renderer.h",
+      "size": 3563,
+      "sha256": "ff4df53554a5bdc6996e7b2edecdfa5ba1ff90c189530068607ea38c70dee054"
+    },
+    {
+      "path": "client/phone/phone_renderer.cpp",
+      "size": 83671,
+      "sha256": "0e6735111ceb71630272f56dd71b7fd94e8f9cecb545ff5611532c2115e8ab5d"
+    },
+    {
+      "path": "tools/phone_m5_migrate.py",
+      "size": 3279,
+      "sha256": "e3850c772aad36386d06cfade39da3e3a23e1d75b63ecf0eb79c0e60bcaca800"
+    },
+    {
+      "path": "tests/test_phone_m5_sqlite.py",
+      "size": 9458,
+      "sha256": "374635a240ecf6ee2ebf9b7ff6f6f9048bc7d48041021576c2b3c7ce86d8e154"
+    },
+    {
+      "path": "tests/unit/test_phone_m5.cpp",
+      "size": 7478,
+      "sha256": "7dc9af211c01d6901918bebc0be40ae85ee1752dc8d5df4260b4385471981802"
+    },
+    {
+      "path": "tests/unit/test_phone_protocol.cpp",
+      "size": 24788,
+      "sha256": "c919ff2557ab85c12303c7a50b4afbf981c8ca6dd341c2a36595ac28dd119c93"
+    },
+    {
+      "path": "tests/unit/test_phone_backend.cpp",
+      "size": 11626,
+      "sha256": "d55daf9756f14f62b4ce5b89abddb9a67a9e55dcd913357a492af3f6d28a1d61"
+    },
+    {
+      "path": "tests/phone_preview.cpp",
+      "size": 29292,
+      "sha256": "77a969f98707a78db46a4bc650e98dea83e1ef54f04890d53b8fe72dd256f094"
+    },
+    {
+      "path": "server/skr-gate-omp/CMakeLists.txt",
+      "size": 10546,
+      "sha256": "c426e79a666a3e5750276365683b5d1b5ed2d3e87b0bc9124980f6ddb882416c"
+    }
+  ]
+}

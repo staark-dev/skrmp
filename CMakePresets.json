@@ -44,6 +44,20 @@
       "cacheVariables": {
         "SKR_EXTERNAL_LOBBY": "ON"
       }
+    },
+    {
+      "name": "op215-x86",
+      "displayName": "OP215 Custom Vehicles (experimental, VS 2026)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": {
+        "value": "Win32",
+        "strategy": "set"
+      },
+      "binaryDir": "${sourceDir}/build-op215",
+      "cacheVariables": {
+        "SKR_EXTERNAL_LOBBY": "ON",
+        "SKR_OP215": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -66,6 +80,15 @@
         "SKRClient",
         "SKRLobbyTests",
         "SKRLaunchIpcTests"
+      ]
+    },
+    {
+      "name": "op215",
+      "configurePreset": "op215-x86",
+      "configuration": "Release",
+      "targets": [
+        "SKRLauncher",
+        "SKRClient"
       ]
     }
   ]

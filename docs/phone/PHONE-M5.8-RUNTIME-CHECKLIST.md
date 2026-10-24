@@ -1,0 +1,41 @@
+# M5.8 — isolated two-client runtime procedure
+
+Status: **NOT RUN**. Operator starts GTA manually. This checklist does not authorize deployment to an active server, overwriting certified OP215 builds or signing/publishing candidates.
+
+## Preparation
+
+1. Copy the intended runtime into a private test installation and retain its matching server/client binaries. Use the exact server working directory containing the existing Gate `skr.db`; verify the path before starting. Stop all users of the **private copy** and retain a full SQLite backup. Do not operate on the active database.
+2. Verify the SHA-256 values in `PHONE-M5.8-HASHES.json`. The three candidate DLLs are x86. Check the actual private server ABI separately; GTA's x86 requirement does not prove server bitness. Record GTA/client/server/component hashes and test configuration.
+3. Operator installs `out/phone-m58-client/Release/SKR.Client.dll` and the Gateway-enabled `out/phone-m58-server/Release/SKRGate.dll` into the **private installation only**. Keep the matching shared VEHICLES snapshot; no vehicle hooks are installed by this procedure.
+4. Keep real account admission/authentication checks. Enable the phone through the existing gamemode integration after trusted initialization. Use two distinct persistent test account names A/B and synthetic message text only. Do not reuse deleted account names or disable TLS, signatures/sandbox or production SKRAC policy to pass a test.
+5. Confirm API Welcome grants `CapPhone 0x08`, `CapGateway 0x10` and `CapPhoneGateway 0x40`; Setup `0x20` remains separately negotiated. With all existing core features, the typical full mask is `0x7F`, but test the required bits rather than assuming the whole mask. API Ready or `0x10` alone is insufficient.
+
+## Test record
+
+For each row record PASS/FAIL/NOT RUN, exact binary hashes, metadata/counts and observations. Never log real SMS text, credentials or unnecessary account/number data. A crash, duplicate number/message, foreign account data, indefinite control lock or vehicle regression stops the test.
+
+| # | Actions | Required observation |
+|---|---|---|
+| 1 | Connect A and B manually. Open the existing native phone with L. Complete setup for new owners; repeat with an existing activated owner from the copied DB. | Existing activated owner is not reset/renumbered. New owners receive distinct canonical numbers in the 10,000-candidate pool, displayed as `555 ####`. No UI redesign, fake extra app or CEF phone replacement. |
+| 2 | From A's native Messages UI send one synthetic SMS to B. Reply from B while A leaves the conversation open. Do not use `/sms` or the retired synchronous test native. | One message row per send; storage acknowledgement changes Sending to Sent; reply appears immediately without reopening. Existing Contacts/Message actions remain the entry points. |
+| 3 | If an approved metadata-only decoded-RPC trace/instrumented test build is available, record the send/receive envelope fields. Do not assume a raw packet capture is a decoded RPC trace. | PHONE traffic uses `(240,10,C→S)` and `(241,10,S→C)`, namespace 5, version 1, matching API session. No phone request/response is also dispatched on legacy steps 9/7. Capture marker/step/ns/version/length/session/request/message IDs only, not SMS bodies. If this evidence is unavailable, mark wire verification NOT RUN rather than inventing it. |
+| 4 | Send several messages in the same second and while opening/loading history. Read and scroll/load older messages. | Stable ordering, no lost live push, duplicate bubble or extra unread increment. Gateway pages contain up to two entries and merge correctly. SQLite retains history beyond the bounded visible window. |
+| 5 | Disconnect B. Send from A, reconnect B and open Messages/history. Then disconnect/reconnect A and restart its launcher. | Offline message persists and is retrievable; own number, completed activation, contacts and preferences remain stable. No automatic resend or transport change during an established session. |
+| 6 | Add B as A's contact, reconnect, open/contact-message B, remove it and reconnect again. | Changes persist for A only; removal does not delete SMS/history. Failure/queue overload must not be reported as a successful save. |
+| 7 | Receive with phone closed/open; open the conversation, reconnect with an unread message, toggle banners. Repeat while ESC/native dialogs/chat are active. | Unread persists/clears for actual displayed incoming IDs, one notification per received message, preference honored. Focus is not stolen. Overlay behavior is a runtime check, not an offline-test conclusion. |
+| 8 | Use phone GPS → existing map → waypoint; start/recalculate/arrive/clear, and test an unavailable route. Exercise Settings and return Home/back. | Same local GPS engine/rendering; actual waypoint/arrival cleanup; no continuous pathfinding/road-graph PHONE traffic or invented ETA. HUD/ESC/input stay consistent. |
+| 9 | Exercise L, ESC, T/F6, text input, alt-tab, death/respawn, driving, resolution/device reset. Observe FPS/server tick/worker backlog while sending within the rate limit. Compare against the same private snapshot before phone traffic. | No chat/input regression, crash, indefinite gameplay lock, SQLite work in packet callbacks or new phone disk-log writes. Record actual latency/FPS/tick observations; no performance target is pre-certified. |
+| 10 | Confirm CORE Ping/Pong before/after all phone operations, and run the existing operator-approved VEHICLES M2.1 checks in the private snapshot. | CORE round trips continue; vehicle registry/bind/stream-in behavior is unchanged. Offline manager tests are not vehicle runtime certification. |
+| 11 | Stop the private server. Operator installs the separately built `out/phone-m58-server-legacy/Release/SKRGate.dll`, restarts and reconnects both clients with the same private DB. | Welcome omits `0x40` while retaining other supported bits. Phone uses legacy requests/responses only; native UI send/ack/receive, numbers and history still work. CORE/VEHICLES remain negotiated independently. No data restore or renumbering for this transport-only rollback. |
+| 12 | Test an old M4/M5 client against the Gateway-enabled server, and a new client against a server with no PHONE Gateway capability (then one with no CapPhone). | Old clients receive legacy phone messages only. New client selects legacy or shows safe unavailable UI according to actual capabilities. No M5 profile actions without Setup support; no assumption that API Ready means all phone features work. |
+
+## Controlled failure checks
+
+- Keep these on disposable data only. Hold a competing SQLite write lock and submit requests, release the lock, then retry. Game/network callbacks must remain responsive; bounded worker errors/queue-full responses are acceptable. No second number or false successful storage acknowledgement.
+- Use the provided offline `SKRPhoneGatewayTests`/`SKRPhoneWorkerTests` for repeatable malformed/version/replay/cancellation checks. If a separate approved live injection harness is used, replay the **same session/request ID**, then an old-session packet after reconnect. Expect one stored SMS/original acknowledgement for same-session replay, and no dispatch for stale/unnegotiated traffic. Do not invent a live harness that is not installed.
+- Simulate unavailable phone services in the private copy. Player can close the phone immediately; tracked requests timeout/fail safely. Failed Gateway sends must not turn into legacy sends in that session.
+- A worker whose initial database open/migration failed reports service errors. Correct its path/permissions and restart the private component/server; a successful protocol negotiation is not proof of healthy storage.
+
+## Decision
+
+Current result is **GO to conduct this controlled test**, not a passed runtime certification. All rows remain NOT RUN until the operator records evidence. Production remains NO-GO until real runtime evidence and the existing dependency/compatibility, account lifecycle and production security requirements are satisfied. Calls are unsupported; the old synchronous development SMS native is intentionally not a certification path.
