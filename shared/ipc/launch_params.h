@@ -19,7 +19,8 @@ inline void MakePipeName(wchar_t* buf, size_t bufChars, DWORD pid) {
 }
 
 static constexpr uint32_t kLaunchParamsMagic   = 0x534B5231; // "SKR1"
-static constexpr uint32_t kLaunchParamsVersion = 4;
+// 5: gameplayConfirmedHandle. 6: sessionId + milestone handles; ack echoes sessionId.
+static constexpr uint32_t kLaunchParamsVersion = 6;
 static constexpr size_t   kMaxAddress          = 256;
 static constexpr size_t   kMaxPlayerName       = 64;
 static constexpr size_t   kJoinTicketSize      = 32;
@@ -39,6 +40,12 @@ struct LaunchParams {
     uint32_t frameReadyHandle = 0;
     uint32_t takeoverHandle = 0;
     uint32_t sessionReadyHandle = 0;
+    uint32_t gameplayConfirmedHandle = 0;  // client: in world, healthy (watchdog disarm)
+    uint32_t clientInitializedHandle = 0;  // launch_milestones.h CLIENT_INITIALIZED
+    uint32_t sampLoadedHandle = 0;         // SAMP_LOADED
+    uint32_t sampReadyHandle = 0;          // SAMP_READY
+    uint32_t reservedHandle = 0;
+    uint64_t sessionId = 0;                // launcher-chosen nonce, echoed in the ack
 };
 
 static_assert(sizeof(LaunchParams) < 4096, "LaunchParams must fit in a single pipe buffer");
@@ -107,8 +114,9 @@ inline bool WriteLaunchParams(DWORD childPid, const LaunchParams& params, DWORD 
     bool sent = detail::Transfer(pipe.value, &copy, sizeof(copy), true, deadline);
     SecureZeroMemory(&copy, sizeof(copy));
     if (!sent) return false;
-    uint8_t ack = 0;
-    return detail::Transfer(pipe.value, &ack, sizeof(ack), false, deadline) && ack == 1;
+    // The reader echoes the session id it accepted: both peers agree on the launch.
+    uint64_t ack = ~params.sessionId;
+    return detail::Transfer(pipe.value, &ack, sizeof(ack), false, deadline) && ack == params.sessionId;
 }
 
 inline bool ReadLaunchParams(LaunchParams& out, DWORD timeoutMs = 5000) {
@@ -130,7 +138,7 @@ inline bool ReadLaunchParams(LaunchParams& out, DWORD timeoutMs = 5000) {
     if (!SetNamedPipeHandleState(opened, &mode, nullptr, nullptr)) return false;
     LaunchParams received{};
     bool valid = detail::Transfer(opened, &received, sizeof(received), false, deadline) && detail::Valid(received);
-    uint8_t ack = valid ? 1 : 0;
+    uint64_t ack = valid ? received.sessionId : ~received.sessionId;
     bool acknowledged = detail::Transfer(opened, &ack, sizeof(ack), true, deadline);
     if (valid && acknowledged) out = received;
     SecureZeroMemory(&received, sizeof(received));
