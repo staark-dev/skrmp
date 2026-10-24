@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "protocol/radar_style.h"
+
 namespace skr::gate_omp {
 
 enum class WireClientType : uint8_t {
@@ -30,6 +32,17 @@ struct ServerArtwork {
     bool HasArtwork() const { return !logoUrl.empty() || !bannerUrl.empty(); }
 };
 
+// Parsed from the "hud" section of skr-runtime.json.
+// Provides server-wide defaults applied to every new player connection.
+struct HudConfig {
+    protocol::RadarStyle defaultRadarStyle = protocol::RadarStyle::Round;
+    protocol::RadarSizeMode defaultRadarSize = protocol::RadarSizeMode::Default;
+    float defaultRadarScale = 1.0f;
+    bool enableSpeedometer = true;
+    bool enableMinimap = true;
+    bool enablePhone = true;
+};
+
 class ClientPolicy {
 public:
     bool LoadFromFile(const char* path, std::string& error);
@@ -49,6 +62,7 @@ public:
     bool AllowsOpenMp() const { return allowOpenMp_; }
 
     const ServerArtwork& Artwork() const { return artwork_; }
+    const HudConfig& Hud() const { return hud_; }
 
 private:
     void ResetDefaults();
@@ -61,6 +75,7 @@ private:
     uint64_t enhancedTimeoutMs_ = 10000;
     std::vector<std::string> warnings_;
     ServerArtwork artwork_;
+    HudConfig hud_;
 };
 
 const char* AdmissionReason(AdmissionDecision decision);

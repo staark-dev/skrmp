@@ -43,7 +43,27 @@ bool SkrClientStateHandler::onReceive(IPlayer& peer, NetworkBitStream& bs) {
     uint8_t marker = 0;
     if (!bs.readUINT8(marker)) return false;
     bs.SetReadOffset(offset);
-    if (marker == protocol::kEnhancedMarker) { gate_->Negotiate(peer, bs); return false; }
+    if (marker == protocol::kEnhancedMarker) {
+        uint8_t step = 0;
+        const bool peekOk = bs.readUINT8(marker) && bs.readUINT8(step);
+        bs.SetReadOffset(offset);
+        if (peekOk && protocol::api::IsApiStep(step))
+            gate_->OnApiMessage(peer, bs);
+        else if (peekOk && step == protocol::skrx::kGatewayStep) {
+            if (!gate_->IsEnhanced(id)) return false;
+            if (!(gate_->ApiCapabilities(id) & protocol::api::CapGateway)) return false;
+            const int bits = bs.GetNumberOfUnreadBits();
+            if (bits<=0 || bits%8!=0) return false;
+            const size_t bytes = static_cast<size_t>(bits / 8);
+            uint8_t buf[protocol::skrx::kMaxGatewaySize];
+            if (bytes > sizeof(buf)) return false;
+            bs.SetReadOffset(offset);
+            if (!bs.Read(reinterpret_cast<char*>(buf), static_cast<unsigned int>(bytes))) return false;
+            gate_->OnGatewayMessage(peer, buf, bytes);
+        }
+        else gate_->Negotiate(peer, bs);
+        return false;
+    }
     if (!gate_->IsEnhanced(id)) return false;
 
     const uint64_t now = NowMs();
@@ -187,6 +207,25 @@ cell AMX_NATIVE_CALL Native_SetRadarSize(AMX*, const cell* params) {
                                 CellToFloat(params[3])) ? 1 : 0;
 }
 
+// native SKR_SetRadarBounds(playerid, Float:scaleW, Float:scaleH);
+cell AMX_NATIVE_CALL Native_SetRadarBounds(AMX*, const cell* params) {
+    if (!g_gate || !HasArgs(params, 3)) return 0;
+    return g_gate->SetRadarBounds(params[1], CellToFloat(params[2]),
+                                  CellToFloat(params[3])) ? 1 : 0;
+}
+
+// native SKR_SetRadarVisible(playerid, bool:visible);
+cell AMX_NATIVE_CALL Native_SetRadarVisible(AMX*, const cell* params) {
+    if (!g_gate || !HasArgs(params, 2)) return 0;
+    return g_gate->SetRadarVisible(params[1], params[2] != 0) ? 1 : 0;
+}
+
+// native SKR_ResetRadarDefaults(playerid);
+cell AMX_NATIVE_CALL Native_ResetRadarDefaults(AMX*, const cell* params) {
+    if (!g_gate || !HasArgs(params, 1)) return 0;
+    return g_gate->ResetRadarDefaults(params[1]) ? 1 : 0;
+}
+
 // native SKR_GetRadarRect(playerid, &Float:x, &Float:y, &Float:w, &Float:h);
 cell AMX_NATIVE_CALL Native_GetRadarRect(AMX* amx, const cell* params) {
     if (!g_gate || !HasArgs(params, 5)) return 0;
@@ -206,6 +245,9 @@ cell AMX_NATIVE_CALL Native_GetRadarRect(AMX* amx, const cell* params) {
 const AMX_NATIVE_INFO kNatives[] = {
     {"SKR_SetRadarStyle", &Native_SetRadarStyle},
     {"SKR_SetRadarSize", &Native_SetRadarSize},
+    {"SKR_SetRadarBounds", &Native_SetRadarBounds},
+    {"SKR_SetRadarVisible", &Native_SetRadarVisible},
+    {"SKR_ResetRadarDefaults", &Native_ResetRadarDefaults},
     {"SKR_GetRadarRect", &Native_GetRadarRect},
 };
 
@@ -213,10 +255,17 @@ const AMX_NATIVE_INFO kNatives[] = {
 
 void SkrGateComponent::onAmxLoad(IPawnScript& script) {
     script.Register(kNatives, static_cast<int>(sizeof(kNatives) / sizeof(kNatives[0])));
+    RegisterApiNatives(script, this);
+    RegisterPhoneNatives(script, this);
+    RegisterVehicleNatives(script, this, &vehicleManager_);
 }
 
 SkrGateComponent::~SkrGateComponent() {
     if (g_gate == this) g_gate = nullptr;
+    PhoneDbClose();
+    ReleaseVehicleNatives();
+    ReleasePhoneNatives(this);
+    ReleaseApiNatives(this);
     if (pawn_) pawn_->getEventDispatcher().removeEventHandler(this);
     if (core_) {
         core_->removePerRPCInEventHandler<kRPC_ClientJoin>(&joinFilter_);
@@ -232,7 +281,7 @@ SkrGateComponent::~SkrGateComponent() {
 void SkrGateComponent::onLoad(ICore* c) {
     core_ = c;
     g_gate = this;
-    core_->printLn("SKR Gate component loaded (v0.1.0)");
+    core_->printLn("SKR-X Gate component loaded (v0.1.2)");
 
     if (!clientPolicy_.LoadFromFile("skr-runtime.json", clientPolicyError_)) {
         core_->logLn(LogLevel::Error, "[SKR ClientPolicy] initialization failed: %s",
@@ -242,9 +291,19 @@ void SkrGateComponent::onLoad(ICore* c) {
     for (const std::string& warning : clientPolicy_.Warnings()) {
         core_->logLn(LogLevel::Warning, "[SKR ClientPolicy] %s", warning.c_str());
     }
+    if (clientPolicy_.IsValid()) {
+        const auto& hud = clientPolicy_.Hud();
+        core_->printLn("[SKR HUD] defaults: radar_style=%s radar_size=%s radar_scale=%.2f minimap=%s",
+                       hud.defaultRadarStyle == protocol::RadarStyle::Square ? "square" : "round",
+                       hud.defaultRadarSize == protocol::RadarSizeMode::Custom ? "custom" : "default",
+                       hud.defaultRadarScale,
+                       hud.enableMinimap ? "on" : "off");
+    }
 }
 
 void SkrGateComponent::onInit(IComponentList* components) {
+    databases_ = components->queryComponent<IDatabasesComponent>();
+    vehiclesComp_ = components->queryComponent<IVehiclesComponent>();
     pawn_ = components->queryComponent<IPawnComponent>();
     if (pawn_) {
         pawn_->getEventDispatcher().addEventHandler(this);
@@ -265,12 +324,24 @@ void SkrGateComponent::onInit(IComponentList* components) {
     radarRectHandler_.setOwner(this, core_);
     core_->addPerRPCInEventHandler<protocol::kRpcRadarRect>(&radarRectHandler_);
 
+    if (vehiclesComp_)
+        vehiclesComp_->getEventDispatcher().addEventHandler(this);
+
     core_->printLn("SKR Gate: registered player event handlers + RPC filter + client-state RPC %d + radar-rect RPC %d",
                    protocol::kRpcClientState, protocol::kRpcRadarRect);
 }
 
 void SkrGateComponent::onReady() {
     core_->printLn("SKR Gate: ready, enforcing ticket-based auth");
+
+    // Register OP215-certified custom vehicle models.
+    // 612: Volvo XC60 (proxy=400 Landstalker, donor=400, 4 seats)
+    // 613: BMW M4 GTS (proxy=475 Sabre, donor=475, 2 seats)
+    // 614: Audi RS6 Avant C8 (proxy=560 Sultan, donor=560, 4 seats)
+    vehicleManager_.RegisterModel(612, 400, 400, "skr_xc60", "Volvo XC60", 4);
+    vehicleManager_.RegisterModel(613, 475, 475, "skr_m4gts", "BMW M4 GTS", 2);
+    vehicleManager_.RegisterModel(614, 560, 560, "skr_rs6", "Audi RS6 Avant C8", 4);
+    core_->printLn("SKR-X VEHICLES: %d custom models registered", vehicleManager_.ModelCount());
 
     // Advertise only the effective, enforced policy. LegacyNetwork keeps the
     // branded version rule and allows this trusted component to update allowed_clients.
@@ -437,6 +508,7 @@ void SkrGateComponent::onIncomingConnection(IPlayer& player, StringView ipAddres
     auto& data = players_[id];
     data.Reset();
     data.generation = ++generationCounter_;
+    ApplyHudDefaults(data);
     if (decision == AdmissionDecision::RequireEnhanced) {
         data.enhancedRequired = true;
         data.enhancedAdmissionDeadlineMs = NowMs() + clientPolicy_.EnhancedTimeoutMs();
@@ -456,10 +528,19 @@ void SkrGateComponent::onPlayerConnect(IPlayer& player) {
 
 void SkrGateComponent::onPlayerDisconnect(IPlayer& player, PeerDisconnectReason reason) {
     int id = player.getID();
+    bool apiReady = false, apiConfirm = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(id);
+        if (it != players_.end()) {
+            apiReady = it->second.api.ready;
+            apiConfirm = it->second.api.confirm.active;
+        }
         players_.erase(id);
     }
+    ApiOnDisconnect(id, apiReady, apiConfirm);
+    vehicleManager_.ForgetPlayer(id);
+    PhoneOnPlayerDisconnect(id);
     clientStateHandler_.forget(id);
     radarRectHandler_.forget(id);
     core_->printLn("SKR Gate: player %d disconnected (reason %d)",
@@ -521,6 +602,41 @@ void SkrGateComponent::SendSessionInfo(IPlayer& player) {
     if (sent) SendRadarStyle(id);
 }
 
+// ── Radar defaults from skr-runtime.json ──
+
+void SkrGateComponent::ApplyHudDefaults(SkrPlayerData& data) {
+    const auto& hud = clientPolicy_.Hud();
+    data.radarStyle = hud.defaultRadarStyle;
+    data.radarSizeMode = hud.defaultRadarSize;
+    data.radarScale = hud.defaultRadarScale;
+    data.radarVisible = hud.enableMinimap;
+    // Square + Default → GTA V rectangular preset (wider than tall).
+    if (hud.defaultRadarStyle == protocol::RadarStyle::Square &&
+        hud.defaultRadarSize == protocol::RadarSizeMode::Default) {
+        data.radarSizeMode = protocol::RadarSizeMode::Bounds;
+        data.radarScaleW = protocol::kSquarePresetScaleW;
+        data.radarScaleH = protocol::kSquarePresetScaleH;
+    }
+}
+
+bool SkrGateComponent::ResetRadarDefaults(int playerId) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(playerId);
+        if (it == players_.end() || it->second.state == SkrPlayerState::Rejected) return false;
+        auto& d = it->second;
+        d.radarStyle = protocol::RadarStyle::Round;
+        d.radarSizeMode = protocol::RadarSizeMode::Default;
+        d.radarScale = 1.0f;
+        d.radarScaleW = 1.0f;
+        d.radarScaleH = 1.0f;
+        d.radarVisible = true;
+        ApplyHudDefaults(d);
+    }
+    SendRadarStyle(playerId);
+    return true;
+}
+
 // ── RPC 242: radar style/size (shared/protocol/radar_style.h) ──
 
 bool SkrGateComponent::SetRadarStyle(int playerId, protocol::RadarStyle style) {
@@ -551,10 +667,40 @@ bool SkrGateComponent::SetRadarSize(int playerId, protocol::RadarSizeMode mode, 
     return true;
 }
 
+bool SkrGateComponent::SetRadarVisible(int playerId, bool visible) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(playerId);
+        if (it == players_.end() || it->second.state == SkrPlayerState::Rejected) return false;
+        it->second.radarVisible = visible;
+    }
+    SendRadarStyle(playerId);
+    return true;
+}
+
+bool SkrGateComponent::SetRadarBounds(int playerId, float scaleW, float scaleH) {
+    if (!InRange(scaleW, protocol::kRadarMinScale, protocol::kRadarMaxScale) ||
+        !InRange(scaleH, protocol::kRadarMinScale, protocol::kRadarMaxScale)) {
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = players_.find(playerId);
+        if (it == players_.end() || it->second.state == SkrPlayerState::Rejected) return false;
+        it->second.radarStyle = protocol::RadarStyle::Square;
+        it->second.radarSizeMode = protocol::RadarSizeMode::Bounds;
+        it->second.radarScaleW = scaleW;
+        it->second.radarScaleH = scaleH;
+    }
+    SendRadarStyle(playerId);
+    return true;
+}
+
 void SkrGateComponent::SendRadarStyle(int playerId) {
     protocol::RadarStyle style;
     protocol::RadarSizeMode mode;
-    float scale;
+    float scale, scaleW, scaleH;
+    bool visible;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = players_.find(playerId);
@@ -563,25 +709,48 @@ void SkrGateComponent::SendRadarStyle(int playerId) {
         style = it->second.radarStyle;
         mode = it->second.radarSizeMode;
         scale = it->second.radarScale;
+        scaleW = it->second.radarScaleW;
+        scaleH = it->second.radarScaleH;
+        visible = it->second.radarVisible;
     }
     IPlayer* player = core_->getPlayers().get(playerId);
     if (!player) return;
 
     NetworkBitStream bs;
-    bs.writeUINT8(protocol::kRadarStyleVersion);
+    bs.writeUINT8(protocol::kRadarStyleVersion);  // v2
     bs.writeUINT8(static_cast<uint8_t>(style));
     bs.writeUINT8(static_cast<uint8_t>(mode));
     bs.writeFLOAT(scale);
+    bs.writeUINT8(visible ? protocol::kRadarFlagVisible : 0);
+    if (mode == protocol::RadarSizeMode::Bounds) {
+        bs.writeFLOAT(scaleW);
+        bs.writeFLOAT(scaleH);
+    }
     const bool sent = player->sendRPC(protocol::kRpcRadarStyle,
         Span<uint8_t>(bs.GetData(), bs.GetNumberOfBitsUsed()), OrderingChannel_SyncRPC);
-    core_->printLn("SKR Gate: radar style %u size %u scale %.2f %s to player %d",
-                   static_cast<unsigned>(style), static_cast<unsigned>(mode), scale,
-                   sent ? "sent" : "NOT sent", playerId);
+    if (mode == protocol::RadarSizeMode::Bounds) {
+        core_->printLn("SKR Gate: radar style %u bounds %.2fx%.2f %s to player %d",
+                       static_cast<unsigned>(style), scaleW, scaleH,
+                       sent ? "sent" : "NOT sent", playerId);
+    } else {
+        core_->printLn("SKR Gate: radar style %u size %u scale %.2f %s to player %d",
+                       static_cast<unsigned>(style), static_cast<unsigned>(mode), scale,
+                       sent ? "sent" : "NOT sent", playerId);
+    }
 }
 
 // ── Tick: enforce auth timeout ───────────────────────────
 
 void SkrGateComponent::onTick(Microseconds elapsed, TimePoint /*now*/) {
+    // Native API: confirm deadlines every 250 ms, script callbacks every tick.
+    apiTickAccumulatorMs_ += static_cast<uint64_t>(elapsed.count() / 1000);
+    if (apiTickAccumulatorMs_ >= 250) {
+        apiTickAccumulatorMs_ = 0;
+        ApiTick(NowMs());
+    }
+    ApiDispatchEvents();
+    PhoneTick();
+
     tickAccumulatorMs_ += static_cast<uint64_t>(elapsed.count() / 1000);
     if (tickAccumulatorMs_ < 2000) return; // check every ~2 seconds
     tickAccumulatorMs_ = 0;
@@ -685,10 +854,12 @@ bool SkrGateComponent::IssueChallenge(int playerId,
     std::lock_guard<std::mutex> lock(mutex_);
     auto& data = players_[playerId];
     const protocol::EnhancedSession enhanced = data.enhanced;
+    const SkrApiState api = data.api;
     const bool enhancedRequired = data.enhancedRequired;
     const uint64_t enhancedDeadline = data.enhancedAdmissionDeadlineMs;
     data.Reset();
     data.enhanced = enhanced;
+    data.api = api;
     data.enhancedRequired = enhancedRequired;
     data.enhancedAdmissionDeadlineMs = enhancedDeadline;
     data.generation = ++generationCounter_;
@@ -759,6 +930,46 @@ void SkrGateComponent::AuthorizePlayer(int playerId, uint32_t accountId) {
     if (core_) {
         core_->printLn("SKR Gate: player %d authorized (account %u)", playerId, accountId);
     }
+}
+
+void SkrGateComponent::SetPhoneEnabled(bool enabled) {
+    if (enabled && !PhoneDbInit()) {
+        phoneEnabled_ = false;
+        if (core_) core_->printLn("SKR Gate: phone backend DISABLED (database init failed)");
+        return;
+    }
+    phoneEnabled_ = enabled;
+    if (phoneWorker_) phoneWorker_->SetEnabled(enabled);
+    if (core_) core_->printLn("SKR Gate: phone backend %s", enabled ? "enabled" : "disabled");
+}
+
+bool SkrGateComponent::PlayerAuthenticate(int playerId, const char* name) {
+    if (!name || name[0] == '\0') return false;
+
+    IPlayer* player = core_ ? core_->getPlayers().get(playerId) : nullptr;
+    if (!player) return false;
+    StringView ompName = player->getName();
+    if (ompName.empty() || std::strncmp(ompName.data(), name, ompName.length()) != 0 ||
+        name[ompName.length()] != '\0') {
+        if (core_) core_->printLn("SKR Gate: player %d auth name mismatch (got '%s', omp '%.*s')",
+                                   playerId, name, static_cast<int>(ompName.length()), ompName.data());
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = players_.find(playerId);
+    if (it == players_.end()) return false;
+    it->second.authenticated = true;
+    std::strncpy(it->second.authName, name, sizeof(it->second.authName) - 1);
+    it->second.authName[sizeof(it->second.authName) - 1] = '\0';
+    if (core_) core_->printLn("SKR Gate: player %d authenticated as '%s'", playerId, it->second.authName);
+    return true;
+}
+
+bool SkrGateComponent::IsPlayerAuthenticated(int playerId) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = players_.find(playerId);
+    return it != players_.end() && it->second.authenticated;
 }
 
 void SkrGateComponent::RejectPlayer(int playerId, protocol::RejectionReason reason) {

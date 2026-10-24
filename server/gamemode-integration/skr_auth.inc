@@ -175,6 +175,12 @@ public _skr_AuthComplete(playerid) {
     cef_destroy_browser(playerid, SKR_AUTH_BROWSER_ID);
     TogglePlayerSpectating(playerid, false);
 
+    // PHONE-M4E: mark player as authenticated for the Gate phone backend.
+    // Must happen before OnSKRAuthSuccess so phone ops are available immediately.
+    #if defined _skr_enhanced_included
+        SKRE_PlayerAuthenticated(playerid, g_authName[playerid]);
+    #endif
+
     CallLocalFunction("OnSKRAuthSuccess", "is", playerid, g_authName[playerid]);
 }
 

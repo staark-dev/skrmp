@@ -1,6 +1,7 @@
 #include "client_policy.hpp"
 
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -92,6 +93,41 @@ public:
             out = out * 10 + digit;
         }
         return true;
+    }
+
+    bool ParseFloat(float& out) {
+        SkipWhitespace();
+        const size_t start = pos_;
+        // Accept optional minus
+        if (pos_ < input_.size() && input_[pos_] == '-') ++pos_;
+        if (pos_ >= input_.size() || !std::isdigit(static_cast<unsigned char>(input_[pos_]))) {
+            pos_ = start; return false;
+        }
+        // Integer part
+        if (input_[pos_] == '0') ++pos_;
+        else { while (pos_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[pos_]))) ++pos_; }
+        // Fractional part
+        if (pos_ < input_.size() && input_[pos_] == '.') {
+            ++pos_;
+            if (pos_ >= input_.size() || !std::isdigit(static_cast<unsigned char>(input_[pos_]))) {
+                pos_ = start; return false;
+            }
+            while (pos_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[pos_]))) ++pos_;
+        }
+        // Exponent
+        if (pos_ < input_.size() && (input_[pos_] == 'e' || input_[pos_] == 'E')) {
+            ++pos_;
+            if (pos_ < input_.size() && (input_[pos_] == '+' || input_[pos_] == '-')) ++pos_;
+            if (pos_ >= input_.size() || !std::isdigit(static_cast<unsigned char>(input_[pos_]))) {
+                pos_ = start; return false;
+            }
+            while (pos_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[pos_]))) ++pos_;
+        }
+        if (pos_ == start) return false;
+        std::string numStr(input_, start, pos_ - start);
+        char* end = nullptr;
+        out = std::strtof(numStr.c_str(), &end);
+        return end == numStr.c_str() + numStr.size();
     }
 
     bool ParseStringArray(std::vector<std::string>& out) {
@@ -211,6 +247,7 @@ struct ParsedPolicy {
     std::vector<std::string> requireEnhancedFor;
     std::vector<std::string> warnings;
     ServerArtwork artwork;
+    HudConfig hud;
 };
 
 // SSRF-safe: only HTTPS URLs with a public-looking host are accepted.
@@ -255,6 +292,72 @@ bool ParseArtworkObject(JsonCursor& cursor, ServerArtwork& artwork, std::string&
         }
         if (cursor.Consume('}')) return true;
         if (!cursor.Consume(',')) { error = "expected ',' or '}' in server_artwork"; return false; }
+    }
+}
+
+bool ParseHudObject(JsonCursor& cursor, HudConfig& hud, std::vector<std::string>& warnings,
+                    std::string& error) {
+    if (!cursor.Consume('{')) { error = "hud must be a JSON object"; return false; }
+    if (cursor.Consume('}')) return true;
+    std::unordered_set<std::string> seen;
+    for (;;) {
+        std::string key;
+        if (!cursor.ParseString(key) || !cursor.Consume(':')) { error = "invalid hud member"; return false; }
+        if (!seen.insert(key).second) { error = "duplicate hud key: " + key; return false; }
+        if (key == "default_radar_style") {
+            std::string value;
+            if (!cursor.ParseString(value)) { error = "default_radar_style must be a string"; return false; }
+            if (value == "round" || value == "default") {
+                hud.defaultRadarStyle = protocol::RadarStyle::Round;
+            } else if (value == "square") {
+                hud.defaultRadarStyle = protocol::RadarStyle::Square;
+            } else {
+                error = "default_radar_style must be \"round\", \"square\" or \"default\"";
+                return false;
+            }
+        } else if (key == "default_radar_size") {
+            std::string value;
+            if (!cursor.ParseString(value)) { error = "default_radar_size must be a string"; return false; }
+            if (value == "default") {
+                hud.defaultRadarSize = protocol::RadarSizeMode::Default;
+            } else if (value == "custom") {
+                hud.defaultRadarSize = protocol::RadarSizeMode::Custom;
+            } else {
+                error = "default_radar_size must be \"default\" or \"custom\"";
+                return false;
+            }
+        } else if (key == "default_radar_scale") {
+            if (!cursor.ParseFloat(hud.defaultRadarScale)) {
+                error = "default_radar_scale must be a number";
+                return false;
+            }
+            if (hud.defaultRadarScale < protocol::kRadarMinScale ||
+                hud.defaultRadarScale > protocol::kRadarMaxScale) {
+                error = "default_radar_scale must be between " +
+                        std::to_string(protocol::kRadarMinScale) + " and " +
+                        std::to_string(protocol::kRadarMaxScale);
+                return false;
+            }
+        } else if (key == "enable_speedometer") {
+            if (!cursor.ParseBool(hud.enableSpeedometer)) {
+                error = "enable_speedometer must be boolean"; return false;
+            }
+        } else if (key == "enable_minimap") {
+            if (!cursor.ParseBool(hud.enableMinimap)) {
+                error = "enable_minimap must be boolean"; return false;
+            }
+        } else if (key == "enable_phone") {
+            if (!cursor.ParseBool(hud.enablePhone)) {
+                error = "enable_phone must be boolean"; return false;
+            }
+        } else if (!cursor.SkipValue()) {
+            error = "invalid JSON value for hud key: " + key;
+            return false;
+        } else {
+            warnings.push_back("unknown hud key ignored: " + key);
+        }
+        if (cursor.Consume('}')) return true;
+        if (!cursor.Consume(',')) { error = "expected ',' or '}' in hud"; return false; }
     }
 }
 
@@ -303,6 +406,8 @@ bool ParseRoot(const std::string& json, ParsedPolicy& parsed, std::string& error
                 foundPolicy = true;
             } else if (key == "server_artwork") {
                 if (!ParseArtworkObject(cursor, parsed.artwork, error)) return false;
+            } else if (key == "hud") {
+                if (!ParseHudObject(cursor, parsed.hud, parsed.warnings, error)) return false;
             } else if (!cursor.SkipValue()) {
                 error = "invalid JSON value for root key: " + key;
                 return false;
@@ -327,6 +432,7 @@ void ClientPolicy::ResetDefaults() {
     enhancedTimeoutMs_ = 10000;
     warnings_.clear();
     artwork_ = ServerArtwork{};
+    hud_ = HudConfig{};
 }
 
 bool ClientPolicy::LoadFromFile(const char* path, std::string& error) {
@@ -381,6 +487,7 @@ bool ClientPolicy::LoadFromJson(const std::string& json, std::string& error) {
     allowEnhanced_ = parsed.enhanced && listedEnhanced;
     enhancedTimeoutMs_ = parsed.timeoutMs;
     artwork_ = std::move(parsed.artwork);
+    hud_ = parsed.hud;
     warnings_ = std::move(parsed.warnings);
 
     if (parsed.hasAllowlist && !parsed.standard && (listed037 || listedOpenMp))
