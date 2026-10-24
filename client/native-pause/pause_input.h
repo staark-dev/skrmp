@@ -62,4 +62,20 @@ struct MouseState {
 };
 const MouseState& GetMouse();
 
+// Keyboard navigation events for the pause surface. Produced by the WndProc
+// hook (GTA thread), consumed once per frame by the renderer (same thread).
+enum class NavEvent : uint8_t {
+    None = 0,
+    Up,
+    Down,
+    Left,
+    Right,
+    Activate,
+};
+NavEvent PopNavEvent();
+
+// True when the loaded samp.dll is the pinned 0.3.7-R5 build (PE timestamp +
+// image size). Gate for every SA-MP memory read.
+bool IsSampR5Loaded();
+
 } // namespace skr::native_pause::input

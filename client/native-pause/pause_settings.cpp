@@ -1,4 +1,5 @@
 #include "native-pause/pause_settings.h"
+#include "native-pause/pause_enhanced.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -32,6 +33,22 @@ constexpr uintptr_t kAntiAliasing        = kMenuManager + 0xCC;
 constexpr uintptr_t kAppliedVideoMode    = kMenuManager + 0xD4;
 constexpr uintptr_t kPreferredVideoMode  = kMenuManager + 0xD8;
 
+// Milestone B — CMenuManager fields (deps/omp-cef/src/client/core/game_sa/
+// CMenuManager.h; consistent with the verified offsets above):
+constexpr uintptr_t kRadarMode           = kMenuManager + 0x24;   // int
+constexpr uintptr_t kLanguage            = kMenuManager + 0x84;   // char
+constexpr uintptr_t kPreviousLanguage    = kMenuManager + 0x85;   // char
+constexpr uintptr_t kLanguageChanged     = kMenuManager + 0x8C;   // bool
+constexpr uintptr_t kUserTrackMode       = kMenuManager + 0xB0;   // char m_nRadioMode
+constexpr uintptr_t kTracksAutoScan      = kMenuManager + 0xC5;   // bool
+constexpr uintptr_t kSavePhotos          = kMenuManager + 0xE8;   // bool
+constexpr uintptr_t kSetDefaultPrefs     = 0x00573AE0;  // char CMenuManager::SetDefaultPreferences(eMenuPage)
+constexpr uintptr_t kInitChangedLanguage = 0x00573260;  // char CMenuManager::InitialiseChangedLanguageSettings(char)
+// Fx_c (Fx_c.cpp): g_fx 0xA9AE00, SetFxQuality 0x49EA40, GetFxQuality 0x49EA50 (thiscall)
+constexpr uintptr_t kFx                  = 0x00A9AE00;
+constexpr uintptr_t kFxSetQuality        = 0x0049EA40;
+constexpr uintptr_t kFxGetQuality        = 0x0049EA50;
+
 constexpr uintptr_t kInvertMouseY        = 0x00BA6745;
 constexpr uintptr_t kMouseSensitivity    = 0x00B6EC1C;
 constexpr uintptr_t kMouseSteering       = 0x00C1CC02;
@@ -57,6 +74,9 @@ constexpr uintptr_t kSetMultiSampling    = 0x007F8A90;
 
 constexpr UINT kApplyVideoModeMessage = WM_APP + 0x622;
 constexpr UINT kApplyAntiAliasingMessage = WM_APP + 0x623;
+constexpr UINT kApplyLanguageMessage = WM_APP + 0x624;
+constexpr UINT kApplyDefaultsMessage = WM_APP + 0x625;   // wParam = eMenuPage
+constexpr DWORD kVideoConfirmMs = 15000;
 constexpr int kMaxVideoModes = 256;
 constexpr int kVideoModeExclusive = 0x1;
 
@@ -80,47 +100,14 @@ using SetVideoModeFn = void(__cdecl*)(int);
 using SetMipMappingFn = void(__cdecl*)(bool);
 using GetMaxMultiSamplingFn = int(__cdecl*)();
 using SetMultiSamplingFn = void(__cdecl*)(int);
+using MenuPageFn = char(__thiscall*)(void*, int);
+using MenuCharFn = char(__thiscall*)(void*, char);
+using FxSetQualityFn = void(__thiscall*)(void*, unsigned int);
+using FxGetQualityFn = unsigned int(__thiscall*)(void*);
 
 HWND g_window = nullptr;
-float g_uiScale = 1.0f;        // SKR UI scale multiplier (0.75 – 1.50)
-bool  g_uiScaleLoaded = false;
-
-// ── SKR UI scale persistence (file-based, not GTA engine) ──────────
-static char g_uiScalePath[MAX_PATH] = {};
-
-static const char* GetUiScalePath() {
-    if (g_uiScalePath[0]) return g_uiScalePath;
-    DWORD n = GetModuleFileNameA(nullptr, g_uiScalePath, MAX_PATH);
-    if (!n || n >= MAX_PATH) return nullptr;
-    char* slash = strrchr(g_uiScalePath, '\\');
-    if (!slash) return nullptr;
-    snprintf(slash + 1, MAX_PATH - (slash + 1 - g_uiScalePath), "SKR\\ui_scale.cfg");
-    return g_uiScalePath;
-}
-
-static void LoadUiScale() {
-    if (g_uiScaleLoaded) return;
-    g_uiScaleLoaded = true;
-    g_uiScale = 1.0f;
-    const char* path = GetUiScalePath();
-    if (!path) return;
-    FILE* f = fopen(path, "r");
-    if (!f) return;
-    float val = 1.0f;
-    if (fscanf(f, "%f", &val) == 1)
-        g_uiScale = std::clamp(val, 0.75f, 1.50f);
-    fclose(f);
-}
-
-static bool SaveUiScale() {
-    const char* path = GetUiScalePath();
-    if (!path) return false;
-    FILE* f = fopen(path, "w");
-    if (!f) return false;
-    fprintf(f, "%.2f\n", g_uiScale);
-    fclose(f);
-    return true;
-}
+// SKR UI scale moved to the Enhanced store (pause_enhanced.cpp, client.ini);
+// the legacy SKR\ui_scale.cfg is migrated there on first run.
 
 int g_selectedVideoMode = -1;
 int g_requestedVideoMode = -1;
@@ -128,6 +115,19 @@ bool g_videoRequestPending = false;
 int g_selectedAntiAliasing = 1;
 int g_requestedAntiAliasing = 1;
 bool g_antiAliasingRequestPending = false;
+
+// Milestone B state
+int   g_selectedLanguage = -1;
+int   g_requestedLanguage = -1;
+bool  g_languageRequestPending = false;
+bool  g_defaultsRequestPending = false;
+bool  g_videoConfirmPending = false;
+int   g_videoConfirmPrevious = -1;
+DWORD g_videoConfirmDeadline = 0;
+bool  g_videoRevertInProgress = false;
+
+constexpr const char* kLanguageFiles[] = { "american", "french", "german", "italian", "spanish" };
+constexpr const char* kLanguageNames[] = { "English", "French", "German", "Italian", "Spanish" };
 
 template <typename T>
 T& Ref(uintptr_t address) {
@@ -195,6 +195,12 @@ bool ApplyVideoMode(int target) {
             return false;
         }
         g_selectedVideoMode = target;
+        if (!g_videoRevertInProgress && previous >= 0) {
+            // Keep-or-revert window (see VideoConfirmPending / Tick).
+            g_videoConfirmPending = true;
+            g_videoConfirmPrevious = previous;
+            g_videoConfirmDeadline = GetTickCount() + kVideoConfirmMs;
+        }
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         if (previous >= 0) SafeSetVideoMode(previous);
@@ -250,6 +256,51 @@ bool ApplyAntiAliasing(int target) {
     }
 }
 
+// Re-applies the runtime side effects of values written by
+// SetDefaultPreferences, so gamma, LOD, mip mapping and audio match at once.
+void ApplyRuntimeValues() {
+    __try {
+        reinterpret_cast<SetGammaFn>(kSetGamma)(reinterpret_cast<void*>(kGammaObject),
+                                                static_cast<float>(Ref<int>(kBrightness)), TRUE);
+        Ref<float>(kRendererLodScale) = Ref<float>(kDrawDistance);
+        reinterpret_cast<SetMipMappingFn>(kSetMipMapping)(Ref<bool>(kMipMapping));
+        void* audio = reinterpret_cast<void*>(kAudioEngine);
+        reinterpret_cast<AudioValueFn>(kSetEffectsVolume)(audio,
+            static_cast<unsigned char>(Ref<char>(kSfxVolume)));
+        reinterpret_cast<AudioValueFn>(kSetMusicVolume)(audio,
+            static_cast<unsigned char>(Ref<char>(kRadioVolume)));
+        reinterpret_cast<AudioBoolFn>(kSetBassEnhance)(audio, Ref<bool>(kRadioEq));
+        reinterpret_cast<AudioBoolFn>(kSetRadioAutoRetune)(audio, Ref<bool>(kRadioAutoSelect));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+bool ApplyDefaults(int page) {
+    __try {
+        reinterpret_cast<MenuPageFn>(kSetDefaultPrefs)(reinterpret_cast<void*>(kMenuManager), page);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    ApplyRuntimeValues();
+    return Save();
+}
+
+bool ApplyLanguage(int target) {
+    if (target < 0 || target >= kLanguageCount) return false;
+    __try {
+        const char current = Ref<char>(kLanguage);
+        if (current == static_cast<char>(target)) return true;
+        Ref<char>(kPreviousLanguage) = current;
+        Ref<char>(kLanguage) = static_cast<char>(target);
+        Ref<bool>(kLanguageChanged) = true;
+        // Same sequence as the vanilla language page: reload text, no control re-init.
+        reinterpret_cast<MenuCharFn>(kInitChangedLanguage)(reinterpret_cast<void*>(kMenuManager), 0);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    return Save();
+}
+
 template <typename T>
 bool StoreAndSave(uintptr_t address, T value) {
     __try {
@@ -275,12 +326,18 @@ void Shutdown() {
     g_selectedAntiAliasing = 1;
     g_requestedAntiAliasing = 1;
     g_antiAliasingRequestPending = false;
+    g_selectedLanguage = -1;
+    g_languageRequestPending = false;
+    g_defaultsRequestPending = false;
+    g_videoConfirmPending = false;
+    g_videoRevertInProgress = false;
 }
 
 void Refresh() {
     __try {
         g_selectedVideoMode = reinterpret_cast<GetCurrentVideoModeFn>(kGetCurrentVideoMode)();
         g_selectedAntiAliasing = std::clamp(Ref<int>(kAntiAliasing), 1, MaxAntiAliasing());
+        g_selectedLanguage = static_cast<unsigned char>(Ref<char>(kLanguage));
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_selectedVideoMode = -1;
     }
@@ -305,8 +362,14 @@ bool Read(Snapshot& out) {
         out.mouseSteering = Ref<bool>(kMouseSteering);
         out.mouseFlying = Ref<bool>(kMouseFlying);
         out.currentVideoMode = reinterpret_cast<GetCurrentVideoModeFn>(kGetCurrentVideoMode)();
-        LoadUiScale();
-        out.uiScale = g_uiScale;
+        out.radarMode = Ref<int>(kRadarMode);
+        out.savePhotos = Ref<bool>(kSavePhotos);
+        out.fxQuality = static_cast<int>(
+            reinterpret_cast<FxGetQualityFn>(kFxGetQuality)(reinterpret_cast<void*>(kFx)));
+        out.userTrackMode = static_cast<unsigned char>(Ref<char>(kUserTrackMode));
+        out.tracksAutoScan = Ref<bool>(kTracksAutoScan);
+        out.language = static_cast<unsigned char>(Ref<char>(kLanguage));
+        out.uiScale = enhanced::Get().uiScale;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         std::memset(&out, 0, sizeof(out));
@@ -380,12 +443,24 @@ bool RequestSelectedAntiAliasing() {
     return g_antiAliasingRequestPending;
 }
 
-bool ProcessMessage(UINT msg, WPARAM, LPARAM) {
+bool ProcessMessage(UINT msg, WPARAM wParam, LPARAM) {
     if (msg == kApplyVideoModeMessage) {
         const int target = g_requestedVideoMode;
         g_videoRequestPending = false;
         g_requestedVideoMode = -1;
         if (!ApplyVideoMode(target)) Refresh();
+        g_videoRevertInProgress = false;
+        return true;
+    }
+    if (msg == kApplyLanguageMessage) {
+        g_languageRequestPending = false;
+        if (!ApplyLanguage(g_requestedLanguage)) Refresh();
+        return true;
+    }
+    if (msg == kApplyDefaultsMessage) {
+        g_defaultsRequestPending = false;
+        ApplyDefaults(static_cast<int>(wParam));
+        Refresh();
         return true;
     }
     if (msg == kApplyAntiAliasingMessage) {
@@ -475,15 +550,115 @@ bool SetInvertMouseY(bool value) { return StoreAndSave(kInvertMouseY, value); }
 bool SetMouseSteering(bool value) { return StoreAndSave(kMouseSteering, value); }
 bool SetMouseFlying(bool value) { return StoreAndSave(kMouseFlying, value); }
 
+// ── Milestone B ─────────────────────────────────────────────────────
+bool SetRadarMode(int value) { return StoreAndSave(kRadarMode, std::clamp(value, 0, 2)); }
+bool SetSavePhotos(bool value) { return StoreAndSave(kSavePhotos, value); }
+bool SetUserTrackMode(int value) {
+    return StoreAndSave(kUserTrackMode, static_cast<char>(std::clamp(value, 0, 2)));
+}
+bool SetTracksAutoScan(bool value) { return StoreAndSave(kTracksAutoScan, value); }
+
+bool SetFxQuality(int value) {
+    value = std::clamp(value, 0, 3);
+    __try {
+        reinterpret_cast<FxSetQualityFn>(kFxSetQuality)(reinterpret_cast<void*>(kFx),
+                                                        static_cast<unsigned int>(value));
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return Save();
+}
+
+const char* LanguageName(int language) {
+    return (language >= 0 && language < kLanguageCount) ? kLanguageNames[language] : "Unknown";
+}
+
+bool IsLanguageInstalled(int language) {
+    if (language < 0 || language >= kLanguageCount) return false;
+    char path[MAX_PATH] = {};
+    const DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    char* slash = (n && n < MAX_PATH) ? strrchr(path, '\\') : nullptr;
+    if (!slash) return false;
+    snprintf(slash + 1, MAX_PATH - (slash + 1 - path), "text\\%s.gxt", kLanguageFiles[language]);
+    return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
+}
+
+int GetSelectedLanguage() {
+    if (g_selectedLanguage < 0) Refresh();
+    return g_selectedLanguage;
+}
+
+void CycleSelectedLanguage(int direction) {
+    if (!direction) return;
+    int next = GetSelectedLanguage();
+    for (int i = 0; i < kLanguageCount; ++i) {
+        next = (next + (direction > 0 ? 1 : kLanguageCount - 1)) % kLanguageCount;
+        if (IsLanguageInstalled(next)) { g_selectedLanguage = next; return; }
+    }
+}
+
+bool RequestSelectedLanguage() {
+    if (!g_window || g_languageRequestPending || !IsLanguageInstalled(g_selectedLanguage))
+        return false;
+    g_requestedLanguage = g_selectedLanguage;
+    g_languageRequestPending =
+        PostMessageW(g_window, kApplyLanguageMessage, 0, 0) != FALSE;
+    return g_languageRequestPending;
+}
+
+bool RequestDefaults(DefaultsGroup group) {
+    if (!g_window || g_defaultsRequestPending) return false;
+    g_defaultsRequestPending = PostMessageW(g_window, kApplyDefaultsMessage,
+                                            static_cast<WPARAM>(group), 0) != FALSE;
+    return g_defaultsRequestPending;
+}
+
+bool SaveNativeSettings() {
+    return Save();
+}
+
+bool ApplyDefaultsNow(DefaultsGroup group) {
+    return ApplyDefaults(static_cast<int>(group));
+}
+
+bool VideoConfirmPending(int& secondsLeft) {
+    if (!g_videoConfirmPending) return false;
+    const DWORD now = GetTickCount();
+    const DWORD left = (static_cast<int32_t>(g_videoConfirmDeadline - now) > 0)
+                           ? g_videoConfirmDeadline - now : 0;
+    secondsLeft = static_cast<int>((left + 999) / 1000);
+    return true;
+}
+
+void ConfirmVideoMode() {
+    g_videoConfirmPending = false;
+}
+
+bool RevertVideoMode() {
+    if (!g_videoConfirmPending) return false;
+    g_videoConfirmPending = false;
+    if (g_videoConfirmPrevious < 0) return false;
+    g_videoRevertInProgress = true;          // no new confirmation for the revert
+    g_selectedVideoMode = g_videoConfirmPrevious;
+    if (!RequestSelectedVideoMode()) {
+        g_videoRevertInProgress = false;
+        return false;
+    }
+    return true;
+}
+
+void Tick() {
+    if (g_videoConfirmPending &&
+        static_cast<int32_t>(GetTickCount() - g_videoConfirmDeadline) >= 0)
+        RevertVideoMode();
+}
+
 float GetUiScale() {
-    LoadUiScale();
-    return g_uiScale;
+    return enhanced::Get().uiScale;
 }
 
 bool SetUiScale(float value) {
-    g_uiScale = std::clamp(value, 0.75f, 1.50f);
-    g_uiScaleLoaded = true;
-    return SaveUiScale();
+    enhanced::Prefs prefs = enhanced::Get();
+    prefs.uiScale = value;
+    return enhanced::Set(prefs);
 }
 
 } // namespace skr::native_pause::settings

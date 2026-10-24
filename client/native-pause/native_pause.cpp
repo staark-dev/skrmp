@@ -4,9 +4,13 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 #include "native-pause/native_pause.h"
+#include "native-pause/pause_enhanced.h"
 #include "native-pause/pause_renderer.h"
 #include "native-pause/pause_input.h"
 #include "native-pause/pause_actions.h"
+#include "gps/gps_panel.h"
+#include "phone/phone_input.h"
+#include "native-api/native_api_ui.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -33,6 +37,7 @@ static const char* GetLogPath() {
 }
 
 void Log(const char* fmt, ...) {
+    if (!skr::native_pause::enhanced::DebugLogEnabled()) return;
     const char* path = GetLogPath();
     if (!path) return;
     FILE* f = fopen(path, "a");
@@ -122,16 +127,29 @@ void OnEndScene(IDirect3DDevice9* device) {
         }
     }
 
+    // Initialize phone input on first frame (after renderer + input are ready).
+    static bool s_phoneInit = false;
+    if (!s_phoneInit && renderer::IsReady()) {
+        skr::phone::input::Initialize();
+        s_phoneInit = true;
+    }
+
     // Keep SA-MP's cursor mode synchronized before processing menu actions.
     input::Tick();
+
+    // Phone per-frame tick (animations, cursor, death detection).
+    skr::phone::input::Tick(GetTickCount64());
 
     // Tick actions (monitors native submenu lifecycle)
     actions::Tick();
 
-    // Only render full menu when pause menu is open
-    if (input::GetState() == input::PauseState::PauseOpen) {
-        renderer::Render(device);
-    }
+    // One existing ImGui owner serves both surfaces. The GPS navigation panel
+    // and phone render during gameplay; the pause menu stays exclusive while it
+    // is open so the three never overlap.
+    const bool pauseOpen = input::GetState() == input::PauseState::PauseOpen;
+    if (pauseOpen || skr::gps::panel::WantsRender() || skr::phone::input::WantsRender()
+        || skr::native_api::ui::WantsRender())
+        renderer::Render(device, pauseOpen);
 }
 
 void OnBeforeReset() {

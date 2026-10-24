@@ -9,10 +9,15 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 #include "native-pause/pause_input.h"
+#include "native-pause/pause_enhanced.h"
 #include "native-pause/pause_actions.h"
+#include "native-pause/pause_controls.h"
+#include "native-pause/pause_renderer.h"
 #include "native-pause/pause_settings.h"
 #include "lobby/menu_patch.h"
 #include "lobby/lobby_manager.h"
+#include "native-api/native_api.h"
+#include "phone/phone_input.h"
 
 #include <windows.h>
 #define DIRECTINPUT_VERSION 0x0800
@@ -44,6 +49,7 @@ static const char* GetLogPath() {
 }
 
 static void Log(const char* fmt, ...) {
+    if (!skr::native_pause::enhanced::DebugLogEnabled()) return;
     const char* path = GetLogPath();
     if (!path) return;
     FILE* f = fopen(path, "a");
@@ -92,6 +98,23 @@ constexpr uintptr_t kStartUserPause = 0x00561AF0;
 constexpr uintptr_t kEndUserPause   = 0x00561B00;
 
 // Debounce: prevent ESC from toggling rapidly
+// Keyboard navigation queue (WndProc → renderer, both on the GTA thread).
+constexpr int kNavQueueSize = 16;
+NavEvent g_navQueue[kNavQueueSize] = {};
+int g_navHead = 0;
+int g_navCount = 0;
+
+void PushNav(NavEvent ev) {
+    if (g_navCount >= kNavQueueSize) return;
+    g_navQueue[(g_navHead + g_navCount) % kNavQueueSize] = ev;
+    ++g_navCount;
+}
+
+void ClearNav() {
+    g_navHead = 0;
+    g_navCount = 0;
+}
+
 DWORD g_lastEscTime = 0;
 constexpr DWORD kEscDebounceMs = 200;
 
@@ -103,7 +126,8 @@ DIGetStateFn g_origDIGetState = nullptr;
 void**       g_diVtable = nullptr;
 
 bool ShouldOwnDirectInput() {
-    return g_state == PauseState::PauseOpen || skr::lobby::IsLobbyActive();
+    return g_state == PauseState::PauseOpen || skr::lobby::IsLobbyActive() ||
+           skr::phone::input::WantsDirectInput();
 }
 
 HRESULT WINAPI HookedDIAcquire(IDirectInputDevice8A* device) {
@@ -236,25 +260,6 @@ void SetSampInputOwnership(bool owned) {
     processInput(game);
 }
 
-void ActivateCurrentTab() {
-    switch (g_activeTab) {
-        case PauseTab::Map:
-            actions::OpenNativeMap();
-            break;
-        case PauseTab::Game:
-            actions::Resume();
-            break;
-        case PauseTab::Settings:
-            actions::OpenNativeSettings();
-            break;
-        case PauseTab::Servers:
-        case PauseTab::About:
-        case PauseTab::Count:
-            // These informational tabs have no primary action.
-            break;
-    }
-}
-
 void EnterCustomPause() {
     // CMenuManager::Process must remain live: it maintains GTA's front-end
     // pause semantics. We hide only its drawing and zero its input separately.
@@ -284,9 +289,16 @@ void LeaveCustomPause(bool resumeGameplay) {
 // ── State transitions ───────────────────────────────────────────────
 void TransitionTo(PauseState newState) {
     PauseState old = g_state;
+    if (old == PauseState::PauseOpen && newState != PauseState::PauseOpen)
+        controls::CancelCapture();
     g_state = newState;
     Log("state transition: %d -> %d", static_cast<int>(old), static_cast<int>(newState));
 
+    // Suspend the phone when the pause menu opens; it never draws over the pause.
+    if (newState == PauseState::PauseOpen)
+        skr::phone::input::GetController().Suspend();
+
+    ClearNav();
     if (newState == PauseState::PauseOpen)
         EnterCustomPause();
     else if (old == PauseState::PauseOpen)
@@ -300,7 +312,35 @@ LRESULT CALLBACK HookedWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 }
 
 bool HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    // Binding capture owns input before settings requests, ESC, ImGui, and
+    // custom keyboard navigation. This prevents a captured key from also
+    // activating a setting, switching tabs, or reaching GTA/SA-MP.
+    if (g_state == PauseState::PauseOpen) {
+        const bool captureAltTab = controls::IsCapturing() && msg == WM_SYSKEYDOWN &&
+                                   wParam == VK_TAB &&
+                                   (static_cast<uintptr_t>(lParam) & (1u << 29)) != 0;
+        if (controls::ProcessMessage(msg, wParam, lParam)) return true;
+        if (captureAltTab) return false;
+    }
+
     if (settings::ProcessMessage(msg, wParam, lParam))
+        return true;
+
+    // Native Runtime API confirm dialog (Y / Enter = confirm, N / ESC = cancel).
+    // Gameplay only, and before the ESC handling below so ESC answers the dialog
+    // instead of opening the pause menu. Other keys are never consumed.
+    if (g_state == PauseState::Gameplay &&
+        skr::native_api::OnWndProc(msg, static_cast<uintptr_t>(wParam), static_cast<intptr_t>(lParam)))
+        return true;
+
+    // Phone input — during gameplay only. The phone never opens over the pause
+    // menu (it suspends when the pause opens and vice versa). It sits after the
+    // native API confirm so ESC answers that dialog first, and before the ESC
+    // handler so ESC navigates the phone instead of opening the pause menu.
+    if (g_state == PauseState::Gameplay &&
+        skr::phone::input::ProcessMessage(msg, static_cast<uintptr_t>(wParam),
+                                          static_cast<intptr_t>(lParam),
+                                          GetTickCount64()))
         return true;
 
     // Update mouse state (always tracked for UI)
@@ -337,6 +377,8 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 return true;
 
             case PauseState::PauseOpen:
+                // ESC closes an open confirmation dialog first.
+                if (renderer::HandleBack()) return true;
                 actions::Resume();
                 return true;
 
@@ -369,20 +411,24 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // native ImGui widgets.
         if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
             const bool repeated = (static_cast<uint32_t>(lParam) & (1u << 30)) != 0;
+            // Q/E switch main tabs. Arrow keys move/adjust the focused
+            // control (auto-repeat allowed); Enter/Space activate it.
             switch (wParam) {
-                case VK_LEFT:
                 case 'Q':
-                    if (!repeated && g_activeTab > PauseTab::Map)
+                    if (!repeated && !renderer::IsModalOpen() && g_activeTab > PauseTab::Map)
                         g_activeTab = static_cast<PauseTab>(static_cast<int>(g_activeTab) - 1);
                     return true;
-                case VK_RIGHT:
                 case 'E':
-                    if (!repeated && g_activeTab < static_cast<PauseTab>(static_cast<int>(PauseTab::Count) - 1))
+                    if (!repeated && !renderer::IsModalOpen() && g_activeTab < static_cast<PauseTab>(static_cast<int>(PauseTab::Count) - 1))
                         g_activeTab = static_cast<PauseTab>(static_cast<int>(g_activeTab) + 1);
                     return true;
+                case VK_UP:    PushNav(NavEvent::Up);    return true;
+                case VK_DOWN:  PushNav(NavEvent::Down);  return true;
+                case VK_LEFT:  PushNav(NavEvent::Left);  return true;
+                case VK_RIGHT: PushNav(NavEvent::Right); return true;
                 case VK_RETURN:
                 case VK_SPACE:
-                    if (!repeated) ActivateCurrentTab();
+                    if (!repeated) PushNav(NavEvent::Activate);
                     return true;
             }
         }
@@ -444,6 +490,7 @@ void Shutdown() {
 
     if (g_state == PauseState::PauseOpen)
         LeaveCustomPause(true);
+    controls::CancelCapture();
     settings::Shutdown();
     RemoveDirectInputOwnership();
 
@@ -485,6 +532,18 @@ void SetActiveTab(PauseTab tab) { g_activeTab = tab; }
 
 const MouseState& GetMouse() {
     return g_mouse;
+}
+
+bool IsSampR5Loaded() {
+    return IsPinnedSampR5(GetModuleHandleW(L"samp.dll"));
+}
+
+NavEvent PopNavEvent() {
+    if (g_navCount <= 0) return NavEvent::None;
+    const NavEvent ev = g_navQueue[g_navHead];
+    g_navHead = (g_navHead + 1) % kNavQueueSize;
+    --g_navCount;
+    return ev;
 }
 
 } // namespace skr::native_pause::input
