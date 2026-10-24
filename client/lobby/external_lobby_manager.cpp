@@ -1,7 +1,7 @@
 // External launcher variant: no CEF lobby, menu patches, input hooks or cover.
 #include "lobby/lobby_manager.h"
 #include "cef-local/cef_local_loader.h"
-#include "escape-menu/escape_menu.h"
+#include "native-pause/native_pause.h"
 #include "protocol/session_info.h"
 #include "../../shared/exit_codes.h"
 #define WIN32_LEAN_AND_MEAN
@@ -19,7 +19,7 @@ namespace skr::lobby {
     }
 
     void OnNetGameState(int) {}
-    void ResetEnhancedSession() { mode.store(-1); gameplay.store(false); skr::escape_menu::Disable(); }
+    void ResetEnhancedSession() { mode.store(-1); gameplay.store(false); }
     void OnSessionInfo(uint8_t value) {
         mode.store(value == static_cast<uint8_t>(skr::protocol::SessionMode::CefIntro) ? 1 : 0);
     }
@@ -31,12 +31,11 @@ namespace skr::lobby {
     bool IsSkrSession() { return mode.load() >= 0; }
     void OnGameplayConfirmed(const char*) {
         gameplay.store(true);
-        if (IsSkrSession()) skr::escape_menu::Enable();
+        // Native pause menu handles ESC (initialized at boot).
     }
 
     void OnInWorldTick() {
         if (!gameplay.load()) OnGameplayConfirmed("external launcher");
-        else if (IsSkrSession()) skr::escape_menu::Enable();
     }
 
     bool IsLobbyActive() { return false; }

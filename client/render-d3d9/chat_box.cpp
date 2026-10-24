@@ -1,5 +1,6 @@
 #include "render-d3d9/chat_box.h"
 #include "lobby/lobby_manager.h"
+#include "native-pause/native_pause.h"
 #include <windows.h>
 #include <d3d9.h>
 #include <algorithm>
@@ -175,6 +176,13 @@ void DrawRoundedRect(IDirect3DDevice9* dev, float l, float t, float r, float b, 
 }
 
 void __fastcall HookedChatDraw(void* chatPtr, void*) {
+    // SA-MP draws chat from its Present proxy, i.e. after our EndScene overlay,
+    // so it would paint over the SKR pause menu. Skip only this draw call while
+    // the pause surface (or a native GTA submenu opened from it) is up. Chat
+    // state, message intake and networking are untouched; drawing resumes on
+    // the first frame after the menu closes.
+    if (skr::native_pause::IsOpen()) return;
+
     auto* chat = static_cast<uint8_t*>(chatPtr);
     auto* dev = *reinterpret_cast<IDirect3DDevice9**>(chat + 0x63AE);
     uint32_t mode = *reinterpret_cast<uint32_t*>(chat + 0x8);

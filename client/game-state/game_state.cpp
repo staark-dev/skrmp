@@ -1,14 +1,26 @@
 #include "game-state/game_state.h"
+#include "game-state/radar_hud.h"
+#ifdef SKR_OP215
+#include "vehicle/custom_vehicle.h"
+#endif
 #include "protocol/client_state.h"
 #include "protocol/session_info.h"
 #include "protocol/enhanced.h"
 #include "protocol/rejection.h"
 #include "protocol/radar_style.h"
 #include "protocol/radar_rect.h"
+#include "protocol/native_api.h"
+#include "native-api/native_api.h"
+#include "skrx/skrx_client.h"
 #include "lobby/lobby_manager.h"
-#include "escape-menu/escape_menu.h"
 #include "intro/launch_cover.h"
+#include "gps/gps_checkpoint.h"
+#include "gps/gps_engine.h"
+#include "gps/gps_notify.h"
+#include "gps/gps_panel.h"
+#include "gps/gps_renderer.h"
 #include <windows.h>
+#include <d3d9.h>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -88,6 +100,10 @@ constexpr uintptr_t kRadarHeight = 0x866B74;
 constexpr uintptr_t kRadarTopFromBottom = 0x866B70;
 // CHud::DrawRadar (cdecl, no params; plugin-sdk CHud.cpp). Entry: mov eax, [0x96A7CC].
 constexpr uintptr_t kCHudDrawRadar = 0x58A330;
+// CRadar::TransformRadarPointToScreenSpace(CVector2D& out, const CVector2D& in), cdecl
+// (deps/omp-cef/src/client/core/game_sa/CRadar.cpp). Same transform GTA uses to place the
+// radar tiles and blips; output is RW screen pixels.
+constexpr uintptr_t kTransformRadarPointToScreen = 0x583480;
 constexpr uint8_t kDrawRadarEntry[5] = {0xA1, 0xCC, 0xA7, 0x96, 0x00};
 // CHud::Draw (static, cdecl, no params) — 2D HUD entry point called from Idle's
 // render pass.  Provenance: plugin-sdk CHud.cpp / gta-reversed.
@@ -108,6 +124,7 @@ constexpr uintptr_t kDisplayHud = 0xA444A0;
 // plugin-sdk RenderWare.h: RsGlobal.maximumWidth/Height — actual render resolution.
 constexpr uintptr_t kRsMaxWidth  = 0xC17044;
 constexpr uintptr_t kRsMaxHeight = 0xC17048;
+constexpr uintptr_t kRwD3D9Device = 0xC97C28;   // IDirect3DDevice9* (RenderWare global)
 // HUD base resolution used by GTA's coordinate transform (640x448).
 constexpr float kHudBaseWidth  = 640.0f;
 constexpr float kHudBaseHeight = 448.0f;
@@ -191,6 +208,23 @@ bool ReadPlayer(CVector& pos, float& heading) {
     return true;
 }
 
+// Local player's seat for the GPS HUD (driver = full panel, else compact).
+// BINARY_CONFIRMED on the clean 1.0 US exe: FindPlayerVehicle 0x56E0D0 tests
+// [ped+0x46C] & 0x100 (bInVehicle) and returns [ped+0x58C] (m_pVehicle);
+// CVehicle::IsDriver 0x6D1C40 compares [vehicle+0x460] (m_pDriver).
+skr::gps::panel::Seat ReadSeat() {
+    using skr::gps::panel::Seat;
+    __try {
+        auto* ped = *reinterpret_cast<uint8_t**>(kPlayersPed);
+        if (!ped || !(*reinterpret_cast<uint32_t*>(ped + 0x46C) & 0x100)) return Seat::OnFoot;
+        auto* vehicle = *reinterpret_cast<uint8_t**>(ped + 0x58C);
+        if (!vehicle) return Seat::OnFoot;
+        return *reinterpret_cast<uint8_t**>(vehicle + 0x460) == ped ? Seat::Driver : Seat::Passenger;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return Seat::OnFoot;
+    }
+}
+
 const char* ZoneText(const uint8_t* zone) {
     auto get = reinterpret_cast<CTextGetFn>(kCTextGet);
     return get(reinterpret_cast<void*>(kTheText), reinterpret_cast<const char*>(zone + 0x8));
@@ -199,7 +233,7 @@ const char* ZoneText(const uint8_t* zone) {
 // Smallest containing navigation zone = area. City/county = containing zone with z2 == 900:
 // in info.zon only LA, VE, SF, RED, BONE, ROBAD, FLINTC, WHET use that height; the
 // state-wide "San Andreas" zone (not in info.zon) is excluded by this rule.
-void ResolveZones(const CVector& pos, char* city, size_t cityLen, char* area, size_t areaLen) {
+void ResolveZonesInternal(const CVector& pos, char* city, size_t cityLen, char* area, size_t areaLen) {
     city[0] = area[0] = '\0';
     short count = *reinterpret_cast<short*>(kTotalInfoZones);
     if (count <= 0 || count > 1000) return;
@@ -247,6 +281,15 @@ void __cdecl HookedCall() {
 }
 
 } // namespace
+
+void ResolveZones(float x, float y, float z, char* city, size_t cityLen, char* area, size_t areaLen) {
+    __try {
+        CVector pos = { x, y, z };
+        ResolveZonesInternal(pos, city, cityLen, area, areaLen);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        city[0] = area[0] = '\0';
+    }
+}
 
 bool InstallProcessHook() {
     for (const auto& c : kCandidates) {
@@ -373,7 +416,12 @@ bool g_radarRingOk = false;
 uint8_t g_radarRingOrig[4][5] = {};
 protocol::RadarStyle g_radarStyle = protocol::RadarStyle::Round;
 float g_radarScale = 1.0f;
+float g_radarScaleW = 1.0f;   // independent width scale (Bounds mode)
+float g_radarScaleH = 1.0f;   // independent height scale (Bounds mode)
+bool g_radarVisible = true;   // minimap visibility (from server flags)
 bool g_detourActive = false;            // true while our JMP is live at 0x58A330
+RadarRect g_measuredRect = {};          // measured radar rect from TransformRadarPointToScreenSpace (previous frame)
+bool g_measuredRectValid = false;       // true after at least one frame of measured geometry
 bool g_radarFloatsUnlocked = false;     // VirtualProtect .rdata once
 
 // Radar rect globals are defined above, near SendRadarRect.
@@ -415,11 +463,16 @@ constexpr int kMaxRadarCrashes = 3;
 void __cdecl HookedDrawRadar() {
     g_drawRadarCount.fetch_add(1);
 
+    // Server-controlled minimap visibility: skip the entire draw when hidden.
+    if (!g_radarVisible) return;
+
     auto* w = reinterpret_cast<float*>(kRadarWidth);
     auto* h = reinterpret_cast<float*>(kRadarHeight);
     auto* top = reinterpret_cast<float*>(kRadarTopFromBottom);
-    const float s = g_radarScale;
+    const float sw = g_radarScaleW;
+    const float sh = g_radarScaleH;
     const float w0 = *w, h0 = *h, top0 = *top;
+    const bool scaled = (sw != 1.0f || sh != 1.0f);
 
     // Rate-limited diagnostic: every 5 seconds
     DWORD now = GetTickCount();
@@ -429,20 +482,40 @@ void __cdecl HookedDrawRadar() {
         char m[320];
         snprintf(m, sizeof(m),
                  "calls=%u trampCalls=%u crashCount=%d trampoline=0x%p "
-                 "w=%.1f h=%.1f top=%.1f scale=%.2f style=%d bDisplayHud=%u "
+                 "w=%.1f h=%.1f top=%.1f scaleW=%.2f scaleH=%.2f style=%d bDisplayHud=%u "
                  "maskByte=0x%02X",
                  g_drawRadarCount.load(), g_trampolineCallCount.load(),
                  g_radarCrashCount.load(),
                  reinterpret_cast<void*>(g_drawRadarTrampoline),
-                 w0, h0, top0, s, static_cast<int>(g_radarStyle), displayHud,
+                 w0, h0, top0, sw, sh, static_cast<int>(g_radarStyle), displayHud,
                  *reinterpret_cast<uint8_t*>(kDrawRadarMask));
         LogDiag("DrawRadar", m);
     }
 
-    if (s != 1.0f) {
-        *w = w0 * s;
-        *h = h0 * s;
-        *top = top0 + h0 * (s - 1.0f);
+    if (scaled) {
+        // GTA's radar tile renderer (CRadar::DrawRadarSection) and blip
+        // transforms read these .rdata values. Extreme aspect ratios cause
+        // uncontrolled exits — the code does not tolerate arbitrarily wide
+        // or tall radar rects. Clamp each axis to a safe range.
+        // Server protocol allows 0.5–2.0; the client applies a tighter
+        // effective maximum of 1.6 to stay within safe GTA geometry.
+        constexpr float kMinEff = 0.5f, kMaxEff = 1.6f;
+        const float effW = (std::min)(kMaxEff, (std::max)(kMinEff, sw));
+        const float effH = (std::min)(kMaxEff, (std::max)(kMinEff, sh));
+        if (effW != sw || effH != sh) {
+            static DWORD s_lastClampLog = 0;
+            DWORD clampNow = GetTickCount();
+            if (clampNow - s_lastClampLog >= 5000) {
+                s_lastClampLog = clampNow;
+                char m[128];
+                snprintf(m, sizeof(m), "clamped: requested %.2fx%.2f -> effective %.2fx%.2f",
+                         sw, sh, effW, effH);
+                LogDiag("DrawRadar", m);
+            }
+        }
+        *w = w0 * effW;
+        *h = h0 * effH;
+        *top = top0 + h0 * (effH - 1.0f);
     }
     const float screenW = static_cast<float>(*reinterpret_cast<int*>(kRsMaxWidth));
     const float screenH = static_cast<float>(*reinterpret_cast<int*>(kRsMaxHeight));
@@ -454,10 +527,52 @@ void __cdecl HookedDrawRadar() {
     rect.x = kRadarLeftMargin * sx;
     rect.y = screenH - *top * sy;
 
+    // D3D9 scissor rect: enforce rectangular clipping for Square/Custom.
+    // Uses the previous frame's measured rect (from TransformRadarPointToScreenSpace)
+    // for pixel-accurate clipping that matches the vitals geometry. Falls back to the
+    // formula-based rect on the first frame.
+    IDirect3DDevice9* dev = nullptr;
+    RECT oldScissor = {};
+    DWORD oldScissorEnable = FALSE;
+    const bool useScissor = g_radarStyle == protocol::RadarStyle::Square;
+    if (useScissor) {
+        dev = *reinterpret_cast<IDirect3DDevice9**>(kRwD3D9Device);
+        if (dev) {
+            dev->GetRenderState(D3DRS_SCISSORTESTENABLE, &oldScissorEnable);
+            dev->GetScissorRect(&oldScissor);
+            const RadarRect& sr = g_measuredRectValid ? g_measuredRect : rect;
+            RECT radarScissor;
+            radarScissor.left   = static_cast<LONG>(sr.x);
+            radarScissor.top    = static_cast<LONG>(sr.y);
+            radarScissor.right  = static_cast<LONG>(std::ceil(sr.x + sr.w));
+            radarScissor.bottom = static_cast<LONG>(std::ceil(sr.y + sr.h));
+            dev->SetScissorRect(&radarScissor);
+            dev->SetRenderState(D3DRS_SCISSORTESTENABLE, TRUE);
+        }
+    }
+
     if (g_radarCrashCount.load() < kMaxRadarCrashes) {
         __try {
             g_trampolineCallCount.fetch_add(1);
             g_drawRadarTrampoline();
+            struct V2 { float x, y; };
+            using TransformFn = void(__cdecl*)(V2*, const V2*);
+            V2 tl{}, br{};
+            const V2 inTL{-1.0f, 1.0f}, inBR{1.0f, -1.0f};
+            reinterpret_cast<TransformFn>(kTransformRadarPointToScreen)(&tl, &inTL);
+            reinterpret_cast<TransformFn>(kTransformRadarPointToScreen)(&br, &inBR);
+            skr::radar_hud::RadarGeometry geo{};
+            geo.srcWidth = *w; geo.srcHeight = *h; geo.srcTopFromBottom = *top;
+            geo.formulaX = rect.x; geo.formulaY = rect.y; geo.formulaW = rect.w; geo.formulaH = rect.h;
+            geo.x = (tl.x < br.x) ? tl.x : br.x;
+            geo.y = (tl.y < br.y) ? tl.y : br.y;
+            geo.w = (tl.x < br.x) ? br.x - tl.x : tl.x - br.x;
+            geo.h = (tl.y < br.y) ? br.y - tl.y : tl.y - br.y;
+            g_measuredRect = {geo.x, geo.y, geo.w, geo.h};
+            g_measuredRectValid = true;
+            skr::radar_hud::OnRadarDrawn(geo);
+            skr::gps::RenderRoute(geo.x, geo.y, geo.w, geo.h,
+                                  g_radarStyle == protocol::RadarStyle::Square);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             g_radarCrashCount.fetch_add(1);
             LogStage(21 + g_radarCrashCount.load(),
@@ -465,7 +580,13 @@ void __cdecl HookedDrawRadar() {
         }
     }
 
-    if (s != 1.0f) {
+    // Restore scissor state after all radar draws.
+    if (useScissor && dev) {
+        dev->SetScissorRect(&oldScissor);
+        dev->SetRenderState(D3DRS_SCISSORTESTENABLE, oldScissorEnable);
+    }
+
+    if (scaled) {
         *w = w0;
         *h = h0;
         *top = top0;
@@ -571,7 +692,7 @@ void MaintainDrawRadarDetour() {
     LogStage(29, m);
 }
 
-void ApplyRadar(protocol::RadarStyle style, float scale) {
+void ApplyRadar(protocol::RadarStyle style, float scale, float scaleW = 1.0f, float scaleH = 1.0f, bool visible = true) {
     if (style != g_radarStyle) {
         const bool square = style == protocol::RadarStyle::Square;
         if (g_radarMaskOk) {
@@ -584,8 +705,13 @@ void ApplyRadar(protocol::RadarStyle style, float scale) {
                 WriteCode(kRadarRingDrawCalls[i], square ? kAddEsp8 : g_radarRingOrig[i], 5);
         }
         g_radarStyle = style;
+        g_measuredRectValid = false;
     }
     g_radarScale = scale;
+    g_radarScaleW = scaleW;
+    g_radarScaleH = scaleH;
+    g_radarVisible = visible;
+    skr::radar_hud::SetSquareMode(style == protocol::RadarStyle::Square);
 }
 
 // ── SKR session-info RPC 241 (shared/protocol/session_info.h) ────────────
@@ -627,6 +753,21 @@ bool SendNegotiation(uintptr_t base, uint8_t* netGame, protocol::EnhancedStep st
 void __cdecl OnSessionInfoRpc(RpcParams* params) {
     if (!params || !params->input || !g_enhancedAdvertised.load()) return;
     const auto* in = params->input;
+    // Native Runtime API (envelope steps 5..8, shared/protocol/native_api.h). Only
+    // after this connection's Enhanced handshake; native_api validates the rest.
+    if (params->numberOfBitsOfData >= 16 && params->numberOfBitsOfData % 8 == 0 &&
+        in[0] == protocol::kEnhancedMarker && protocol::api::IsApiStep(in[1])) {
+        if (g_negotiation == Negotiation::Enhanced)
+            skr::native_api::OnServerMessage(in, params->numberOfBitsOfData / 8);
+        return;
+    }
+    if (params->numberOfBitsOfData >= protocol::skrx::kGatewayHeaderSize * 8 &&
+        params->numberOfBitsOfData % 8 == 0 &&
+        protocol::skrx::IsGatewayMessage(in, params->numberOfBitsOfData / 8)) {
+        if (g_negotiation == Negotiation::Enhanced)
+            skr::skrx::OnGatewayMessage(in, params->numberOfBitsOfData / 8);
+        return;
+    }
     protocol::RejectionMessage rejection{};
     if (params->numberOfBitsOfData == sizeof(rejection) * 8 &&
         protocol::DecodeRejection(in, sizeof(rejection), rejection)) {
@@ -648,6 +789,7 @@ void __cdecl OnSessionInfoRpc(RpcParams* params) {
         in[1] > 1 || g_negotiation != Negotiation::ConfirmSent) return;
     g_negotiation = Negotiation::Enhanced;
     skr::lobby::OnSessionInfo(in[1]);
+    skr::native_api::OnEnhancedConfirmed(g_negotiationToken);   // API Hello goes out from Tick
     LogStage(26, "Enhanced capabilities confirmed (not authentication)");
 }
 
@@ -656,6 +798,13 @@ void TickNegotiation(uintptr_t base, uint8_t* netGame) {
     if (!connected) {
         if (g_wasConnected) {
             skr::lobby::ResetEnhancedSession();
+            skr::native_api::Reset();   // drops session id, dialogs, HUD override
+            skr::skrx::Reset();
+            skr::gps::Reset();
+            skr::gps::ResetRenderer();
+            skr::gps::panel::Reset();
+            skr::gps::notify::Reset();
+            skr::gps::checkpoint::Reset();
             ApplyRadar(protocol::RadarStyle::Round, 1.0f);
             g_negotiation = Negotiation::Idle;
             g_negotiationToken = 0;
@@ -686,14 +835,38 @@ void __cdecl OnRadarStyleRpc(RpcParams* params) {
     if (!params || !params->input || params->numberOfBitsOfData < 7 * 8) return;
     if (!skr::lobby::IsSkrSession()) return;
     const uint8_t* in = params->input;
-    if (in[0] != protocol::kRadarStyleVersion || in[1] > 1 || in[2] > 1) return;
-    float scale = 1.0f;
-    if (in[2] == static_cast<uint8_t>(protocol::RadarSizeMode::Custom)) {
+    const uint8_t version = in[0];
+    if (version < 1 || version > 2 || in[1] > 1 || in[2] > 2) return;
+    const auto sizeMode = static_cast<protocol::RadarSizeMode>(in[2]);
+    float scale = 1.0f, scaleW = 1.0f, scaleH = 1.0f;
+    bool visible = true;
+    if (sizeMode == protocol::RadarSizeMode::Custom) {
         memcpy(&scale, in + 3, sizeof(scale));
         if (!std::isfinite(scale) || scale < protocol::kRadarMinScale || scale > protocol::kRadarMaxScale)
             return;
+        scaleW = scale;
+        scaleH = scale;
     }
-    ApplyRadar(static_cast<protocol::RadarStyle>(in[1]), scale);
+    if (version >= 2) {
+        // v2: flags byte at offset 7 (after 3-byte header + 4-byte scale)
+        if (params->numberOfBitsOfData < 8 * 8) return;
+        visible = (in[7] & protocol::kRadarFlagVisible) != 0;
+        if (sizeMode == protocol::RadarSizeMode::Bounds) {
+            // v2 Bounds: scaleW(4) + scaleH(4) follow the flags byte
+            if (params->numberOfBitsOfData < 16 * 8) return;
+            memcpy(&scaleW, in + 8, sizeof(scaleW));
+            memcpy(&scaleH, in + 12, sizeof(scaleH));
+            if (!std::isfinite(scaleW) || scaleW < protocol::kRadarMinScale || scaleW > protocol::kRadarMaxScale ||
+                !std::isfinite(scaleH) || scaleH < protocol::kRadarMinScale || scaleH > protocol::kRadarMaxScale)
+                return;
+        }
+    }
+    auto style = static_cast<protocol::RadarStyle>(in[1]);
+    // Bounds mode requires Square rendering (rectangular clipping).
+    // Promote Round+Bounds to Square to prevent elliptical mask artifacts.
+    if (sizeMode == protocol::RadarSizeMode::Bounds && style == protocol::RadarStyle::Round)
+        style = protocol::RadarStyle::Square;
+    ApplyRadar(style, scale, scaleW, scaleH, visible);
 }
 
 // CNetGame (and its RakClient) is created once per session; register before
@@ -706,7 +879,8 @@ void RegisterSessionInfoRpc(uint8_t* netGame) {
     reg(rak, &g_sessionInfoRpcId, &OnSessionInfoRpc);
     reg(rak, &g_radarStyleRpcId, &OnRadarStyleRpc);
     g_sessionRpcRakClient = rak;
-    LogStage(13, "rpc 241 (session info) + 242 (radar style) handlers registered");
+    skr::skrx::SetRakClient(rak);
+    LogStage(13, "rpc 241 (session info) + 242 (radar style) + skrx handlers registered");
 }
 
 bool IsConnected() {
@@ -762,10 +936,28 @@ void __cdecl HookedHudDraw() {
         }
     }
 
+    skr::radar_hud::OnHudDrawBegin();
     if (g_origHudDraw) g_origHudDraw();
+    skr::radar_hud::OnHudDrawEnd();   // radar frame + health/armour block (2D pass)
+    skr::gps::DrawStatus();           // navigation line above the minimap (Renderer=1)
+    // Native API notifications moved to ImGui pass (pause_renderer.cpp, C3.1).
 }
 
 void Tick() {
+#ifdef SKR_OP215
+    // OP215: custom vehicle tick — runs every CGame::Process frame.
+    // Deferred initialization: registers the IMG and vehicle descriptors
+    // once, on the GTA thread, after CStreaming is live.
+    {
+        static bool s_op215Init = false;
+        if (!s_op215Init) {
+            s_op215Init = true;
+            skr::vehicle::Initialize();
+        }
+        skr::vehicle::Tick();
+    }
+#endif
+
     // Native HUD stays visible; the server hides individual components via
     // CEF_ToggleHudComponent. Radar style/size come from the server (RPC 242);
     // not gated on IsConnected: 241/242 can arrive before SA-MP reports connected.
@@ -774,6 +966,13 @@ void Tick() {
     // Re-apply DrawRadar detour after SA-MP restores original bytes (at spawn).
     // Runs every frame -- not rate-limited -- so we catch the transition immediately.
     MaintainDrawRadarDetour();
+
+    // Native Runtime API: Hello / Welcome timeout / replies / dialog countdown.
+    skr::native_api::Tick();
+
+    // GPS world checkpoint: GTA keeps a 3D marker for one frame only, so it is
+    // placed every CGame::Process frame (cached state, no I/O, no allocation).
+    skr::gps::checkpoint::PlaceFrame();
 
     // Early CNetGame detection -- runs every CGame::Process frame (no rate limit).
     // Signals the cover to dismiss BEFORE the "Started" chat message renders.
@@ -810,11 +1009,27 @@ void Tick() {
     float heading = 0.0f;
     if (!ReadPlayer(pos, heading)) { LogStage(4, "no player ped"); return; }
 
+    skr::gps::notify::Install();      // GPS events -> notification adapter (idempotent)
+    skr::gps::Tick(pos.x, pos.y, pos.z);
+    skr::gps::panel::SetPlayerContext(pos.x, pos.y, ReadSeat());   // HUD mode + on-foot distance
+    skr::gps::checkpoint::Tick(pos.x, pos.y, pos.z);                // waypoint marker state + ground z
+
+    // GPS panel second row: current GTA area / city, only while navigation
+    // is shown, at most twice a second (zone scan stays off the render path).
+    if (skr::gps::panel::WantsLocation()) {
+        static DWORD s_lastZone = 0;
+        if (now - s_lastZone >= 500) {
+            s_lastZone = now;
+            char zoneCity[48], zoneArea[48];
+            ResolveZones(pos.x, pos.y, pos.z, zoneCity, sizeof(zoneCity), zoneArea, sizeof(zoneArea));
+            skr::gps::panel::SetLocation(zoneArea, zoneCity);
+        }
+    }
+
     // Connected with a ped in the world. Runs from CGame::Process, which keeps
     // ticking after SA-MP proxies the D3D device; the lobby decides when to
     // hand over based on the server's session info (RPC 241).
     skr::lobby::OnInWorldTick();
-    skr::escape_menu::Tick();
 
     // Failsafe ONLY — not the normal dismiss path. The cover now dismisses
     // itself in Draw() at the first frame where worldConnected + negotiation
@@ -848,7 +1063,7 @@ void Tick() {
     if (!skr::lobby::IsSkrSession()) { LogStage(14, "non-SKR server: rpc 240 disabled"); return; }
 
     char city[48], area[48];
-    ResolveZones(pos, city, sizeof(city), area, sizeof(area));
+    ResolveZonesInternal(pos, city, sizeof(city), area, sizeof(area));
     Sanitize(city);
     Sanitize(area);
 
@@ -976,6 +1191,27 @@ ClientConnectionMode GetConnectionMode() {
     default:  // Idle, Failed
         return ClientConnectionMode::Standard;
     }
+}
+
+bool SendEnhancedEnvelope(const uint8_t* data, size_t len) {
+    if (!data || len < 2 || len > 255 || data[0] != protocol::kEnhancedMarker) return false;
+    HMODULE samp = GetModuleHandleA("samp.dll");
+    if (!samp) return false;
+    const auto base = reinterpret_cast<uintptr_t>(samp);
+    auto* netGame = *reinterpret_cast<uint8_t**>(base + kSampNetGameRva);
+    if (!netGame || netGame[kNetGameStateOff] != kStateConnected) return false;
+    void* rak = *reinterpret_cast<void**>(netGame);
+    if (!rak) return false;
+    // Same BitStream/RPC path as SendNegotiation (samp.dll R5 RVAs above).
+    alignas(16) uint8_t bs[0x400]{};
+    reinterpret_cast<BsThisFn>(base + kBsCtorRva)(bs);
+    reinterpret_cast<BsWriteBytesFn>(base + kBsWriteBytesRva)(
+        bs, reinterpret_cast<const char*>(data), static_cast<int>(len));
+    int id = protocol::kRpcClientState;
+    auto vtbl = *reinterpret_cast<uint8_t**>(rak);
+    const bool sent = (*reinterpret_cast<RakRpcFn*>(vtbl + kRakRpcVtableOffset))(rak, &id, bs, 1, 9, 0, false);
+    reinterpret_cast<BsThisFn>(base + kBsDtorRva)(bs);
+    return sent;
 }
 
 bool IsEnhancedNegotiationPending() {

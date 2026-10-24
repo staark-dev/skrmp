@@ -9,13 +9,11 @@
 #include "intro/launch_cover.h"
 #include "intro/urban_intro.h"
 #include "samp-loader/samp_loader.h"
-#include "escape-menu/escape_menu.h"
+#include "native-pause/native_pause.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d9.h>
-#define DIRECTINPUT_VERSION 0x0800
-#include <dinput.h>
 #include <wincodec.h>
 #include <algorithm>
 #include <atomic>
@@ -938,86 +936,6 @@ bool EnsureVideoMode(IDirect3DDevice9* device) {
     return false;
 }
 
-// ── DirectInput release while the lobby owns input ─────────────────
-// GTA's DirectInput mouse is exclusive: Windows hides the cursor and sends no
-// mouse messages, so the CEF page gets no input. While the lobby is shown we
-// keep GTA's devices unacquired; the WndProc -> CEF path then works. Same
-// shared-vtable technique as D:\GCMP gclient.c hook_dinput_mouse (ANSI
-// interfaces, as GTA SA creates them). IDirectInputDevice8 vtable slots:
-// 7 Acquire, 8 Unacquire, 9 GetDeviceState.
-using DIAcquireFn  = HRESULT(WINAPI*)(IDirectInputDevice8A*);
-using DIGetStateFn = HRESULT(WINAPI*)(IDirectInputDevice8A*, DWORD, LPVOID);
-DIAcquireFn  g_origDIAcquire  = nullptr;
-DIGetStateFn g_origDIGetState = nullptr;
-
-// The lobby only owns input while GTA sits in the frontend. SA-MP's StartGame
-// sets gGameState to 8 (initialization_flow.md §4.3); from then on the game
-// gets its devices back. Checked here because SKR's EndScene hook stops being
-// called once SA-MP installs its device proxy.
-bool OverlayOwnsInput() {
-    constexpr uintptr_t kGtaGameState = 0x00C8D4C0;   // plugin-sdk CGame.cpp:18
-    if (g_gameInputReleased.load() && *reinterpret_cast<volatile int*>(kGtaGameState) <= 7)
-        return true;
-    return skr::escape_menu::IsOpen();
-}
-
-HRESULT WINAPI HookedDIAcquire(IDirectInputDevice8A* dev) {
-    if (OverlayOwnsInput()) return DI_OK;
-    return g_origDIAcquire(dev);
-}
-
-HRESULT WINAPI HookedDIGetDeviceState(IDirectInputDevice8A* dev, DWORD size, LPVOID data) {
-    if (OverlayOwnsInput()) {
-        dev->Unacquire();
-        if (data) memset(data, 0, size);
-        return DI_OK;
-    }
-    HRESULT hr = g_origDIGetState(dev, size, data);
-    if (hr == DIERR_INPUTLOST || hr == DIERR_NOTACQUIRED) {
-        if (SUCCEEDED(g_origDIAcquire(dev))) hr = g_origDIGetState(dev, size, data);
-    }
-    return hr;
-}
-
-void InstallDInputHookOnce() {
-    static bool attempted = false;
-    if (attempted) return;
-    attempted = true;
-
-    using DI8CreateFn = HRESULT(WINAPI*)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
-    HMODULE hDI = GetModuleHandleW(L"dinput8.dll");
-    auto create = hDI ? reinterpret_cast<DI8CreateFn>(GetProcAddress(hDI, "DirectInput8Create")) : nullptr;
-    if (!create) { Log("dinput: DirectInput8Create not found"); return; }
-
-    IDirectInput8A* di = nullptr;
-    if (FAILED(create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8A,
-                      reinterpret_cast<LPVOID*>(&di), nullptr)) || !di) {
-        Log("dinput: DirectInput8Create failed");
-        return;
-    }
-    IDirectInputDevice8A* mouse = nullptr;
-    if (FAILED(di->CreateDevice(GUID_SysMouse, &mouse, nullptr)) || !mouse) {
-        Log("dinput: CreateDevice(SysMouse) failed");
-        di->Release();
-        return;
-    }
-
-    void** vtbl = *reinterpret_cast<void***>(mouse);
-    DWORD old = 0;
-    if (VirtualProtect(&vtbl[7], 3 * sizeof(void*), PAGE_EXECUTE_READWRITE, &old)) {
-        g_origDIAcquire  = reinterpret_cast<DIAcquireFn>(vtbl[7]);
-        g_origDIGetState = reinterpret_cast<DIGetStateFn>(vtbl[9]);
-        vtbl[7] = reinterpret_cast<void*>(&HookedDIAcquire);
-        vtbl[9] = reinterpret_cast<void*>(&HookedDIGetDeviceState);
-        VirtualProtect(&vtbl[7], 3 * sizeof(void*), old, &old);
-        Log("dinput: Acquire/GetDeviceState hooked");
-    } else {
-        Log("dinput: VirtualProtect failed");
-    }
-    mouse->Release();
-    di->Release();
-}
-
 } // namespace
 
 void Initialize() {
@@ -1063,7 +981,7 @@ constexpr DWORD kNoSessionInfoGraceMs = 1500;   // RPC 241 may land just after t
 constexpr DWORD kIntroWaitMaxMs = 30000;        // never block on a server intro that never shows
 constexpr DWORD kResourceWaitMaxMs = 120000;    // never block on a stalled resource download
 
-void ResetEnhancedSession() { g_sessionMode.store(-1); g_inWorldSince = 0; skr::escape_menu::Disable(); }
+void ResetEnhancedSession() { g_sessionMode.store(-1); g_inWorldSince = 0; }
 
 void OnSessionInfo(uint8_t mode) {
     const int value = mode == static_cast<uint8_t>(skr::protocol::SessionMode::CefIntro) ? 1 : 0;
@@ -1187,10 +1105,9 @@ void OnGameplayConfirmed(const char* reason) {
     Log("connect -> %s; lobby browser hidden and game input restored", reason);
     DebugLog("OnGameplayConfirmed: %s (browser hidden, destroy deferred to shutdown)", reason);
 
-    // On SKR servers, replace the native GTA pause menu with our custom ESC menu.
+    // Native pause menu (Task #22) handles ESC — initialized at boot.
     if (IsSkrSession()) {
-        skr::escape_menu::Enable();
-        Log("escape menu enabled (SKR server)");
+        Log("native pause menu active (SKR server)");
     }
 }
 
@@ -1222,9 +1139,9 @@ void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
         MenuPatchStatus st{};
         PatchGtaMainMenu(st);
 
-        // Process being patched to 0xC3 is sufficient — it prevents menu logic
-        // from running.  DrawFrontEnd at 0x0057B210 consistently reads 0x00
-        // (not live code) and may never succeed; don't block on it.
+        // Process being patched to 0xC3 is sufficient: it prevents menu logic
+        // from running. 0x0057B210 is an interior instruction address in the
+        // canonical Hoodlum image and is deliberately never patched.
         bool processOk = (st.entries[0].firstByte == 0xC3 || st.entries[0].patched);
         if (processOk && !g_menuPatched.load()) {
             g_menuPatched.store(true);
@@ -1237,10 +1154,8 @@ void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
             *reinterpret_cast<bool*>(0x00BA67A4) = false;   // m_bMenuActive  (+0x5C)
             *reinterpret_cast<bool*>(0x00BA677A) = true;    // m_bDontDrawFrontEnd (+0x32)
 
-            Log("CMenuManager::Process patched (0x%02X). DrawFrontEnd: first=0x%02X %s",
-                st.entries[0].firstByte,
-                st.entries[1].firstByte,
-                st.entries[1].patched ? "patched" : (st.entries[1].reason ? st.entries[1].reason : "skipped"));
+            Log("CMenuManager::Process verified and patched (original first byte 0x%02X)",
+                st.entries[0].firstByte);
             Log("FrontEndMenuManager: m_bMenuActive=false, m_bDontDrawFrontEnd=true");
         }
     }
@@ -1264,7 +1179,6 @@ void OnEndSceneAfterIntro(IDirect3DDevice9* device) {
     // Pump it manually from our EndScene hook so RenderManager captures the
     // real device and CEF browsers draw to the screen.
     if (g_browserShown.load()) {
-        InstallDInputHookOnce();
         if (!g_gameInputReleased.exchange(true)) Log("dinput: game input released to lobby");
 
         using PumpFn = void(__cdecl*)();

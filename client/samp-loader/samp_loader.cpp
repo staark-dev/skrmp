@@ -9,6 +9,10 @@
 #include <mutex>
 #include <string>
 
+#ifdef SKR_TEST_CERTIFICATION
+#include "vfs/samp_vfs.h"
+#endif
+
 namespace skr::samp_loader {
 
 namespace {
@@ -163,6 +167,132 @@ std::wstring GtaDir() {
     return path;
 }
 
+// Directory holding SKR.Client.dll, with a trailing backslash.
+// The bundled SA-MP runtime sits in "samp\\" beside it.
+std::wstring SelfDir() {
+    HMODULE self = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(&SelfDir), &self);
+    wchar_t p[MAX_PATH];
+    DWORD n = GetModuleFileNameW(self, p, MAX_PATH);
+    if (!n || n >= MAX_PATH) return {};
+    std::wstring s(p, n);
+    auto slash = s.find_last_of(L'\\');
+    if (slash == std::wstring::npos) return {};
+    return s.substr(0, slash + 1);
+}
+
+// Try to find samp.dll from a candidate path (plain or .skr-hidden).
+// Returns the validated path or an empty string.
+std::wstring FindSampAt(const std::wstring& candidatePath) {
+    std::wstring hidden = candidatePath + L".skr";
+    if (GetFileAttributesW(candidatePath.c_str()) == INVALID_FILE_ATTRIBUTES &&
+        GetFileAttributesW(hidden.c_str()) != INVALID_FILE_ATTRIBUTES)
+        MoveFileExW(hidden.c_str(), candidatePath.c_str(), 0);
+    if (GetFileAttributesW(candidatePath.c_str()) == INVALID_FILE_ATTRIBUTES)
+        return {};
+    if (!HashMatchesPinnedR5(candidatePath.c_str())) {
+        Log("samp.dll at %ls rejected: SHA-256 mismatch", candidatePath.c_str());
+        return {};
+    }
+    return candidatePath;
+}
+
+#ifdef SKR_TEST_CERTIFICATION
+// ── Error 1114 (ERROR_DLL_INIT_FAILED) Diagnostics ──────────────────
+// samp.dll's DllMain returned FALSE. This diagnostic block gathers
+// evidence about WHY the initialization failed, separately from the
+// VFS redirection. Possible causes include:
+//   1. Missing resource files (SAMP.img, fonts, etc.) — addressed by VFS
+//   2. Missing or incompatible DLL dependencies
+//   3. GTA process state not at the expected point for SA-MP bootstrap
+//   4. SA-MP internal validation failure (version check, integrity, etc.)
+//   5. bass.dll initialization failure (audio subsystem)
+void DiagnoseError1114(const wchar_t* sampPath) {
+    Log("=== ERROR 1114 DIAGNOSTICS ===");
+
+    // 1. Check transitive DLL dependencies are loadable.
+    const wchar_t* deps[] = {
+        L"d3dx9_25.dll", L"COMCTL32.dll", L"ADVAPI32.dll",
+        L"WSOCK32.dll", L"WINMM.dll", L"PSAPI.DLL",
+        L"SHELL32.dll", L"USER32.dll", L"GDI32.dll",
+        nullptr
+    };
+    for (const wchar_t** dep = deps; *dep; ++dep) {
+        HMODULE h = GetModuleHandleW(*dep);
+        if (!h) h = LoadLibraryExW(*dep, nullptr, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        Log("  dep %ls: %s (module=%p)", *dep, h ? "OK" : "MISSING", h);
+    }
+
+    // 2. Check bass.dll specifically (samp.dll imports it).
+    //    bass.dll must be loadable from the samp.dll directory.
+    std::wstring sampDir(sampPath);
+    auto slash = sampDir.find_last_of(L'\\');
+    if (slash != std::wstring::npos) {
+        sampDir.resize(slash + 1);
+        std::wstring bassPath = sampDir + L"bass.dll";
+        DWORD attrs = GetFileAttributesW(bassPath.c_str());
+        Log("  bass.dll at %ls: %s", bassPath.c_str(),
+            attrs != INVALID_FILE_ATTRIBUTES ? "EXISTS" : "NOT FOUND");
+
+        if (attrs != INVALID_FILE_ATTRIBUTES) {
+            // Try loading bass.dll explicitly to see if IT fails.
+            HMODULE bass = LoadLibraryExW(bassPath.c_str(), nullptr,
+                                          LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+                                          LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+            if (bass) {
+                Log("  bass.dll: loaded successfully at %p", bass);
+                FreeLibrary(bass);
+            } else {
+                Log("  bass.dll: LOAD FAILED (error %lu)", GetLastError());
+            }
+        }
+    }
+
+    // 3. Check GTA process state.
+    const int gameState = *reinterpret_cast<volatile int*>(kGtaGameState);
+    Log("  gGameState=%d (expected < %d)", gameState, kGtaStateFrontendIdle);
+
+    // 4. Check if SA-MP resource files exist at expected locations.
+    std::wstring gtaDir = GtaDir();
+    const wchar_t* resources[] = {
+        L"\\SAMP\\SAMP.img", L"\\SAMP\\SAMP.ide", L"\\samp.saa",
+        L"\\gtaweap3.ttf", L"\\sampaux3.ttf", L"\\sampgui.png",
+        L"\\mouse.png",
+        nullptr
+    };
+    for (const wchar_t** res = resources; *res; ++res) {
+        std::wstring path = gtaDir + *res;
+        DWORD attrs = GetFileAttributesW(path.c_str());
+        Log("  resource %ls: %s", path.c_str(),
+            attrs != INVALID_FILE_ATTRIBUTES ? "EXISTS" : "NOT FOUND");
+    }
+
+    // Also check in the bundled samp directory.
+    std::wstring selfDir = SelfDir();
+    if (!selfDir.empty()) {
+        Log("  --- bundled resources ---");
+        for (const wchar_t** res = resources; *res; ++res) {
+            std::wstring path = selfDir + L"samp" + *res;
+            DWORD attrs = GetFileAttributesW(path.c_str());
+            Log("  bundled %ls: %s", path.c_str(),
+                attrs != INVALID_FILE_ATTRIBUTES ? "EXISTS" : "NOT FOUND");
+        }
+    }
+
+    // 5. VFS status.
+    if (skr::vfs::IsInstalled()) {
+        Log("  VFS: active");
+        skr::vfs::LogTraceSummary();
+    } else {
+        Log("  VFS: not installed");
+    }
+
+    Log("=== END DIAGNOSTICS ===");
+}
+#endif // SKR_TEST_CERTIFICATION
+
 } // namespace
 
 bool PreloadSamp(const ConnectParams* startup) {
@@ -176,18 +306,20 @@ bool PreloadSamp(const ConnectParams* startup) {
         return false;
     }
 
-    std::wstring dir = GtaDir();
-    std::wstring sampPath = dir + L"\\samp.dll";
-    std::wstring hidden = sampPath + L".skr";
-    if (GetFileAttributesW(sampPath.c_str()) == INVALID_FILE_ATTRIBUTES &&
-        GetFileAttributesW(hidden.c_str()) != INVALID_FILE_ATTRIBUTES)
-        MoveFileExW(hidden.c_str(), sampPath.c_str(), 0);
-    if (GetFileAttributesW(sampPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        Log("samp.dll not found (tried restore from .skr and original)");
-        return false;
+    // Search order:
+    //   1. Bundled runtime beside SKR.Client.dll: <self_dir>\samp\samp.dll
+    //   2. GTA installation directory: <gta_dir>\samp.dll (legacy / developer)
+    // Nothing is installed into or written to the GTA directory.
+    std::wstring sampPath;
+    std::wstring selfDir = SelfDir();
+    if (!selfDir.empty())
+        sampPath = FindSampAt(selfDir + L"samp\\samp.dll");
+    if (sampPath.empty()) {
+        std::wstring dir = GtaDir();
+        sampPath = FindSampAt(dir + L"\\samp.dll");
     }
-    if (!HashMatchesPinnedR5(sampPath.c_str())) {
-        Log("samp.dll rejected: SHA-256 is not the pinned R5 build");
+    if (sampPath.empty()) {
+        Log("samp.dll not found (tried bundled and GTA directory)");
         return false;
     }
 
@@ -203,18 +335,81 @@ bool PreloadSamp(const ConnectParams* startup) {
     sampCmdLine = *cmdLinePtr;
     sampCmdLine += " -c";
 
-    Log("preloading samp from %ls (gGameState=%d)", sampPath.c_str(), gameState);
+    Log("preloading samp from %ls (gGameState=%d)",
+        sampPath.c_str(), gameState);
+
     char* originalCmdLine = *cmdLinePtr;
+
+#ifdef SKR_TEST_CERTIFICATION
+    // ── VFS: Install resource redirection BEFORE loading samp.dll ────
+    // samp.dll's DllMain (with -c) may probe for resource files (SAMP.img,
+    // fonts, etc.) relative to the GTA directory or its own directory.
+    // The bundled SA-MP runtime files are in <self_dir>\samp\, not in the
+    // GTA directory. The VFS intercepts file operations and redirects
+    // verified SA-MP resource paths to the bundled location.
+    {
+        skr::vfs::VfsConfig vfsConfig;
+        vfsConfig.sampResourceDir = selfDir + L"samp\\";
+        vfsConfig.gtaDir = GtaDir();
+        vfsConfig.traceAll = true;  // Full trace for first diagnostic run
+        if (skr::vfs::Install(vfsConfig)) {
+            Log("VFS installed: redirecting SA-MP resources from %ls to %ls",
+                vfsConfig.gtaDir.c_str(), vfsConfig.sampResourceDir.c_str());
+        } else {
+            Log("VFS install FAILED: proceeding without resource redirection");
+        }
+    }
+#endif // SKR_TEST_CERTIFICATION
+
     *cmdLinePtr = sampCmdLine.data();
-    HMODULE module = LoadLibraryW(sampPath.c_str());
+
+    HMODULE module = LoadLibraryExW(
+        sampPath.c_str(),
+        nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+        LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
+    );
+
+    // Capture immediately, before other API operations.
+    const DWORD loadError = module ? ERROR_SUCCESS : GetLastError();
+
     *cmdLinePtr = originalCmdLine;
+
     if (!module) {
-        Log("LoadLibrary FAILED: error %lu", GetLastError());
+        Log("SA-MP LoadLibraryExW FAILED: error %lu (path=%ls)", loadError, sampPath.c_str());
+        // Error 126 = ERROR_MOD_NOT_FOUND (a dependency DLL is missing)
+        // Error 1114 = ERROR_DLL_INIT_FAILED (DllMain returned FALSE)
+        if (loadError == 126) {
+            Log("  hint: a dependency of samp.dll was not found in the DLL search path");
+            Log("  searched: samp dir, System32");
+        }
+#ifdef SKR_TEST_CERTIFICATION
+        if (loadError == 1114) {
+            DiagnoseError1114(sampPath.c_str());
+        }
+        // Remove VFS hooks regardless of success or failure.
+        skr::vfs::Remove();
+#endif
         return false;
     }
+
+    Log("SA-MP R5 loaded successfully: module=%p", module);
+
+#ifdef SKR_TEST_CERTIFICATION
+    // Log VFS trace summary after successful load, then keep hooks active
+    // for continued SA-MP initialization (Samp_MainThread resource access).
+    if (skr::vfs::IsInstalled()) {
+        skr::vfs::LogTraceSummary();
+        Log("VFS hooks remain active for SA-MP initialization phase");
+    }
+#endif
+
     if (!IsPinnedR5Image(module)) {
         Log("samp.dll rejected: PE signature is not the pinned R5 build");
         FreeLibrary(module);
+#ifdef SKR_TEST_CERTIFICATION
+        skr::vfs::Remove();
+#endif
         return false;
     }
 
@@ -224,6 +419,9 @@ bool PreloadSamp(const ConnectParams* startup) {
     if (!settings->onlineGame || !sampGame) {
         Log("samp.dll did not open its client bootstrap (g_ModeClient=%d CGame=%p)",
             settings->onlineGame, sampGame);
+#ifdef SKR_TEST_CERTIFICATION
+        skr::vfs::Remove();
+#endif
         return false;
     }
 
@@ -246,6 +444,7 @@ bool PreloadSamp(const ConnectParams* startup) {
     // our gate so StartGame only runs after the player picks a server.
     // The thread cannot reach them yet: GTA is far from state 7.
     const uintptr_t gateAddr = reinterpret_cast<uintptr_t>(&g_startGate);
+
     for (uintptr_t rva : kStartGameCompareRvas) {
         uint8_t* insn = base + rva;
         if (memcmp(insn, kStartGameCompare, sizeof(kStartGameCompare)) != 0) {
@@ -253,6 +452,7 @@ bool PreloadSamp(const ConnectParams* startup) {
             return false;
         }
     }
+
     for (uintptr_t rva : kStartGameCompareRvas) {
         uint8_t* operand = base + rva + 2;
         DWORD old = 0;
@@ -260,6 +460,7 @@ bool PreloadSamp(const ConnectParams* startup) {
         memcpy(operand, &gateAddr, sizeof(uint32_t));
         VirtualProtect(operand, sizeof(uint32_t), old, &old);
     }
+
     FlushInstructionCache(GetCurrentProcess(), base, kR5ImageSize);
 
     g_sampModule = module;
@@ -269,15 +470,18 @@ bool PreloadSamp(const ConnectParams* startup) {
 
 bool LoadSamp(const ConnectParams& params) {
     std::lock_guard<std::mutex> lk(g_loadMutex);
+
     if (g_loaded.load() || !g_sampModule || !params.serverAddress || !params.playerName ||
         !params.serverAddress[0] || !params.playerName[0] || params.serverPort == 0) {
         if (!g_sampModule) Log("connect refused: samp.dll was not preloaded at startup");
         return false;
     }
+
     if (!IsSafeArg(params.serverAddress, true) || !IsSafeArg(params.playerName, false)) {
         Log("connect refused: host or nickname contains unsupported characters");
         return false;
     }
+
     const int gameState = *reinterpret_cast<volatile int*>(kGtaGameState);
     if (gameState != kGtaStateFrontendIdle) {
         Log("connect refused: GTA not idle in the frontend (gGameState=%d)", gameState);
@@ -293,6 +497,17 @@ bool LoadSamp(const ConnectParams& params) {
     g_loaded.store(true);
     g_startGate.store(kGtaStateFrontendIdle);
     Log("connect staged for %s:%u, StartGame released", settings->host, params.serverPort);
+
+#ifdef SKR_TEST_CERTIFICATION
+    // Remove VFS hooks now that SA-MP initialization is complete and the
+    // game is transitioning to gameplay. Resource files are memory-mapped
+    // by this point.
+    if (skr::vfs::IsInstalled()) {
+        skr::vfs::Remove();
+        Log("VFS removed: SA-MP initialization complete, resources loaded");
+    }
+#endif
+
     return true;
 }
 

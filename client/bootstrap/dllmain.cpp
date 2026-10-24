@@ -7,13 +7,21 @@
 #include "render-d3d9/d3d9_hook.h"
 #include "samp-hooks/samp_hooks.h"
 #include "lobby/lobby_manager.h"
+#include "skrx/skrx_client.h"
 #include "skrac/mock_adapter.h"
 #include "skrac/ac_policy.h"
 #include "ipc/launch_params.h"
 #include "samp-loader/samp_loader.h"
 #include "gta-fixes/gta_fixes.h"
 #include "intro/launch_cover.h"
+#include "intro/launch_signals.h"
+#include "gps/gps_engine.h"
 #include "game-state/game_state.h"
+#include "native-pause/native_pause.h"
+#include "bootstrap/init_state.h"
+#ifdef SKR_OP215
+#include "vehicle/custom_vehicle.h"
+#endif
 
 namespace {
     std::atomic<bool> started{false};
@@ -21,7 +29,52 @@ namespace {
     skr::ac::AcPolicyEnforcer* g_acPolicy = nullptr;
     skr::ipc::LaunchParams g_launchParams{};
     bool g_hasLaunchParams = false;
+    skr::bootstrap::InitializationTracker g_initialization;
+    std::atomic<bool> g_monitorShutdown{false};
+    HANDLE g_monitorThread = nullptr;
     LONG CALLBACK CrashTraceHandler(EXCEPTION_POINTERS* info);
+
+    // samp.dll identity for the SAMP_LOADED trace: PE timestamp + image size of
+    // the pinned 0.3.7-R5 build (same values as native-pause/pause_input.cpp).
+    const char* SampBuild() {
+        const auto* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(L"samp.dll"));
+        if (!base) return "samp.dll not loaded";
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0) return "samp.dll unknown";
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+        return nt->Signature == IMAGE_NT_SIGNATURE && nt->FileHeader.TimeDateStamp == 0x6372C39E &&
+               nt->OptionalHeader.SizeOfImage == 0x27E000 ? "samp.dll 0.3.7-R5" : "samp.dll unknown build";
+    }
+
+    DWORD WINAPI InitializationMonitor(LPVOID) {
+        constexpr DWORD kTimeoutMs = 35000;
+        const DWORD startedAt = GetTickCount();
+        while (!g_monitorShutdown.load(std::memory_order_acquire)) {
+            const auto d3d9 = skr::render::GetD3D9HookState();
+            const auto samp = skr::samp_hooks::GetSampHookState();
+            if (d3d9 == skr::bootstrap::ComponentState::FAILED) {
+                g_initialization.Fail(skr::bootstrap::InitializationError::D3D9_HOOK_FAILED);
+                return 1;
+            }
+            if (samp == skr::bootstrap::ComponentState::FAILED) {
+                g_initialization.Fail(skr::bootstrap::InitializationError::SAMP_HOOK_FAILED);
+                return 1;
+            }
+            g_initialization.SetD3D9(d3d9);
+            g_initialization.SetSamp(samp);
+            if (d3d9 == skr::bootstrap::ComponentState::INSTALLED &&
+                samp == skr::bootstrap::ComponentState::INSTALLED) {
+                skr::launch_signals::Signal(skr::ipc::Milestone::SampLoaded, SampBuild());
+                return 0;
+            }
+            if (GetTickCount() - startedAt >= kTimeoutMs) {
+                g_initialization.Fail(skr::bootstrap::InitializationError::INITIALIZATION_TIMEOUT);
+                return 1;
+            }
+            Sleep(25);
+        }
+        return 1;
+    }
 }
 
 extern "C" __declspec(dllexport) BOOL __cdecl SkrUsesExternalHandoff() noexcept {
@@ -29,6 +82,8 @@ extern "C" __declspec(dllexport) BOOL __cdecl SkrUsesExternalHandoff() noexcept 
 }
 extern "C" __declspec(dllexport) BOOL __cdecl SkrInitialize() noexcept {
     if (started.exchange(true)) return TRUE;
+    g_initialization.Begin();
+    g_monitorShutdown.store(false, std::memory_order_release);
 
     // Read launch params from launcher via named pipe.
     // In fake_game / dev mode this may fail — we continue with defaults.
@@ -39,14 +94,19 @@ extern "C" __declspec(dllexport) BOOL __cdecl SkrInitialize() noexcept {
     if (!g_hasLaunchParams || !g_launchParams.serverPort ||
         !memchr(g_launchParams.serverAddress, 0, sizeof(g_launchParams.serverAddress)) ||
         !memchr(g_launchParams.playerName, 0, sizeof(g_launchParams.playerName))) {
+        g_initialization.Fail(skr::bootstrap::InitializationError::LAUNCH_PARAMS_INVALID);
         started.store(false);
         return FALSE;
     }
     skr::samp_loader::ConnectParams selected{g_launchParams.serverAddress,
         g_launchParams.serverPort, g_launchParams.playerName};
-    if (!skr::samp_loader::PreloadSamp(&selected)) { started.store(false); return FALSE; }
-    skr::launch_cover::Configure(g_launchParams.frameReadyHandle, g_launchParams.takeoverHandle,
-                                g_launchParams.sessionReadyHandle);
+    if (!skr::samp_loader::PreloadSamp(&selected)) {
+        g_initialization.Fail(skr::bootstrap::InitializationError::SAMP_PRELOAD_FAILED);
+        started.store(false);
+        return FALSE;
+    }
+    skr::launch_cover::Configure(g_launchParams.frameReadyHandle, g_launchParams.takeoverHandle);
+    skr::launch_signals::Configure(g_launchParams);
 #else
     skr::samp_loader::PreloadSamp();
 #endif
@@ -57,12 +117,21 @@ extern "C" __declspec(dllexport) BOOL __cdecl SkrInitialize() noexcept {
     skr::gta_fixes::InstallGtaFixes();
 
     if (!skr::render::InstallD3D9Hooks()) {
+        g_initialization.Fail(skr::bootstrap::InitializationError::D3D9_THREAD_START_FAILED);
         started.store(false);
         return FALSE;
     }
 
-    skr::samp_hooks::InstallSampHooks();
+    skr::native_pause::Initialize();
+
+    if (!skr::samp_hooks::InstallSampHooks()) {
+        g_initialization.Fail(skr::bootstrap::InitializationError::SAMP_THREAD_START_FAILED);
+        skr::render::RemoveD3D9Hooks();
+        started.store(false);
+        return FALSE;
+    }
     skr::lobby::Initialize();
+    skr::skrx::Init();
 
     static skr::ac::PolicyConfig config{};
     config.mode = skr::ac::AcEnforcement::Development;
@@ -70,11 +139,27 @@ extern "C" __declspec(dllexport) BOOL __cdecl SkrInitialize() noexcept {
     g_acPolicy = &policy;
 
     if (!g_acPolicy->Initialize("dev-session")) {
+        g_initialization.Fail(skr::bootstrap::InitializationError::AC_INITIALIZATION_FAILED);
+        skr::samp_hooks::RemoveSampHooks();
         skr::render::RemoveD3D9Hooks();
         started.store(false);
         return FALSE;
     }
 
+    g_monitorThread = CreateThread(nullptr, 0, &InitializationMonitor, nullptr, 0, nullptr);
+    if (!g_monitorThread) {
+        g_initialization.Fail(skr::bootstrap::InitializationError::MONITOR_THREAD_START_FAILED);
+        g_acPolicy->Shutdown();
+        g_acPolicy = nullptr;
+        skr::samp_hooks::RemoveSampHooks();
+        skr::render::RemoveD3D9Hooks();
+        started.store(false);
+        return FALSE;
+    }
+
+    // Request accepted. Runtime readiness is reported separately and cannot
+    // become HOOKS_INSTALLED until both asynchronous installers complete.
+    skr::launch_signals::Signal(skr::ipc::Milestone::ClientInitialized);
     return TRUE;
 }
 
@@ -90,16 +175,44 @@ extern "C" __declspec(dllexport) DWORD WINAPI SkrRemoteInit(LPVOID) noexcept {
 }
 #pragma comment(linker, "/EXPORT:SkrRemoteInit=_SkrRemoteInit@4")
 
+extern "C" __declspec(dllexport) DWORD WINAPI SkrGetInitializationState(LPVOID) noexcept {
+    return static_cast<DWORD>(g_initialization.GetState());
+}
+#pragma comment(linker, "/EXPORT:SkrGetInitializationState=_SkrGetInitializationState@4")
+
+extern "C" __declspec(dllexport) DWORD WINAPI SkrGetInitializationError(LPVOID) noexcept {
+    return static_cast<DWORD>(g_initialization.GetError());
+}
+#pragma comment(linker, "/EXPORT:SkrGetInitializationError=_SkrGetInitializationError@4")
+
 extern "C" __declspec(dllexport) void __cdecl SkrShutdown() noexcept {
+    g_monitorShutdown.store(true, std::memory_order_release);
+    if (g_monitorThread) {
+        WaitForSingleObject(g_monitorThread, 5000);
+        CloseHandle(g_monitorThread);
+        g_monitorThread = nullptr;
+    }
     if (g_acPolicy) {
         g_acPolicy->Shutdown();
         g_acPolicy = nullptr;
     }
+#ifdef SKR_OP215
+    skr::vehicle::Shutdown();
+#endif
+    skr::native_pause::Shutdown();
+    skr::gps::Shutdown();
     skr::lobby::Shutdown();
     skr::samp_hooks::RemoveSampHooks();
     skr::render::RemoveD3D9Hooks();
+    g_initialization.Reset();
     started.store(false);
 }
+
+extern "C" __declspec(dllexport) DWORD WINAPI SkrRemoteShutdown(LPVOID) noexcept {
+    SkrShutdown();
+    return 0;
+}
+#pragma comment(linker, "/EXPORT:SkrRemoteShutdown=_SkrRemoteShutdown@4")
 
 namespace {
 

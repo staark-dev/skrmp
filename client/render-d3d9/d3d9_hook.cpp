@@ -3,6 +3,7 @@
 #include "intro/launch_cover.h"
 #include "lobby/lobby_manager.h"
 #include "render-d3d9/fps_engine.h"
+#include "render-d3d9/present_chain.h"
 #include "native-pause/native_pause.h"
 #include <atomic>
 #include <algorithm>
@@ -22,8 +23,7 @@ std::atomic<bool> g_hookShutdown{false};
 std::atomic<skr::bootstrap::ComponentState> g_hookState{
     skr::bootstrap::ComponentState::NOT_STARTED};
 HANDLE g_hookThread = nullptr;
-using PresentFn = HRESULT(WINAPI*)(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
-PresentFn g_origPresent = nullptr;
+using present_chain::PresentFn;
 std::atomic<bool> g_cefPresentOwner{false};
 bool g_cefDrewCover = false;
 LARGE_INTEGER g_freq{};
@@ -213,27 +213,32 @@ HRESULT WINAPI HookedReset(IDirect3DDevice9* device, D3DPRESENT_PARAMETERS* pp) 
     return hr;
 }
 
-HRESULT WINAPI HookedPresent(
+// Per-frame SKR work, run once per frame at the outermost Present hook
+// (present_chain.h). `next` is the hooked entry's original.
+HRESULT PresentFrame(
+    PresentFn next,
     IDirect3DDevice9* device,
     const RECT* source,
     const RECT* dest,
     HWND window,
     const RGNDATA* dirty)
 {
-    if (g_cefPresentOwner.load()) return g_origPresent(device, source, dest, window, dirty);
-    const bool inWorld = IsPlayerInGame();
     static ULONGLONG lastDiagnostic = 0;
+    if (GetTickCount64() - lastDiagnostic >= 5000) {
+        lastDiagnostic = GetTickCount64();
+        char message[160]{};
+        sprintf_s(message, "hook Present frames primary=%u rechained=%u owner=%s inWorld=%u",
+                  present_chain::FrameCount(present_chain::Primary),
+                  present_chain::FrameCount(present_chain::Rechained),
+                  g_cefPresentOwner.load() ? "cef" : "skr", IsPlayerInGame() ? 1u : 0u);
+        fps::Trace(message);
+    }
+    if (g_cefPresentOwner.load()) return next(device, source, dest, window, dirty);
+    const bool inWorld = IsPlayerInGame();
 
     const bool drawn = skr::launch_cover::Draw(
         device, inWorld
     );
-    if (GetTickCount64() - lastDiagnostic >= 5000) {
-        lastDiagnostic = GetTickCount64();
-        char message[120]{};
-        sprintf_s(message, "hook Present inWorld=%u cover=%u introFinished=%u",
-                  inWorld ? 1u : 0u, drawn ? 1u : 0u, skr::intro::IsFinished() ? 1u : 0u);
-        fps::Trace(message);
-    }
 
 #ifdef SKR_EXTERNAL_LOBBY
     // Diagnostic: testăm FPS fără condiția SA-MP.
@@ -242,7 +247,7 @@ HRESULT WINAPI HookedPresent(
     }
 #endif
 
-    HRESULT result = g_origPresent(
+    HRESULT result = next(
         device, source, dest, window, dirty
     );
 
@@ -281,7 +286,15 @@ DWORD WINAPI D3D9HookThread(LPVOID) {
 
     bool ok = true;
 #ifdef SKR_EXTERNAL_LOBBY
-    ok &= PatchVtable(g_hookedVtable, 17, reinterpret_cast<void*>(&HookedPresent), reinterpret_cast<void**>(&g_origPresent));
+    {
+        present_chain::SetFrameHandler(&PresentFrame);
+        const auto r = present_chain::Install(g_hookedVtable, present_chain::Primary);
+        char msg[120]{};
+        sprintf_s(msg, "Present hook (primary vtable %p): %s", static_cast<void*>(g_hookedVtable),
+                  present_chain::ToString(r));
+        fps::Trace(msg);
+        ok &= r == present_chain::InstallResult::Installed;
+    }
 #endif
     EndSceneFn initialEndScene = nullptr;
     ResetFn initialReset = nullptr;
@@ -414,6 +427,21 @@ DWORD WINAPI D3D9HookThread(LPVOID) {
         }
     }
 
+#ifdef SKR_EXTERNAL_LOBBY
+    // Re-chain Present: without it the launch cover never completes on the
+    // proxy device and the launcher never receives visual-ready.
+    {
+        void* entry = vtableNow[present_chain::kPresentIndex];
+        const auto r = present_chain::Install(vtableNow, present_chain::Rechained);
+        char msg[200]{};
+        sprintf_s(msg, "D3D9 re-chain: Present %s (entry=%p, now our orig=%p)",
+                  present_chain::ToString(r), entry,
+                  reinterpret_cast<void*>(present_chain::Original(present_chain::Rechained)));
+        fps::Trace(msg);
+        rechained |= r == present_chain::InstallResult::Installed;
+    }
+#endif
+
     // Update the stored vtable pointer (may differ if device changed)
     g_hookedVtable = vtableNow;
 
@@ -469,14 +497,8 @@ void RemoveD3D9Hooks() {
     skr::render::fps::Shutdown();
     skr::intro::Shutdown();
 
+    present_chain::Uninstall();
     if (g_hookedVtable) {
-        if (g_origPresent && g_hookedVtable[17] == reinterpret_cast<void*>(&HookedPresent)) {
-            DWORD old = 0;
-            if (VirtualProtect(&g_hookedVtable[17], sizeof(void*), PAGE_READWRITE, &old)) {
-                g_hookedVtable[17] = reinterpret_cast<void*>(g_origPresent);
-                VirtualProtect(&g_hookedVtable[17], sizeof(void*), old, &old);
-            }
-        }
         EndSceneFn endScene = g_origEndScene.load(std::memory_order_acquire);
         ResetFn reset = g_origReset.load(std::memory_order_acquire);
         if (endScene && g_hookedVtable[kVtableEndScene] == reinterpret_cast<void*>(&HookedEndScene)) {
@@ -497,7 +519,6 @@ void RemoveD3D9Hooks() {
 
     g_origEndScene.store(nullptr, std::memory_order_release);
     g_origReset.store(nullptr, std::memory_order_release);
-    g_origPresent = nullptr;
     g_hookedVtable = nullptr;
     g_hookInstalled.store(false);
     g_hookState.store(skr::bootstrap::ComponentState::NOT_STARTED, std::memory_order_release);

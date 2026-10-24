@@ -1,6 +1,7 @@
 #include "samp-hooks/samp_hooks.h"
 #include "game-state/game_state.h"
 #include "render-d3d9/chat_box.h"
+#include "skrx/skrx_vehicles_client.h"
 #include <atomic>
 #include <cstring>
 
@@ -16,6 +17,8 @@ constexpr uintptr_t kGtaGameState = 0x00C8D4C0;
 HMODULE     g_sampBase   = nullptr;
 HANDLE      g_hookThread = nullptr;
 std::atomic<bool> g_shutdown{false};
+std::atomic<skr::bootstrap::ComponentState> g_hookState{
+    skr::bootstrap::ComponentState::NOT_STARTED};
 
 // ── String patching ─────────────────────────────────────────────────
 // Scan samp.dll's loaded image for exact ASCII strings and replace them
@@ -109,13 +112,15 @@ static size_t GetModuleImageSize(HMODULE mod) {
 constexpr uintptr_t kSkrSignatureAddr  = 0x00B7CE50;
 constexpr uint32_t  kSkrSignatureValue = 0x00524B53; // "SKR\0"
 
-static void WriteSkrSignature() {
+static bool WriteSkrSignature() {
     DWORD oldProt = 0;
     auto* addr = reinterpret_cast<uint32_t*>(kSkrSignatureAddr);
     if (VirtualProtect(addr, 4, PAGE_READWRITE, &oldProt)) {
         *addr = kSkrSignatureValue;
         VirtualProtect(addr, 4, oldProt, &oldProt);
+        return true;
     }
+    return false;
 }
 
 // ── Also patch the "SA-MP" init string in CNetGame ──────────────────
@@ -157,10 +162,10 @@ static bool PatchBytes(uintptr_t addr, const uint8_t* expect, size_t expectLen,
     return true;
 }
 
-static void PatchChatLineLength(uintptr_t base) {
+static bool PatchChatLineLength(uintptr_t base) {
     static const uint8_t kCmpWrap[] = {0x83, 0xF8, 0x48};             // cmp eax, 0x48
     const uint8_t wrap = 0x7F;
-    PatchBytes(base + 0x67CA9, kCmpWrap, sizeof(kCmpWrap), 2, &wrap, 1);
+    return PatchBytes(base + 0x67CA9, kCmpWrap, sizeof(kCmpWrap), 2, &wrap, 1);
 }
 
 // CChat (g_Chat at RVA 0x26EB80): +0xC m_bTimeStamp, +0x63DA m_bNeedsRedraw (chat.md §2).
@@ -178,30 +183,48 @@ static bool EnableChatTimestamps() {
 
 // ── Hook installer thread ───────────────────────────────────────────
 DWORD WINAPI SampHookThread(LPVOID) {
+    g_hookState.store(skr::bootstrap::ComponentState::WAITING, std::memory_order_release);
     // Wait for samp.dll
     for (int i = 0; i < 600 && !g_shutdown.load(); ++i) {
         g_sampBase = GetModuleHandleA("samp.dll");
         if (g_sampBase) break;
         Sleep(50);
     }
-    if (!g_sampBase) return 1;
+    if (!g_sampBase) {
+        g_hookState.store(skr::bootstrap::ComponentState::FAILED, std::memory_order_release);
+        return 1;
+    }
 
     // Patch format strings immediately (before SA-MP uses them)
     size_t imageSize = GetModuleImageSize(g_sampBase);
     uintptr_t sampAddr = reinterpret_cast<uintptr_t>(g_sampBase);
     if (imageSize > 0) {
         ScanAndPatchStrings(sampAddr, imageSize);
-        PatchChatLineLength(sampAddr);
+        if (!PatchChatLineLength(sampAddr)) {
+            g_hookState.store(skr::bootstrap::ComponentState::FAILED, std::memory_order_release);
+            return 1;
+        }
+    } else {
+        g_hookState.store(skr::bootstrap::ComponentState::FAILED, std::memory_order_release);
+        return 1;
     }
 
     // Write SKR signature so the server can identify us via sendClientCheck
-    WriteSkrSignature();
+    if (!WriteSkrSignature()) {
+        g_hookState.store(skr::bootstrap::ComponentState::FAILED, std::memory_order_release);
+        return 1;
+    }
 
     // Wait for SA-MP to finish installing its hooks (game state >= 8)
     auto* pGameState = reinterpret_cast<volatile DWORD*>(kGtaGameState);
+    bool sampReady = false;
     for (int i = 0; i < 600 && !g_shutdown.load(); ++i) {
-        if (*pGameState >= 8) break;
+        if (*pGameState >= 8) { sampReady = true; break; }
         Sleep(50);
+    }
+    if (!sampReady) {
+        g_hookState.store(skr::bootstrap::ComponentState::FAILED, std::memory_order_release);
+        return 1;
     }
 
     // Wait for SA-MP subsystems (CNetGame creation)
@@ -211,13 +234,23 @@ DWORD WINAPI SampHookThread(LPVOID) {
     PatchNetGameSessionName();
 
     // Per-frame game-thread tick (chains whatever is already at the call site)
-    skr::game_state::InstallProcessHook();
+    const bool processHook = skr::game_state::InstallProcessHook();
 
     // Radar DrawMap inside CHud::Draw (RenderWare 2D state, not EndScene)
-    skr::game_state::InstallHudDrawHook();
+    const bool hudHook = skr::game_state::InstallHudDrawHook();
 
     // Panel behind the native SA-MP chat (verified call site, skipped if bytes differ)
-    skr::render::InstallChatBoxHook();
+    const bool chatHook = skr::render::InstallChatBoxHook();
+    if (!processHook || !hudHook || !chatHook) {
+        g_hookState.store(skr::bootstrap::ComponentState::FAILED, std::memory_order_release);
+        return 1;
+    }
+
+    // SKR-X VEHICLES: hook CVehiclePool::Create for proxy→custom model swap.
+    skr::skrx::vehicles::Init();
+    skr::skrx::vehicles::InstallVehiclePoolHook(sampAddr);
+
+    g_hookState.store(skr::bootstrap::ComponentState::INSTALLED, std::memory_order_release);
 
     // Tick loop: re-patch session name periodically
     bool timestampsOn = false;
@@ -233,8 +266,17 @@ DWORD WINAPI SampHookThread(LPVOID) {
 } // anonymous namespace
 
 bool InstallSampHooks() {
+    if (g_hookThread) return false;
+    g_shutdown.store(false, std::memory_order_release);
+    g_hookState.store(skr::bootstrap::ComponentState::WAITING, std::memory_order_release);
     g_hookThread = CreateThread(nullptr, 0, SampHookThread, nullptr, 0, nullptr);
+    if (!g_hookThread)
+        g_hookState.store(skr::bootstrap::ComponentState::FAILED, std::memory_order_release);
     return g_hookThread != nullptr;
+}
+
+skr::bootstrap::ComponentState GetSampHookState() noexcept {
+    return g_hookState.load(std::memory_order_acquire);
 }
 
 void RemoveSampHooks() {
@@ -244,6 +286,8 @@ void RemoveSampHooks() {
         CloseHandle(g_hookThread);
         g_hookThread = nullptr;
     }
+    g_sampBase = nullptr;
+    g_hookState.store(skr::bootstrap::ComponentState::NOT_STARTED, std::memory_order_release);
 }
 
 } // namespace skr::samp_hooks

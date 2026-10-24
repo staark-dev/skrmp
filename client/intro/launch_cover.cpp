@@ -1,13 +1,15 @@
 #include "game-state/game_state.h"
 #include "intro/launch_cover.h"
 #include "lobby/lobby_manager.h"
+#include "intro/launch_signals.h"
 #include "ipc/handoff_trace.h"
 #include <atomic>
 #include <cstring>
 namespace skr::launch_cover {
 namespace {
-HANDLE frameEvent{}, takeoverEvent{}, readyEvent{};
+HANDLE frameEvent{}, takeoverEvent{};
 bool finished = false, completionPending = false, frameReported = false;
+bool completeOnPresent = false;   // completion frame drawn without the cover
 bool worldTraced = false, takeoverTraced = false, netGameTraced = false;
 std::atomic<bool> gameplayConfirmed{false};
 std::atomic<bool> netGameReady{false};
@@ -53,10 +55,9 @@ bool CreateTitle(IDirect3DDevice9* device) {
     return ok;
 }
 }
-void Configure(uint32_t frame, uint32_t takeover, uint32_t ready) {
+void Configure(uint32_t frame, uint32_t takeover) {
     frameEvent = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(frame));
     takeoverEvent = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(takeover));
-    readyEvent = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(ready));
 }
 void BeforeReset() { if (title) { title->Release(); title = nullptr; } }
 bool Draw(IDirect3DDevice9* device, bool worldConnected) {
@@ -92,6 +93,12 @@ bool Draw(IDirect3DDevice9* device, bool worldConnected) {
         char buf[80]; wsprintfA(buf, "COVER-TIMING: takeover at %lu", GetTickCount());
         ipc::TraceHandoff(buf);
     }
+    // Completion frame: present the game, not the cover. Visual-ready is
+    // signalled in Presented() only after this frame is actually presented.
+    if (completionPending) {
+        completeOnPresent = true;
+        return false;
+    }
     if (FAILED(device->TestCooperativeLevel())) return false;
     if (!title && !CreateTitle(device)) return false;
     IDirect3DStateBlock9* saved = nullptr;
@@ -120,22 +127,36 @@ bool Draw(IDirect3DDevice9* device, bool worldConnected) {
     return ok;
 }
 void Presented(bool drewCover, HRESULT result) {
-    if (!drewCover || result != D3D_OK) return;
-    SetEvent(frameEvent);
-    if (!frameReported) { frameReported = true; ipc::TraceHandoff("cover-presented"); }
-    if (completionPending) {
-        finished = true; SetEvent(readyEvent);
-        char buf[80]; wsprintfA(buf, "COVER-TIMING: dismissed at %lu", GetTickCount());
+    if (result != D3D_OK) {
+        if (completeOnPresent && !finished) {
+            char buf[96]; wsprintfA(buf, "COVER: completion frame Present failed hr=0x%08lX, retrying", result);
+            ipc::TraceHandoff(buf);
+            completeOnPresent = false;   // Draw() re-arms it on the next frame
+        }
+        return;
+    }
+    if (drewCover) {
+        SetEvent(frameEvent);
+        if (!frameReported) { frameReported = true; ipc::TraceHandoff("cover-presented"); }
+    }
+    if (completeOnPresent && !finished) {
+        finished = true;
+        completeOnPresent = false;
+        char buf[80];
+        wsprintfA(buf, "COVER-TIMING: dismissed at %lu", GetTickCount());
         ipc::TraceHandoff(buf);
+        launch_signals::Signal(ipc::Milestone::VisualReady, "after presented frame");
         BeforeReset();
     }
 }
 void MarkGameplayConfirmed() {
-    if (!gameplayConfirmed.exchange(true, std::memory_order_relaxed))
-        ipc::TraceHandoff("LAUNCH-COVER: gameplayConfirmed = true");
+    if (gameplayConfirmed.exchange(true, std::memory_order_relaxed)) return;
+    ipc::TraceHandoff("LAUNCH-COVER: gameplayConfirmed = true");
+    launch_signals::Signal(ipc::Milestone::GameplayConfirmed, "in world, independent of Present");
 }
 void MarkNetGameReady() {
-    if (!netGameReady.exchange(true, std::memory_order_relaxed))
-        ipc::TraceHandoff("LAUNCH-COVER: netGameReady = true (CNetGame exists)");
+    if (netGameReady.exchange(true, std::memory_order_relaxed)) return;
+    ipc::TraceHandoff("LAUNCH-COVER: netGameReady = true (CNetGame exists)");
+    launch_signals::Signal(ipc::Milestone::SampReady, "CNetGame created");
 }
 }

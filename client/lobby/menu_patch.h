@@ -3,17 +3,14 @@
 
 // GTA SA 1.0 US main-menu neutralisation.
 //
-// Provenance (DK22Pac/plugin-sdk, GAME_10US_COMPACT meta files, confirmed
-// against gta-reversed-modern/source/game_sa/Menu/CMenuManager.cpp):
+// Canonical Hoodlum profile evidence (SHA-256 A559AA77...45CBD26):
 //   FrontEndMenuManager singleton         = 0x00BA6748
 //   CMenuManager::Process()      __thiscall @ 0x0057B440   (void())
-//   CMenuManager::DrawFrontEnd() __thiscall @ 0x0057B210   (void())
 //
-// Both methods take only `this` in ECX on x86 __thiscall and return void
-// with no stack args, so overwriting the first byte with 0xC3 (near ret)
-// gives a clean return to the caller. Phase 1 live test showed the previous
-// strict prologue allowlist refused to patch — the diagnostic struct below
-// now reports the actual first byte so the exact mismatch is visible.
+// 0x0057B210 is inside an instruction in the preceding routine, not a
+// DrawFrontEnd entry. It must never be patched. Process is suppressed with a
+// one-byte near return only after an exact profile signature and executable
+// section validation succeed.
 
 namespace skr::lobby {
 
@@ -26,11 +23,11 @@ struct MenuPatchStatus {
         bool        alreadyPatched; // 0xC3 was already there (we didn't write)
         const char* reason;         // nullptr on success; else short English reason
     };
-    Entry entries[2];
+    Entry entries[1];
     int   count;
 };
 
-// Returns true when every site is now 0xC3 (patched or already-patched).
+// Returns true when the canonical Process site is now 0xC3.
 // Writes a per-site report into `out`. Call once per frame until true; the
 // caller is expected to log on first success / first permanent failure.
 bool PatchGtaMainMenu(MenuPatchStatus& out);

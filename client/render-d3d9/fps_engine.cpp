@@ -82,6 +82,14 @@ void Initialize() {
               g_preferences.showCounter ? 1u : 0u, g_preferences.cap, g_frequency.QuadPart);
     Trace(message);
 }
+void ReloadPreferences() {
+    g_preferences = performance::LoadFpsSettings();
+    g_lastPaced = {};
+    char message[96]{};
+    sprintf_s(message, "fps preferences reloaded show=%u cap=%u",
+              g_preferences.showCounter ? 1u : 0u, g_preferences.cap);
+    Trace(message);
+}
 void BeforeReset() {
     g_savedState.Reset(); g_windowStart = {}; g_lastPaced = {}; g_presentCount = 0;
     Trace("fps reset resources released; sampling restarted");
