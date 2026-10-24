@@ -64,3 +64,23 @@ nul
 
 # Generated reference documents (not source)
 NATIVE_RADAR_HUD_REFERENCE.md
+
+# Compiled Pawn bytecode (source .pwn is committed; .amx is not)
+*.amx
+
+# Git bundles and backup copies
+*.bundle
+*.bak
+
+# GTA IMG archives (binary vehicle/asset packs)
+*.img
+
+# Development previews (screenshots, renders — large binary blobs)
+docs/gps-previews/
+docs/phone-previews/
+
+# Agent context documents (project-specific, not CLAUDE.md/AGENTS.md)
+docs/AGENT_CONTEXT.md
+
+# Op215 evidence logs (runtime output)
+assets/op215/evidence/
