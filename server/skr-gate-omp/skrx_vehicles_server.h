@@ -46,6 +46,22 @@ struct PlayerBinding {
     bool     ready;               // player confirmed model loaded
 };
 
+// ── VehicleReady validation result ──────────────────────────────────
+
+enum class ReadyResult : uint8_t {
+    Accepted = 0,     // binding set ready for the current generation
+    Duplicate,        // already ready for this generation (idempotent)
+    NotReady,         // status != 0: binding cleared for this generation
+    InvalidPlayer,
+    InvalidStatus,
+    InvalidModel,     // not a registered custom model
+    UnknownVehicle,   // pool ID not tracked as custom
+    ModelMismatch,
+    StaleGeneration,
+};
+
+const char* ReadyResultName(ReadyResult result);
+
 // ── Vehicle Manager ─────────────────────────────────────────────────
 
 class VehicleManager {
@@ -96,10 +112,15 @@ public:
 
     // ── Per-player binding ──────────────────────────────────────────
 
-    void OnPlayerReady(int playerId, int vehiclePoolId, uint16_t customModelId,
-                       uint32_t generation, uint8_t status);
+    // Readiness is per player and per vehicle instance: it must match the
+    // tracked pool ID, custom model and current generation.
+    ReadyResult OnPlayerReady(int playerId, int vehiclePoolId, uint16_t customModelId,
+                              uint32_t generation, uint8_t status);
 
     bool IsPlayerReady(int playerId, int vehiclePoolId) const;
+
+    // Vehicle streamed out for this player: the client destroyed its instance.
+    void ClearPlayerVehicle(int playerId, int vehiclePoolId);
 
     void ForgetPlayer(int playerId);
 

@@ -70,6 +70,32 @@ static void Log(const char* fmt, ...) {
 // ── State ──────────────────────────────────────────────────────────
 VehiclesClientState g_state;
 
+VehicleAssignment* FindAssignment(uint16_t vehiclePoolId) {
+    for (int i = 0; i < g_state.assignCount; ++i) {
+        auto& a = g_state.assignments[i];
+        if (a.active && a.vehiclePoolId == vehiclePoolId) return &a;
+    }
+    return nullptr;
+}
+
+void ClearReady(VehicleAssignment& a) {
+    a.readyPending = false;
+    a.readyStatus = 0;
+    a.readyAttempts = 0;
+    a.readyAcked = false;
+}
+
+// Called from the Create hook (inside samp.dll's RPC handler): only records
+// the acknowledgment; Tick() sends it on the next game tick. Every custom
+// creation is acknowledged (the server clears readiness on stream-out);
+// a proxy creation only retracts an earlier acknowledgment.
+void QueueReady(VehicleAssignment& a, uint8_t status) {
+    if (status != 0 && !a.readyAcked) return;
+    a.readyPending = true;
+    a.readyStatus = status;
+    a.readyAttempts = 0;
+}
+
 // ── CVehiclePool::Create hook ──────────────────────────────────────
 // samp.dll R5 RVA 0x1F080: BOOL __thiscall CVehiclePool::Create(VehicleInfo* pInfo)
 // __thiscall: ECX = CVehiclePool*, stack arg = VehicleInfo*, returns via RET 4.
@@ -116,6 +142,9 @@ static bool IsModelStreamedIn(int modelId) {
 }
 
 int __fastcall HookedCreate(void* thisPtr, void* /*edx*/, void* pInfo) {
+    uint16_t readyPool = 0;
+    bool readyTracked = false;   // vehicle has a custom assignment
+    bool readyApplied = false;   // created as the custom model (not the proxy)
     if (pInfo) {
         auto* info = static_cast<uint8_t*>(pInfo);
 
@@ -143,6 +172,9 @@ int __fastcall HookedCreate(void* thisPtr, void* /*edx*/, void* pInfo) {
             }
 #endif
 
+            readyPool = poolId;
+            readyTracked = true;
+            readyApplied = modelReady;
             if (modelReady) {
                 *reinterpret_cast<int32_t*>(info + kVI_Type) = static_cast<int32_t>(customModel);
                 ++g_state.swapCount;
@@ -160,7 +192,17 @@ int __fastcall HookedCreate(void* thisPtr, void* /*edx*/, void* pInfo) {
         Log("HOOK exit pool=%d tick=%lu", poolId, GetTickCount());
     }
 
-    return reinterpret_cast<CreateOrigFn>(g_trampoline)(thisPtr, pInfo);
+    const int created = reinterpret_cast<CreateOrigFn>(g_trampoline)(thisPtr, pInfo);
+
+    // VehicleReady only after samp.dll actually created this instance, and
+    // only for the custom model; a proxy creation retracts an earlier ack.
+    if (readyTracked) {
+        if (VehicleAssignment* a = FindAssignment(readyPool)) {
+            if (created && readyApplied) QueueReady(*a, 0);
+            else QueueReady(*a, 2);
+        }
+    }
+    return created;
 }
 
 // ── Trampoline construction ────────────────────────────────────────
@@ -248,14 +290,11 @@ static bool SendVehicleReady(uint16_t poolId, uint16_t customModel,
     size_t total = EncodeVehiclesGateway(VehicleOp::VehicleReady, inner, innerLen, buf, sizeof(buf));
     if (!total) return false;
 
-    // SendOnRpc240 is internal to skrx_client.cpp — use the gateway send path.
-    // For now, the ready acknowledgement is logged but not sent until
-    // the send path is exposed.  This is a known M2.1-B limitation.
-    // TODO: expose SendOnRpc240 or add a SendGateway public API.
-    ++g_state.readySentCount;
-    Log("VehicleReady pool=%d model=%d gen=%u status=%u (queued, count=%d)",
-        poolId, customModel, generation, status, g_state.readySentCount);
-    return true;
+    const bool sent = skr::skrx::SendGateway(buf, total);
+    if (sent) ++g_state.readySentCount;
+    Log("VehicleReady pool=%d model=%d gen=%u status=%u %s count=%d",
+        poolId, customModel, generation, status, sent ? "sent" : "send-failed", g_state.readySentCount);
+    return sent;
 }
 
 // ── VEHICLES namespace message handlers ────────────────────────────
@@ -316,6 +355,8 @@ void OnVehicleAssign(const uint8_t* data, size_t len) {
     for (int i = 0; i < g_state.assignCount; ++i) {
         auto& a = g_state.assignments[i];
         if (a.active && a.vehiclePoolId == assign.vehiclePoolId) {
+            if (a.customModelId != assign.customModelId || a.generation != assign.generation)
+                ClearReady(a);   // reassignment: an older ack must not carry over
             a.customModelId = assign.customModelId;
             a.generation    = assign.generation;
             Log("VehicleAssign update pool=%d model=%d gen=%u",
@@ -327,6 +368,7 @@ void OnVehicleAssign(const uint8_t* data, size_t len) {
     for (int i = 0; i < g_state.assignCount; ++i) {
         if (!g_state.assignments[i].active) {
             auto& a = g_state.assignments[i];
+            ClearReady(a);
             a.vehiclePoolId = assign.vehiclePoolId;
             a.customModelId = assign.customModelId;
             a.generation    = assign.generation;
@@ -360,6 +402,7 @@ void OnVehicleRevoke(const uint8_t* data, size_t len) {
         auto& a = g_state.assignments[i];
         if (a.active && a.vehiclePoolId == poolId) {
             a.active = false;
+            ClearReady(a);
             Log("VehicleRevoke pool=%d", poolId);
             return;
         }
@@ -394,6 +437,7 @@ void OnVehicleRespawn(const uint8_t* data, size_t len) {
     for (int i = 0; i < g_state.assignCount; ++i) {
         auto& a = g_state.assignments[i];
         if (a.active && a.vehiclePoolId == poolId) {
+            if (a.generation != generation) ClearReady(a);
             a.generation = generation;
             Log("VehicleRespawn pool=%d gen=%u", poolId, generation);
             return;
@@ -422,6 +466,21 @@ void Reset() {
     g_state.readySentCount = 0;
     for (auto& m : g_state.models) m = {};
     for (auto& a : g_state.assignments) a = {};
+}
+
+void Tick() {
+    constexpr uint8_t kMaxReadyAttempts = 3;
+    for (int i = 0; i < g_state.assignCount; ++i) {
+        auto& a = g_state.assignments[i];
+        if (!a.active || !a.readyPending) continue;
+        if (SendVehicleReady(a.vehiclePoolId, a.customModelId, a.generation, a.readyStatus)) {
+            a.readyAcked = a.readyStatus == 0;
+            a.readyPending = false;
+        } else if (++a.readyAttempts >= kMaxReadyAttempts) {
+            a.readyPending = false;   // gateway gone; Reset() follows on disconnect
+            a.readyAcked = false;
+        }
+    }
 }
 
 VehiclesClientState& GetState() { return g_state; }

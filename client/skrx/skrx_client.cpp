@@ -150,6 +150,7 @@ void Reset() {
             g_state.lastRttMs, g_state.pingCount, g_state.pongCount,
             g_state.timeoutCount, g_state.unsolicitedPongCount, g_state.stalePongCount);
     FlushLog();
+    skr::skrx::vehicles::Reset();   // assignments and acks belong to the old session
     g_state = {};
     s_rakClient = nullptr;
     s_rakVtbl = nullptr;
@@ -178,7 +179,13 @@ void Tick() {
                 g_state.lastPingSentMs, now - g_state.lastPingSentMs, g_state.timeoutCount);
         }
     }
+    skr::skrx::vehicles::Tick();   // VehicleReady acks queued by the CVehiclePool hook
     FlushLog();
+}
+
+bool SendGateway(const uint8_t* data, size_t len) {
+    if (!g_state.gatewayReady || !data || !len) return false;
+    return SendOnRpc240(data, len);
 }
 
 void OnGatewayMessage(const uint8_t* data, size_t len) {

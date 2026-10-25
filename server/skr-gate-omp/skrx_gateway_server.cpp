@@ -131,10 +131,22 @@ void SkrGateComponent::OnGatewayVehiclesMessage(IPlayer& player, const GatewayHe
             core_->logLn(LogLevel::Warning, "SKR-X VEHICLES: player %d: bad VehicleReady", player.getID());
             return;
         }
-        vehicleManager_.OnPlayerReady(player.getID(), ready.vehiclePoolId,
-                                      ready.customModelId, ready.generation, ready.status);
-        core_->logLn(LogLevel::Message, "SKR-X VEHICLES: player %d: ready for vehicle %d (model=%d gen=%u status=%u)",
-                     player.getID(), ready.vehiclePoolId, ready.customModelId, ready.generation, ready.status);
+        // A late ack for an instance this player no longer has streamed in
+        // (stream-out already processed) must not mark the vehicle ready.
+        IVehicle* vehicle = vehiclesComp_ ? vehiclesComp_->get(ready.vehiclePoolId) : nullptr;
+        if (ready.status == 0 && (!vehicle || !vehicle->isStreamedInForPlayer(player))) {
+            vehicleManager_.ClearPlayerVehicle(player.getID(), ready.vehiclePoolId);
+            core_->logLn(LogLevel::Warning, "SKR-X VEHICLES: player %d: VehicleReady vehicle=%d gen=%u -> not-streamed-in",
+                         player.getID(), ready.vehiclePoolId, ready.generation);
+            break;
+        }
+        const auto result = vehicleManager_.OnPlayerReady(player.getID(), ready.vehiclePoolId,
+                                                          ready.customModelId, ready.generation, ready.status);
+        core_->logLn(result == vehicles::ReadyResult::Accepted || result == vehicles::ReadyResult::Duplicate
+                         ? LogLevel::Message : LogLevel::Warning,
+                     "SKR-X VEHICLES: player %d: VehicleReady vehicle=%d model=%d gen=%u status=%u -> %s",
+                     player.getID(), ready.vehiclePoolId, ready.customModelId, ready.generation, ready.status,
+                     vehicles::ReadyResultName(result));
         break;
     }
     default:
@@ -274,6 +286,12 @@ void SkrGateComponent::onVehicleStreamIn(IVehicle& vehicle, IPlayer& player) {
     ApiSend(player, buf, total);
     core_->logLn(LogLevel::Message, "skrx vehicles: bind player=%d vehicleid=%d model=%d generation=%u",
                  pid, vehicleId, customModel, slot->generation);
+}
+
+// The client destroys its instance on stream-out; readiness must be
+// re-acknowledged by the next instance it creates.
+void SkrGateComponent::onVehicleStreamOut(IVehicle& vehicle, IPlayer& player) {
+    vehicleManager_.ClearPlayerVehicle(player.getID(), vehicle.getID());
 }
 
 } // namespace skr::gate_omp

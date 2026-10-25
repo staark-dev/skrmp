@@ -47,4 +47,8 @@ SkrXState& GetState();
 void OnGatewayMessage(const uint8_t* data, size_t len);
 bool SendPing();
 
+// Sends an already-encoded gateway envelope (RPC 240, step 10).
+// Rejected when the gateway capability is not negotiated. Main thread only.
+bool SendGateway(const uint8_t* data, size_t len);
+
 } // namespace skr::skrx

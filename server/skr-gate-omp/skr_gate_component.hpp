@@ -251,7 +251,7 @@ public:
 
     // VehicleEventHandler
     void onVehicleStreamIn(IVehicle& vehicle, IPlayer& player) override;
-    void onVehicleStreamOut(IVehicle& vehicle, IPlayer& player) override {}
+    void onVehicleStreamOut(IVehicle& vehicle, IPlayer& player) override;
     vehicles::VehicleManager& GetVehicleManager() { return vehicleManager_; }
     IVehiclesComponent* GetVehiclesComponent() const { return vehiclesComp_; }
 

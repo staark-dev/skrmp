@@ -107,6 +107,7 @@ bool VehicleManager::UntrackVehicle(int vehiclePoolId) {
         if (vehicles_[i].vehiclePoolId == vehiclePoolId && vehicles_[i].alive) {
             vehicles_[i] = vehicles_[vehicleCount_ - 1];
             --vehicleCount_;
+            for (auto& [pid, bindings] : playerBindings_) bindings.erase(vehiclePoolId);  // pool ID may be reused
             return true;
         }
     }
@@ -152,17 +153,43 @@ int VehicleManager::FillActiveVehicles(proto::VehicleAssignData* out, int maxEnt
 
 // ── Per-player binding ──────────────────────────────────────────────
 
-void VehicleManager::OnPlayerReady(int playerId, int vehiclePoolId,
-                                   uint16_t customModelId, uint32_t generation,
-                                   uint8_t status) {
+const char* ReadyResultName(ReadyResult result) {
+    switch (result) {
+    case ReadyResult::Accepted:        return "accepted";
+    case ReadyResult::Duplicate:       return "duplicate";
+    case ReadyResult::NotReady:        return "not-ready";
+    case ReadyResult::InvalidPlayer:   return "invalid-player";
+    case ReadyResult::InvalidStatus:   return "invalid-status";
+    case ReadyResult::InvalidModel:    return "invalid-model";
+    case ReadyResult::UnknownVehicle:  return "unknown-vehicle";
+    case ReadyResult::ModelMismatch:   return "model-mismatch";
+    case ReadyResult::StaleGeneration: return "stale-generation";
+    }
+    return "?";
+}
+
+ReadyResult VehicleManager::OnPlayerReady(int playerId, int vehiclePoolId,
+                                          uint16_t customModelId, uint32_t generation,
+                                          uint8_t status) {
+    if (playerId < 0) return ReadyResult::InvalidPlayer;
+    if (status > 2) return ReadyResult::InvalidStatus;
+    if (!IsCustomModel(customModelId)) return ReadyResult::InvalidModel;
     const auto* v = FindVehicle(vehiclePoolId);
-    if (!v) return;
-    if (v->customModelId != customModelId) return;
-    if (v->generation != generation) return;
+    if (!v) return ReadyResult::UnknownVehicle;
+    if (v->customModelId != customModelId) return ReadyResult::ModelMismatch;
+    if (v->generation != generation) return ReadyResult::StaleGeneration;
 
     auto& binding = playerBindings_[playerId][vehiclePoolId];
+    const bool wasReady = binding.ready && binding.generation == generation;
     binding.generation = generation;
     binding.ready = (status == 0);
+    if (status != 0) return ReadyResult::NotReady;
+    return wasReady ? ReadyResult::Duplicate : ReadyResult::Accepted;
+}
+
+void VehicleManager::ClearPlayerVehicle(int playerId, int vehiclePoolId) {
+    auto pit = playerBindings_.find(playerId);
+    if (pit != playerBindings_.end()) pit->second.erase(vehiclePoolId);
 }
 
 bool VehicleManager::IsPlayerReady(int playerId, int vehiclePoolId) const {

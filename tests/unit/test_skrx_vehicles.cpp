@@ -322,6 +322,70 @@ static void TestPlayerBindings() {
     CHECK(!mgr.IsPlayerReady(0, 42), "forget-player");
 }
 
+// T03-M1: VehicleReady validation results and per-client lifecycle.
+static void TestReadyLifecycle() {
+    using skr::gate_omp::vehicles::ReadyResult;
+    VehicleManager mgr;
+    mgr.RegisterModel(612, 400, 400, "skr_xc60", nullptr, 4);
+    mgr.RegisterModel(613, 475, 475, "skr_m4gts", nullptr, 2);
+    mgr.RegisterModel(614, 560, 560, "skr_rs6", nullptr, 4);
+    const uint32_t gen = mgr.TrackVehicle(2, 612);
+    const uint32_t gen614 = mgr.TrackVehicle(5, 614);
+
+    CHECK(mgr.OnPlayerReady(0, 2, 612, gen, 0) == ReadyResult::Accepted, "accept");
+    CHECK(mgr.OnPlayerReady(0, 2, 612, gen, 0) == ReadyResult::Duplicate, "duplicate-idempotent");
+    CHECK(mgr.IsPlayerReady(0, 2), "duplicate-keeps-ready");
+
+    // Per client: player 1 has not acknowledged.
+    CHECK(!mgr.IsPlayerReady(1, 2), "per-client-not-shared");
+    CHECK(mgr.OnPlayerReady(1, 2, 612, gen, 0) == ReadyResult::Accepted, "second-client-accept");
+
+    // Field validation.
+    CHECK(mgr.OnPlayerReady(-1, 2, 612, gen, 0) == ReadyResult::InvalidPlayer, "invalid-player");
+    CHECK(mgr.OnPlayerReady(2, 2, 612, gen, 3) == ReadyResult::InvalidStatus, "invalid-status");
+    CHECK(mgr.OnPlayerReady(2, 2, 400, gen, 0) == ReadyResult::InvalidModel, "stock-model-rejected");
+    CHECK(mgr.OnPlayerReady(2, 2, 700, gen, 0) == ReadyResult::InvalidModel, "unregistered-model-rejected");
+    CHECK(mgr.OnPlayerReady(2, 9, 612, gen, 0) == ReadyResult::UnknownVehicle, "unknown-vehicle");
+    CHECK(mgr.OnPlayerReady(2, 2, 613, gen, 0) == ReadyResult::ModelMismatch, "model-mismatch");
+    CHECK(mgr.OnPlayerReady(2, 2, 612, gen + 100, 0) == ReadyResult::StaleGeneration, "stale-generation");
+    CHECK(!mgr.IsPlayerReady(2, 2), "rejections-not-ready");
+
+    // 614 kept as proxy: the client never acknowledges, so never ready.
+    CHECK(!mgr.IsPlayerReady(0, 5), "614-proxy-not-ready");
+    CHECK(mgr.OnPlayerReady(0, 5, 614, gen614, 1) == ReadyResult::NotReady, "614-asset-missing");
+    CHECK(!mgr.IsPlayerReady(0, 5), "614-still-not-ready");
+
+    // Retraction (re-created as proxy) clears readiness.
+    CHECK(mgr.OnPlayerReady(1, 2, 612, gen, 2) == ReadyResult::NotReady, "retract");
+    CHECK(!mgr.IsPlayerReady(1, 2), "retract-clears");
+    CHECK(mgr.IsPlayerReady(0, 2), "retract-only-that-client");
+
+    // Stream-out clears only that client's binding.
+    mgr.ClearPlayerVehicle(0, 2);
+    CHECK(!mgr.IsPlayerReady(0, 2), "stream-out-clears");
+    CHECK(mgr.OnPlayerReady(0, 2, 612, gen, 0) == ReadyResult::Accepted, "stream-in-reack");
+
+    // Respawn: old generation stale.
+    const uint32_t gen2 = mgr.RespawnVehicle(2);
+    CHECK(!mgr.IsPlayerReady(0, 2), "respawn-stale");
+    CHECK(mgr.OnPlayerReady(0, 2, 612, gen, 0) == ReadyResult::StaleGeneration, "old-gen-after-respawn");
+    CHECK(mgr.OnPlayerReady(0, 2, 612, gen2, 0) == ReadyResult::Accepted, "new-gen-accepted");
+
+    // Destroy + pool ID reuse: no binding survives.
+    mgr.UntrackVehicle(2);
+    CHECK(!mgr.IsPlayerReady(0, 2), "destroy-clears");
+    const uint32_t gen3 = mgr.TrackVehicle(2, 613);
+    CHECK(gen3 != gen2, "reuse-new-generation");
+    CHECK(!mgr.IsPlayerReady(0, 2), "reuse-not-ready");
+    CHECK(mgr.OnPlayerReady(0, 2, 612, gen2, 0) == ReadyResult::ModelMismatch, "reuse-old-ack-rejected");
+    CHECK(mgr.OnPlayerReady(0, 2, 613, gen2, 0) == ReadyResult::StaleGeneration, "reuse-old-gen-rejected");
+
+    // Disconnect / session change.
+    CHECK(mgr.OnPlayerReady(0, 2, 613, gen3, 0) == ReadyResult::Accepted, "reuse-accept");
+    mgr.ForgetPlayer(0);
+    CHECK(!mgr.IsPlayerReady(0, 2), "disconnect-clears");
+}
+
 static void TestFillRegistryEntries() {
     VehicleManager mgr;
     mgr.RegisterModel(612, 400, 400, "skr_xc60", nullptr, 4);
@@ -392,6 +456,7 @@ int main() {
     TestModelRegistration();
     TestVehicleLifecycle();
     TestPlayerBindings();
+    TestReadyLifecycle();
     TestFillRegistryEntries();
     TestCapacityLimits();
     TestReset();

@@ -25,6 +25,11 @@ struct VehicleAssignment {
     uint16_t customModelId  = 0;
     uint32_t generation     = 0;
     bool     active         = false;
+    // VehicleReady (Op 4): queued by the Create hook, sent from Tick().
+    bool     readyPending   = false;
+    uint8_t  readyStatus    = 0;     // 0 = custom model applied, 2 = re-created as proxy
+    uint8_t  readyAttempts  = 0;
+    bool     readyAcked     = false; // last sent status was 0 for this generation
 };
 
 struct VehiclesClientState {
@@ -42,6 +47,9 @@ struct VehiclesClientState {
 
 bool Init();
 void Reset();
+
+// Sends queued VehicleReady acknowledgments (called from skrx::Tick, game thread).
+void Tick();
 
 VehiclesClientState& GetState();
 
