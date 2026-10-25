@@ -176,5 +176,4 @@ On the user's Desktop (can be deleted at any time):
 - Do not publish omp-cef local commits to upstream (aurora-mp/omp-cef)
 - `server-runtime/` and `C:\Users\Staark\Desktop\SKR-Backups\` are protected
 - `config.json` RCON password `skrdev2026` must NEVER be in a release package
-- No Co-Authored-By: Claude trailers in new commits
 - Do not start Task #20B/#20C or Next Gen development

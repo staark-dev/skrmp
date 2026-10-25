@@ -2,7 +2,7 @@
 ## SKR Enhanced Client 1.0.0
 
 **Date:** 2026-10-22  
-**Author:** Claude (automated analysis) + Ionut (project lead)  
+**Author:** Ionut (project lead)  
 **Scope:** SA-MP runtime distribution, dependencies, packaging & validation
 
 ---
