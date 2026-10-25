@@ -952,7 +952,14 @@ void Tick() {
         static bool s_op215Init = false;
         if (!s_op215Init) {
             s_op215Init = true;
+            char dm[128];
+            snprintf(dm, sizeof(dm), "OP215 init enter tid=%lu tick=%lu",
+                     GetCurrentThreadId(), GetTickCount());
+            LogDiag("OP215Init", dm);
             skr::vehicle::Initialize();
+            snprintf(dm, sizeof(dm), "OP215 init done tick=%lu",
+                     GetTickCount());
+            LogDiag("OP215Init", dm);
         }
         skr::vehicle::Tick();
     }

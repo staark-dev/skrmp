@@ -2,10 +2,16 @@
 // OP215 — SKR Enhanced Custom Vehicle System (Runtime)
 // ─────────────────────────────────────────────────────────────────────
 // GTA SA 1.0 US (x86).  All addresses verified against plugin-sdk /
-// gta-reversed.  The module runs on the GTA thread only.
+// gta-reversed / SKR-EXP-001.  The module runs on the GTA thread only.
+//
+// Models are registered before the first frame by Operation 215
+// (operation215/native_vehicle_registration, SAMP\CUSTOM.IMG, native scanner).
+// This file reads that result, queues non-blocking requests through it and
+// tracks load state for diagnostics and the F9 test spawn.
 // ─────────────────────────────────────────────────────────────────────
 
 #include "vehicle/custom_vehicle.h"
+#include "operation215/native_vehicle_registration.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -15,6 +21,7 @@
 #include <cmath>
 
 namespace skr::vehicle {
+namespace registration = skr::operation215;
 namespace {
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -22,89 +29,32 @@ namespace {
 // ═══════════════════════════════════════════════════════════════════════
 
 // CStreaming
-constexpr uintptr_t kAddImageToList         = 0x407610;  // int __cdecl(const char*, bool)
-constexpr uintptr_t kRequestModel           = 0x4087E0;  // void __cdecl(int, int)
-constexpr uintptr_t kLoadAllRequestedModels = 0x40EA10;  // void __cdecl(bool)
 constexpr uintptr_t kHasModelLoaded         = 0x4044C0;  // bool __cdecl(int)
-constexpr uintptr_t kRemoveModel            = 0x4089A0;  // void __cdecl(int)
 constexpr uintptr_t kStreamingInfoArray     = 0x8E4CC0;  // CStreamingInfo[26316]
 constexpr int kStreamingInfoSize            = 20;        // sizeof(CStreamingInfo)
+constexpr int kSI_LoadState                 = 0x10;      // plugin-sdk VALIDATE_OFFSET
 
-// CModelInfo
-constexpr uintptr_t kModelInfoPtrs          = 0xA9B0C8;  // CBaseModelInfo*[20000]
-
-// CTxdStore
-constexpr uintptr_t kTxdAddSlot             = 0x731C80;  // int __cdecl(const char*)
-constexpr uintptr_t kTxdFindSlot            = 0x731850;  // int __cdecl(const char*)
-constexpr uintptr_t kTxdAddRef              = 0x731A00;  // void __cdecl(int)
-constexpr uintptr_t kTxdSetCurrent          = 0x7319C0;  // void __cdecl(int)
-constexpr uintptr_t kTxdRemoveSlot          = 0x731CD0;  // void __cdecl(int)
-
-// CWorld
-constexpr uintptr_t kWorldAdd               = 0x563220;  // void __cdecl(CEntity*)
+// Native vehicle construction (SKR-EXP-001 native_vehicle_spawn.cpp, D3/D5)
+constexpr uintptr_t kVehicleNew             = 0x6E2D50;  // CVehicle::operator new(size) -> vehicle pool
+constexpr uintptr_t kAutomobileCtor         = 0x6B0A90;  // CAutomobile(this, model, createdBy, setupSuspension)
+constexpr uintptr_t kSetHeading             = 0x43E0C0;  // CPlaceable::SetHeading(this, float)
+constexpr uintptr_t kUpdateRW               = 0x446F90;  // CEntity::UpdateRW(this)
+constexpr uintptr_t kUpdateRwFrame          = 0x532B00;  // CEntity::UpdateRwFrame(this)
+constexpr uintptr_t kWorldAdd               = 0x563220;  // CWorld::Add(entity)
+constexpr uintptr_t kFindGroundZ            = 0x5696C0;  // CWorld::FindGroundZFor3DCoord
+constexpr int kAutomobileSize               = 0x988;
+constexpr uint8_t kCreatedByMission         = 2;
+constexpr uint8_t kStatusAbandonedBits      = 0x20;      // (status << 3) at +0x36
+constexpr size_t kVtableSetIsStatic         = 4;
+constexpr size_t kVtableBaseHeight          = 53;        // CAutomobile::GetHeightAboveRoad
 
 // Player position: CWorld::Players[0].m_pPed -> matrix -> pos
 constexpr uintptr_t kPlayersPed             = 0xB7CD98;
 
-// CAutomobile constructor (thiscall: ECX = this, args on stack)
-constexpr uintptr_t kAutomobileCtor         = 0x6B0A90;  // void __thiscall(int modelId, uint8_t createdBy)
-constexpr int kAutomobileSize               = 0x988;     // sizeof(CAutomobile)
+constexpr DWORD kSpawnWaitMs                = 15000;     // F9: give up waiting for the stream
+constexpr DWORD kStallWarnMs                = 10000;     // request still pending -> log once
 
-// CVehicleModelInfo — size 0x308.
-// Key offsets within CVehicleModelInfo:
-//   0x00: vtable
-//   0x04: hashKey (uint32)
-//   0x0A: texDictionary (int16) — TXD slot index
-//   0x0E: objectNumber (uint16) — model ID
-//   0x14: colModel (CColModel*)
-//   0x20: rwObject (RpClump*)
-// Vehicle-specific (varies by game version):
-//   0x30C: vehicleType (uint32) — 0=car, 5=bike, etc.
-constexpr int kVehicleModelInfoSize         = 0x308;
-constexpr int kMI_HashKey                   = 0x04;
-constexpr int kMI_TexDict                   = 0x0A;
-constexpr int kMI_ObjectNumber              = 0x0E;
-constexpr int kMI_ColModel                  = 0x14;
-constexpr int kMI_RwObject                  = 0x20;
-
-// CStreamingInfo layout (20 bytes):
-//   0x00: nextOnCd (int16)
-//   0x02: prevOnCd (int16)
-//   0x04: nextInImg (int16)
-//   0x06: prevInImg (int16)
-//   0x08: imgId (uint8)
-//   0x09: padding (uint8)
-//   0x0A: cdPosn (uint32) — sector offset within the IMG
-//   0x0E: cdSize (uint32) — size in sectors (streaming blocks)
-//   0x12: flags (uint8)
-//   0x13: padding (uint8)
-constexpr int kSI_NextOnCd  = 0x00;
-constexpr int kSI_PrevOnCd  = 0x02;
-constexpr int kSI_NextInImg = 0x04;
-constexpr int kSI_PrevInImg = 0x06;
-constexpr int kSI_ImgId     = 0x08;
-constexpr int kSI_CdPosn    = 0x0A;
-constexpr int kSI_CdSize    = 0x0E;
-constexpr int kSI_Flags     = 0x12;
-
-// TXD streaming IDs: TXD slot + 20000 (TXD stream base)
-constexpr int kTxdStreamBase = 20000;
-
-// ═══════════════════════════════════════════════════════════════════════
-// Function Typedefs
-// ═══════════════════════════════════════════════════════════════════════
-
-using AddImageToListFn         = int   (__cdecl*)(const char*, bool);
-using RequestModelFn           = void  (__cdecl*)(int, int);
-using LoadAllRequestedModelsFn = void  (__cdecl*)(bool);
-using HasModelLoadedFn         = bool  (__cdecl*)(int);
-using RemoveModelFn            = void  (__cdecl*)(int);
-using TxdAddSlotFn             = int   (__cdecl*)(const char*);
-using TxdFindSlotFn            = int   (__cdecl*)(const char*);
-using TxdAddRefFn              = void  (__cdecl*)(int);
-using TxdSetCurrentFn          = void  (__cdecl*)(int);
-using TxdRemoveSlotFn          = void  (__cdecl*)(int);
-using WorldAddFn               = void  (__cdecl*)(void*);
+using HasModelLoadedFn = bool (__cdecl*)(int);
 
 // ═══════════════════════════════════════════════════════════════════════
 // Logging
@@ -141,84 +91,46 @@ static void Log(const char* fmt, ...) {
 
 static constexpr int kMaxCustomVehicles = 8;
 
+// Metadata donor is Sultan (560) for every model, as certified in EXP-001 D5.
 static const VehicleDescriptor kDescriptors[] = {
-    { 612, "skr_xc60",  "Volvo XC60 2009", 400 },  // Landstalker (SUV donor)
-    { 613, "skr_m4gts", "BMW M4 GTS",      475 },  // Sabre (coupe donor)
+    { 612, "skr_xc60",  "Volvo XC60 2009", 560 },
+    { 613, "skr_m4gts", "BMW M4 GTS",      560 },
+    { 614, "skr_rs6c8", "Audi RS6",        560 },  // reserved: maps only once its asset is enabled
 };
 static constexpr int kNumDescriptors = sizeof(kDescriptors) / sizeof(kDescriptors[0]);
 
 struct VehicleSlot {
     const VehicleDescriptor* desc = nullptr;
-    uint8_t* modelInfo       = nullptr;  // Allocated CVehicleModelInfo clone
-    int      txdSlot         = -1;
-    bool     registered      = false;
-    bool     imgSetUp        = false;
+    uint8_t lastLoadState = 0;
+    DWORD   requestedAt   = 0;
+    bool    stallLogged   = false;
 };
 
 static VehicleSlot g_slots[kMaxCustomVehicles] = {};
 static int  g_numSlots    = 0;
 static bool g_initialized = false;
-static int  g_imgId       = -1;  // IMG archive index returned by AddImageToList
 
 // F9 spawn state
-static int  g_spawnIndex  = 0;   // cycles through registered vehicles
-static bool g_f9WasDown   = false;
-static bool g_f8WasDown   = false;
-static bool g_showDiag    = false;
-
-// IMG directory info: sector offsets for each file within skr_vehicles.img.
-// Must match the order in the IMG built by build_skr_img.ps1.
-struct ImgEntry {
-    const char* name;
-    uint32_t    sectorOffset;  // within the IMG (relative to IMG start)
-    uint32_t    sectorCount;
-};
-
-// These values must match the IMG builder output.
-// Header + directory = ceil((8 + 4*32) / 2048) = ceil(136/2048) = 1 sector.
-// Data starts at sector 1.
-static const ImgEntry kImgEntries[] = {
-    { "skr_xc60.dff",  1,           4208 },
-    { "skr_xc60.txd",  1 + 4208,    773  },
-    { "skr_m4gts.dff", 1 + 4208 + 773, 3728 },
-    { "skr_m4gts.txd", 1 + 4208 + 773 + 3728, 1332 },
-};
+static int   g_spawnIndex   = 0;   // cycles through registered vehicles
+static int   g_pendingSpawn = 0;   // model waiting for its stream, 0 = none
+static DWORD g_pendingSince = 0;
+static bool  g_f9WasDown    = false;
+static bool  g_f8WasDown    = false;
+static bool  g_showDiag     = false;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════
 
-static uint32_t GtaCrc32(const char* str) {
-    // GTA SA CRC-32 variant (CKeyGen::GetUppercaseKey 0x53CF70).
-    // Simplified: uppercase input, standard CRC-32, inverted final XOR.
-    // For our purposes a simple hash is sufficient since we're using
-    // unused model IDs.  We use a direct computation.
-    uint32_t hash = 0;
-    for (; *str; ++str) {
-        char c = *str;
-        if (c >= 'a' && c <= 'z') c -= 32;
-        hash += static_cast<uint8_t>(c);
-        hash += (hash << 10);
-        hash ^= (hash >> 6);
-    }
-    hash += (hash << 3);
-    hash ^= (hash >> 11);
-    hash += (hash << 15);
-    return hash;
+static uint8_t LoadState(int streamId) {
+    return *(reinterpret_cast<const uint8_t*>(kStreamingInfoArray) + streamId * kStreamingInfoSize + kSI_LoadState);
 }
 
-static void* GetModelInfoPtr(int modelId) {
-    auto** ptrs = reinterpret_cast<void**>(kModelInfoPtrs);
-    return ptrs[modelId];
-}
-
-static void SetModelInfoPtr(int modelId, void* ptr) {
-    auto** ptrs = reinterpret_cast<void**>(kModelInfoPtrs);
-    ptrs[modelId] = ptr;
-}
-
-static uint8_t* GetStreamingInfo(int streamId) {
-    return reinterpret_cast<uint8_t*>(kStreamingInfoArray) + streamId * kStreamingInfoSize;
+static VehicleSlot* FindSlot(int modelId) {
+    if (!g_initialized) return nullptr;
+    for (int i = 0; i < g_numSlots; ++i)
+        if (g_slots[i].desc && g_slots[i].desc->modelId == modelId) return &g_slots[i];
+    return nullptr;
 }
 
 static bool ReadPlayerPos(float& x, float& y, float& z, float& heading) {
@@ -241,198 +153,78 @@ static bool ReadPlayerPos(float& x, float& y, float& z, float& heading) {
     }
 }
 
-// Find the IMG entry index for a given filename (case-insensitive).
-static int FindImgEntry(const char* name) {
-    for (int i = 0; i < static_cast<int>(sizeof(kImgEntries)/sizeof(kImgEntries[0])); ++i) {
-        if (_stricmp(kImgEntries[i].name, name) == 0) return i;
+// Pool-allocated CAutomobile, placed on the ground and added to the world
+// (EXP-001 NativeConstruct + NativePlace). Model must already be loaded.
+static DWORD NativeSpawn(int modelId, float x, float y, float z, float heading, uint8_t** out) {
+    *out = nullptr;
+    __try {
+        bool found = false;
+        const float ground = reinterpret_cast<float (__cdecl*)(float, float, float, bool*, void**)>(
+            kFindGroundZ)(x, y, z + 3.0f, &found, nullptr);
+        void* memory = reinterpret_cast<void* (__cdecl*)(unsigned)>(kVehicleNew)(kAutomobileSize);
+        if (!memory) return 0xE0000001;
+        auto* v = static_cast<uint8_t*>(reinterpret_cast<void* (__thiscall*)(void*, int, uint8_t, bool)>(
+            kAutomobileCtor)(memory, modelId, kCreatedByMission, true));
+        const auto vtable = *reinterpret_cast<uintptr_t* const*>(v);
+        const float base = reinterpret_cast<float (__thiscall*)(void*)>(vtable[kVtableBaseHeight])(v);
+        const float finalZ = (found ? ground : z) + base + 0.1f;
+        reinterpret_cast<void (__thiscall*)(void*, float)>(kSetHeading)(v, heading);
+        auto* matrix = *reinterpret_cast<uint8_t**>(v + 0x14);
+        if (matrix) {
+            memcpy(matrix + 0x30, &x, 4); memcpy(matrix + 0x34, &y, 4); memcpy(matrix + 0x38, &finalZ, 4);
+        } else {
+            memcpy(v + 0x04, &x, 4); memcpy(v + 0x08, &y, 4); memcpy(v + 0x0C, &finalZ, 4);
+        }
+        v[0x36] = static_cast<uint8_t>((v[0x36] & 0x07) | kStatusAbandonedBits);
+        reinterpret_cast<void (__thiscall*)(void*, bool)>(vtable[kVtableSetIsStatic])(v, false);
+        reinterpret_cast<void (__thiscall*)(void*)>(kUpdateRW)(v);
+        reinterpret_cast<void (__thiscall*)(void*)>(kUpdateRwFrame)(v);
+        reinterpret_cast<void (__cdecl*)(void*)>(kWorldAdd)(v);
+        *out = v;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
     }
-    return -1;
+    return 0;
 }
-
-// ═══════════════════════════════════════════════════════════════════════
-// Registration
-// ═══════════════════════════════════════════════════════════════════════
-
-static bool RegisterImg() {
-    // Build the path relative to the GTA directory.
-    // The IMG is staged to <gta>\SKR\op215\skr_vehicles.img by the build system.
-    auto addImg = reinterpret_cast<AddImageToListFn>(kAddImageToList);
-    g_imgId = addImg("SKR\\op215\\skr_vehicles.img", false);
-    if (g_imgId < 0) {
-        Log("RegisterImg FAILED: AddImageToList returned %d", g_imgId);
-        return false;
-    }
-    Log("RegisterImg OK: imgId=%d", g_imgId);
-    return true;
-}
-
-static bool RegisterVehicle(VehicleSlot& slot) {
-    const auto* desc = slot.desc;
-
-    // 1. Register a TXD slot for this vehicle's textures.
-    auto txdAdd  = reinterpret_cast<TxdAddSlotFn>(kTxdAddSlot);
-    auto txdFind = reinterpret_cast<TxdFindSlotFn>(kTxdFindSlot);
-
-    slot.txdSlot = txdFind(desc->internalName);
-    if (slot.txdSlot < 0) {
-        slot.txdSlot = txdAdd(desc->internalName);
-    }
-    if (slot.txdSlot < 0) {
-        Log("RegisterVehicle(%d) FAILED: TXD slot allocation", desc->modelId);
-        return false;
-    }
-    Log("RegisterVehicle(%d): txdSlot=%d", desc->modelId, slot.txdSlot);
-
-    // 2. Clone the donor vehicle's CVehicleModelInfo.
-    auto* donorInfo = reinterpret_cast<uint8_t*>(GetModelInfoPtr(desc->donorModelId));
-    if (!donorInfo) {
-        Log("RegisterVehicle(%d) FAILED: donor %d has no model info", desc->modelId, desc->donorModelId);
-        return false;
-    }
-
-    slot.modelInfo = static_cast<uint8_t*>(malloc(kVehicleModelInfoSize));
-    if (!slot.modelInfo) {
-        Log("RegisterVehicle(%d) FAILED: malloc", desc->modelId);
-        return false;
-    }
-    memcpy(slot.modelInfo, donorInfo, kVehicleModelInfoSize);
-
-    // 3. Patch the cloned model info.
-    // Hash key — unique per model name.
-    *reinterpret_cast<uint32_t*>(slot.modelInfo + kMI_HashKey) = GtaCrc32(desc->internalName);
-    // TXD slot.
-    *reinterpret_cast<int16_t*>(slot.modelInfo + kMI_TexDict) = static_cast<int16_t>(slot.txdSlot);
-    // Model ID.
-    *reinterpret_cast<uint16_t*>(slot.modelInfo + kMI_ObjectNumber) = static_cast<uint16_t>(desc->modelId);
-    // Clear the RW object pointer — it will be populated when streamed.
-    *reinterpret_cast<uintptr_t*>(slot.modelInfo + kMI_RwObject) = 0;
-    // Collision: keep the donor's collision for now (prevents fall-through).
-    // The DFF's embedded collision will replace it on load.
-
-    // 4. Register in the global model info array.
-    SetModelInfoPtr(desc->modelId, slot.modelInfo);
-
-    // 5. Set up CStreamingInfo for the DFF.
-    char dffName[32], txdName[32];
-    snprintf(dffName, sizeof(dffName), "%s.dff", desc->internalName);
-    snprintf(txdName, sizeof(txdName), "%s.txd", desc->internalName);
-
-    int dffEntry = FindImgEntry(dffName);
-    int txdEntry = FindImgEntry(txdName);
-    if (dffEntry < 0 || txdEntry < 0) {
-        Log("RegisterVehicle(%d) FAILED: IMG entries not found (dff=%d txd=%d)",
-            desc->modelId, dffEntry, txdEntry);
-        return false;
-    }
-
-    // DFF streaming info (model ID = streaming ID for models < 20000).
-    auto* dffSi = GetStreamingInfo(desc->modelId);
-    *reinterpret_cast<int16_t*>(dffSi + kSI_NextOnCd)  = -1;
-    *reinterpret_cast<int16_t*>(dffSi + kSI_PrevOnCd)  = -1;
-    *reinterpret_cast<int16_t*>(dffSi + kSI_NextInImg)  = -1;
-    *reinterpret_cast<int16_t*>(dffSi + kSI_PrevInImg)  = -1;
-    *reinterpret_cast<uint8_t*>(dffSi + kSI_ImgId)     = static_cast<uint8_t>(g_imgId);
-    *reinterpret_cast<uint32_t*>(dffSi + kSI_CdPosn)   = kImgEntries[dffEntry].sectorOffset;
-    *reinterpret_cast<uint32_t*>(dffSi + kSI_CdSize)   = kImgEntries[dffEntry].sectorCount;
-    *reinterpret_cast<uint8_t*>(dffSi + kSI_Flags)     = 0;
-
-    // TXD streaming info (streaming ID = txdSlot + 20000).
-    int txdStreamId = slot.txdSlot + kTxdStreamBase;
-    auto* txdSi = GetStreamingInfo(txdStreamId);
-    *reinterpret_cast<int16_t*>(txdSi + kSI_NextOnCd)  = -1;
-    *reinterpret_cast<int16_t*>(txdSi + kSI_PrevOnCd)  = -1;
-    *reinterpret_cast<int16_t*>(txdSi + kSI_NextInImg)  = -1;
-    *reinterpret_cast<int16_t*>(txdSi + kSI_PrevInImg)  = -1;
-    *reinterpret_cast<uint8_t*>(txdSi + kSI_ImgId)     = static_cast<uint8_t>(g_imgId);
-    *reinterpret_cast<uint32_t*>(txdSi + kSI_CdPosn)   = kImgEntries[txdEntry].sectorOffset;
-    *reinterpret_cast<uint32_t*>(txdSi + kSI_CdSize)   = kImgEntries[txdEntry].sectorCount;
-    *reinterpret_cast<uint8_t*>(txdSi + kSI_Flags)     = 0;
-
-    slot.registered = true;
-    slot.imgSetUp   = true;
-    Log("RegisterVehicle(%d) OK: '%s' -> donor=%d txd=%d dffSector=%u txdSector=%u",
-        desc->modelId, desc->internalName, desc->donorModelId, slot.txdSlot,
-        kImgEntries[dffEntry].sectorOffset, kImgEntries[txdEntry].sectorOffset);
-    return true;
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// Spawn
-// ═══════════════════════════════════════════════════════════════════════
 
 static bool DoSpawn(int modelId) {
-    auto requestModel  = reinterpret_cast<RequestModelFn>(kRequestModel);
-    auto loadAll       = reinterpret_cast<LoadAllRequestedModelsFn>(kLoadAllRequestedModels);
-    auto hasLoaded     = reinterpret_cast<HasModelLoadedFn>(kHasModelLoaded);
-    auto worldAdd      = reinterpret_cast<WorldAddFn>(kWorldAdd);
-
-    // Request the model and its TXD.
-    requestModel(modelId, 2);  // flags=2: GAME_REQUIRED
-    loadAll(false);
-
-    // Synchronous wait (up to 5 seconds).
-    DWORD start = GetTickCount();
-    while (!hasLoaded(modelId)) {
-        if (GetTickCount() - start > 5000) {
-            Log("DoSpawn(%d) TIMEOUT waiting for model load", modelId);
-            return false;
-        }
-        Sleep(10);
-        loadAll(false);
+    if (!IsLoaded(modelId)) {
+        Log("DoSpawn(%d) REJECTED: model not loaded", modelId);
+        return false;
     }
-
     float px, py, pz, heading;
     if (!ReadPlayerPos(px, py, pz, heading)) {
         Log("DoSpawn(%d) FAILED: cannot read player position", modelId);
         return false;
     }
+    // 5 units in front of the player.
+    const float x = px - 5.0f * sinf(heading);
+    const float y = py + 5.0f * cosf(heading);
+    uint8_t* vehicle = nullptr;
+    const DWORD exception = NativeSpawn(modelId, x, y, pz, heading, &vehicle);
+    Log("DoSpawn(%d) %s vehicle=%p exception=0x%08lX at (%.1f, %.1f, %.1f)", modelId,
+        vehicle ? "OK" : "FAILED", vehicle, exception, x, y, pz);
+    return vehicle != nullptr;
+}
 
-    // Offset spawn 5 units in front of the player.
-    float spawnX = px - 5.0f * sinf(heading);
-    float spawnY = py + 5.0f * cosf(heading);
-    float spawnZ = pz + 0.5f;
-
-    // Allocate CAutomobile and call constructor.
-    auto* vehicle = static_cast<uint8_t*>(malloc(kAutomobileSize));
-    if (!vehicle) {
-        Log("DoSpawn(%d) FAILED: malloc CAutomobile", modelId);
-        return false;
-    }
-    memset(vehicle, 0, kAutomobileSize);
-
-    __try {
-        // CAutomobile::CAutomobile(int modelId, uint8_t createdBy)
-        // thiscall: ECX = this
-        auto ctor = kAutomobileCtor;
-        __asm {
-            push 2          // createdBy = MISSION_VEHICLE
-            push modelId
-            mov ecx, vehicle
-            call ctor
+// Gate D evidence: every CStreaming load-state transition of a mapped model.
+static void TrackLoadStates() {
+    for (int i = 0; i < g_numSlots; ++i) {
+        VehicleSlot& slot = g_slots[i];
+        const int id = slot.desc->modelId;
+        const uint8_t state = LoadState(id);
+        if (state != slot.lastLoadState) {
+            const int txd = registration::GetTxdStreamId(id);
+            Log("stream model=%d loadState %u -> %u txdState=%u elapsed=%lums", id, slot.lastLoadState, state,
+                txd >= 0 ? LoadState(txd) : 0xFF, slot.requestedAt ? GetTickCount() - slot.requestedAt : 0);
+            slot.lastLoadState = state;
         }
-
-        // Set position via the entity's CPlaceable::SetPosn equivalent.
-        // CEntity matrix is at offset 0x14 (pointer to CMatrix).
-        auto* matrix = *reinterpret_cast<float**>(vehicle + 0x14);
-        if (matrix) {
-            matrix[12] = spawnX;
-            matrix[13] = spawnY;
-            matrix[14] = spawnZ;
-        } else {
-            // CSimpleTransform at offset 0x04.
-            auto* pos = reinterpret_cast<float*>(vehicle + 0x04);
-            pos[0] = spawnX;
-            pos[1] = spawnY;
-            pos[2] = spawnZ;
+        if (state != 0 && state != 1 && slot.requestedAt && !slot.stallLogged &&
+            GetTickCount() - slot.requestedAt > kStallWarnMs) {
+            slot.stallLogged = true;
+            Log("stream model=%d still loadState=%u after %lums (no wait on main thread)", id, state,
+                GetTickCount() - slot.requestedAt);
         }
-
-        worldAdd(vehicle);
-        Log("DoSpawn(%d) OK at (%.1f, %.1f, %.1f)", modelId, spawnX, spawnY, spawnZ);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Log("DoSpawn(%d) EXCEPTION in vehicle constructor", modelId);
-        free(vehicle);
-        return false;
     }
 }
 
@@ -445,99 +237,80 @@ static bool DoSpawn(int modelId) {
 int Initialize() {
     if (g_initialized) return g_numSlots;
 
-    Log("=== OP215 Initialize ===");
-
-    // Ensure the SKR log directory exists.
-    char dir[MAX_PATH];
-    DWORD n = GetModuleFileNameA(nullptr, dir, MAX_PATH);
-    if (n && n < MAX_PATH) {
-        char* slash = strrchr(dir, '\\');
-        if (slash) {
-            snprintf(slash + 1, MAX_PATH - (slash + 1 - dir), "SKR\\");
-            CreateDirectoryA(dir, nullptr);
-            snprintf(slash + 1, MAX_PATH - (slash + 1 - dir), "SKR\\op215\\");
-            CreateDirectoryA(dir, nullptr);
-        }
-    }
-
-    if (!RegisterImg()) return 0;
+    const registration::Stage stage = registration::GetStage();
+    const size_t intact = registration::RecheckMappings();
+    Log("=== OP215 Initialize === tid=%lu stage=%s intact=%u", GetCurrentThreadId(),
+        registration::StageName(stage), static_cast<unsigned>(intact));
 
     g_numSlots = 0;
     for (int i = 0; i < kNumDescriptors && g_numSlots < kMaxCustomVehicles; ++i) {
-        auto& slot = g_slots[g_numSlots];
-        slot.desc = &kDescriptors[i];
-        if (RegisterVehicle(slot)) {
-            ++g_numSlots;
-        } else {
-            slot.desc = nullptr;
-        }
+        const auto* desc = &kDescriptors[i];
+        const registration::Resource resource = registration::GetResource(desc->modelId);
+        const bool mapped = registration::IsMapped(desc->modelId);
+        Log("model %d '%s' resource=%s mapped=%u%s", desc->modelId, desc->displayName,
+            registration::ResourceName(resource), mapped, mapped ? "" : " -> proxy fallback");
+        if (!mapped) continue;
+        g_slots[g_numSlots] = {};
+        g_slots[g_numSlots].desc = desc;
+        g_slots[g_numSlots].lastLoadState = LoadState(desc->modelId);
+        ++g_numSlots;
     }
 
     g_initialized = (g_numSlots > 0);
-    Log("Initialize complete: %d vehicles registered", g_numSlots);
+    Log("Initialize complete: %d vehicles mapped via SAMP\\CUSTOM.IMG", g_numSlots);
     return g_numSlots;
 }
 
 void Shutdown() {
+    // Descriptors live in the relocated GTA store and streaming entries belong
+    // to CStreaming: nothing to free here, and no engine calls off-thread.
     if (!g_initialized) return;
     Log("=== OP215 Shutdown ===");
-
-    auto removeModel = reinterpret_cast<RemoveModelFn>(kRemoveModel);
-    auto txdRemove   = reinterpret_cast<TxdRemoveSlotFn>(kTxdRemoveSlot);
-
-    for (int i = 0; i < g_numSlots; ++i) {
-        auto& slot = g_slots[i];
-        if (!slot.desc) continue;
-
-        if (slot.registered) {
-            removeModel(slot.desc->modelId);
-            SetModelInfoPtr(slot.desc->modelId, nullptr);
-        }
-        if (slot.txdSlot >= 0) {
-            txdRemove(slot.txdSlot);
-        }
-        free(slot.modelInfo);
-        slot = {};
-    }
-
     g_numSlots = 0;
+    g_pendingSpawn = 0;
     g_initialized = false;
 }
 
 bool IsInitialized() { return g_initialized; }
 
+bool IsRegistered(int modelId) {
+    return FindSlot(modelId) != nullptr && registration::IsMapped(modelId);
+}
+
 void RequestLoad(int modelId) {
-    auto requestModel = reinterpret_cast<RequestModelFn>(kRequestModel);
-    requestModel(modelId, 2);
+    VehicleSlot* slot = FindSlot(modelId);
+    if (!slot || !registration::IsMapped(modelId)) {
+        Log("RequestLoad(%d) REJECTED: model not registered in OP215", modelId);
+        return;
+    }
+    if (registration::GetResource(modelId) != registration::Resource::Registered) return;  // in flight or ready
+    if (!slot->requestedAt) slot->requestedAt = GetTickCount();
+    slot->stallLogged = false;
+    registration::Request(modelId);  // issued by registration::Tick, one custom model at a time
 }
 
 bool IsLoaded(int modelId) {
+    if (!IsRegistered(modelId) || !registration::IsReady(modelId)) return false;
     auto hasLoaded = reinterpret_cast<HasModelLoadedFn>(kHasModelLoaded);
     return hasLoaded(modelId);
 }
 
 bool SpawnAtPlayer(int modelId) {
-    if (!g_initialized) return false;
-    bool found = false;
-    for (int i = 0; i < g_numSlots; ++i) {
-        if (g_slots[i].desc && g_slots[i].desc->modelId == modelId) {
-            found = true; break;
-        }
-    }
-    if (!found) return false;
-    return DoSpawn(modelId);
+    if (!IsRegistered(modelId)) return false;
+    if (IsLoaded(modelId)) return DoSpawn(modelId);
+    RequestLoad(modelId);
+    g_pendingSpawn = modelId;
+    g_pendingSince = GetTickCount();
+    Log("SpawnAtPlayer(%d) deferred until streamed", modelId);
+    return false;
 }
 
 DiagInfo GetDiag(int modelId) {
-    DiagInfo info = { modelId, false, false, false, g_imgId >= 0 };
-    for (int i = 0; i < g_numSlots; ++i) {
-        if (g_slots[i].desc && g_slots[i].desc->modelId == modelId) {
-            info.registered  = g_slots[i].registered;
-            info.txdLoaded   = (g_slots[i].txdSlot >= 0);
-            auto hasLoaded   = reinterpret_cast<HasModelLoadedFn>(kHasModelLoaded);
-            info.modelLoaded = hasLoaded(modelId);
-            break;
-        }
+    DiagInfo info = { modelId, false, false, false, registration::GetStage() == registration::Stage::Mapped };
+    if (IsRegistered(modelId)) {
+        info.registered  = true;
+        info.txdLoaded   = registration::GetTxdStreamId(modelId) >= 0;
+        info.modelLoaded = IsLoaded(modelId);
     }
     return info;
 }
@@ -552,9 +325,23 @@ const VehicleDescriptor* GetDescriptor(int index) {
 void Tick() {
     if (!g_initialized || g_numSlots == 0) return;
 
+    registration::Tick();
+    TrackLoadStates();
+
+    if (g_pendingSpawn) {
+        if (IsLoaded(g_pendingSpawn)) {
+            const int model = g_pendingSpawn;
+            g_pendingSpawn = 0;
+            DoSpawn(model);
+        } else if (GetTickCount() - g_pendingSince > kSpawnWaitMs) {
+            Log("F9 spawn model=%d abandoned: not streamed after %lums", g_pendingSpawn, kSpawnWaitMs);
+            g_pendingSpawn = 0;
+        }
+    }
+
     // F9: cycle spawn through registered vehicles.
     bool f9Down = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
-    if (f9Down && !g_f9WasDown) {
+    if (f9Down && !g_f9WasDown && !g_pendingSpawn) {
         int idx = g_spawnIndex % g_numSlots;
         auto* desc = g_slots[idx].desc;
         if (desc) {
@@ -565,10 +352,14 @@ void Tick() {
     }
     g_f9WasDown = f9Down;
 
-    // F8: toggle diagnostics overlay.
+    // F8: toggle diagnostics logging.
     bool f8Down = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
     if (f8Down && !g_f8WasDown) {
         g_showDiag = !g_showDiag;
+        for (int i = 0; i < g_numSlots; ++i) {
+            const int id = g_slots[i].desc->modelId;
+            Log("F8 diag model=%d loadState=%u loaded=%u", id, LoadState(id), IsLoaded(id));
+        }
     }
     g_f8WasDown = f8Down;
 }

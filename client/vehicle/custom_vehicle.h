@@ -2,8 +2,9 @@
 // ─────────────────────────────────────────────────────────────────────
 // OP215 — SKR Enhanced Custom Vehicle System
 // ─────────────────────────────────────────────────────────────────────
-// Registers custom vehicle models (IDs 612+) at runtime without
-// modifying any original GTA SA model (400–611).
+// Custom vehicle models (IDs 612+) are registered before the first frame
+// through SAMP\CUSTOM.IMG (operation215/native_vehicle_registration.h); no original GTA SA
+// model (400–611) is modified and no extra IMG archive is added.
 //
 // GTA SA 1.0 US (x86).  SA-MP 0.3.7-R5.
 // ─────────────────────────────────────────────────────────────────────
@@ -21,7 +22,7 @@ struct VehicleDescriptor {
     int         modelId;        // e.g. 612, 613
     const char* internalName;   // e.g. "skr_xc60" — also DFF/TXD base name in the IMG
     const char* displayName;    // e.g. "Volvo XC60 2009"
-    int         donorModelId;   // existing vehicle to clone model info from (e.g. 400 = Landstalker)
+    int         donorModelId;   // metadata/handling donor (560 = Sultan, certified in EXP-001 D5)
 };
 
 // Diagnostics snapshot for F8 overlay.
@@ -30,29 +31,32 @@ struct DiagInfo {
     bool registered;    // model info entry exists
     bool txdLoaded;     // TXD slot registered
     bool modelLoaded;   // DFF streamed in
-    bool imgRegistered; // IMG added to streaming list
+    bool imgRegistered; // CUSTOM.IMG scan mapped and verified
 };
 
-// Call once after SA-MP has finished initialization (samp.dll state == 5).
-// Registers the custom IMG and all vehicle descriptors.
-// Returns the number of vehicles successfully registered.
+// Call once on the GTA thread (first CGame::Process tick). Adopts the models
+// mapped during the CUSTOM.IMG scan. Returns the number of mapped vehicles.
 int  Initialize();
 
-// Tear down — unload custom models, free allocations.
+// Tear down module state (engine-owned descriptors are left in place).
 void Shutdown();
 
 // Whether Initialize() completed successfully.
 bool IsInitialized();
 
+// Whether a model ID is registered in the OP215 descriptor table.
+bool IsRegistered(int modelId);
+
 // Request streaming load of a custom vehicle.  Non-blocking.
+// Rejected if the model is not registered.
 void RequestLoad(int modelId);
 
 // Check if a custom vehicle model is fully streamed.
 bool IsLoaded(int modelId);
 
-// Spawn a custom vehicle at the player's position.
-// Returns true if the vehicle was created and added to the world.
-// Requires the model to be loaded (calls RequestLoad + sync load internally).
+// Spawn a custom vehicle in front of the player (pool-allocated CAutomobile).
+// Returns true if it was created now; if the model is not streamed yet it is
+// requested and the spawn happens on a later Tick (never waits).
 bool SpawnAtPlayer(int modelId);
 
 // F8 diagnostic info for the overlay.

@@ -21,6 +21,7 @@
 #include "bootstrap/init_state.h"
 #ifdef SKR_OP215
 #include "vehicle/custom_vehicle.h"
+#include "operation215/native_vehicle_registration.h"
 #endif
 
 namespace {
@@ -98,6 +99,15 @@ extern "C" __declspec(dllexport) BOOL __cdecl SkrInitialize() noexcept {
         started.store(false);
         return FALSE;
     }
+#ifdef SKR_OP215
+    // Operation 215, before samp.dll and before GTA resumes: relocate the vehicle store and
+    // hook the CUSTOM.IMG directory scan. Fails only on a partial code patch.
+    if (!skr::operation215::PrepareBeforeResume()) {
+        g_initialization.Fail(skr::bootstrap::InitializationError::SAMP_PRELOAD_FAILED);
+        started.store(false);
+        return FALSE;
+    }
+#endif
     skr::samp_loader::ConnectParams selected{g_launchParams.serverAddress,
         g_launchParams.serverPort, g_launchParams.playerName};
     if (!skr::samp_loader::PreloadSamp(&selected)) {

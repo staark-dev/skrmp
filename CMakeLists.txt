@@ -58,7 +58,11 @@ option(SKR_EXTERNAL_LOBBY "Experimental WebView2 lobby before GTA startup" OFF)
 option(SKR_TEST_CERTIFICATION "TEST_ONLY: Enable experimental Hoodlum certification for controlled runtime testing. NEVER use in production builds." OFF)
 option(SKR_OP215 "OP215: Custom vehicle loading (experimental)" OFF)
 if(SKR_OP215)
-  set(SKR_OP215_SOURCES client/vehicle/custom_vehicle.cpp)
+  set(SKR_OP215_SOURCES
+    client/vehicle/custom_vehicle.cpp
+    client/operation215/native_vehicle_registration.cpp
+    client/operation215/op215_preconditions.cpp
+    client/operation213/vehicle_store_relocation.cpp)
   message(STATUS "OP215 custom vehicle system enabled")
 else()
   set(SKR_OP215_SOURCES "")
@@ -422,6 +426,10 @@ target_link_libraries(SKRFakeGame PRIVATE SKRShared ws2_32)
 
 add_executable(SKRLaunchIpcTests tests/unit/test_launch_ipc.cpp)
 target_include_directories(SKRLaunchIpcTests PRIVATE ${CMAKE_SOURCE_DIR}/shared)
+# Operation 215 pure validators (ported verbatim from SKR-EXP-001).
+add_executable(OP215PreconditionTests tests/unit/test_op215_preconditions.cpp client/operation215/op215_preconditions.cpp)
+target_include_directories(OP215PreconditionTests PRIVATE ${CMAKE_SOURCE_DIR}/client)
+add_test(NAME OP215PreconditionTests COMMAND OP215PreconditionTests)
 add_executable(SKRHandoffTests tests/unit/test_handoff.cpp client/render-d3d9/present_chain.cpp)
 target_include_directories(SKRHandoffTests PRIVATE ${CMAKE_SOURCE_DIR}/client ${CMAKE_SOURCE_DIR}/shared ${CMAKE_SOURCE_DIR}/apps/launcher)
 target_link_libraries(SKRHandoffTests PRIVATE d3d9)

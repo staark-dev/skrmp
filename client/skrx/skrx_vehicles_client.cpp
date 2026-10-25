@@ -72,6 +72,13 @@ VehiclesClientState g_state;
 
 // ── CVehiclePool::Create hook ──────────────────────────────────────
 // samp.dll R5 RVA 0x1F080: BOOL __thiscall CVehiclePool::Create(VehicleInfo* pInfo)
+// __thiscall: ECX = CVehiclePool*, stack arg = VehicleInfo*, returns via RET 4.
+//
+// ACTUAL R5 PROLOG (verified from pinned samp.dll SHA-256 B72B5D…53A2):
+//   56              push esi              (1 byte)
+//   8B 74 24 08     mov esi, [esp+8]      (4 bytes)
+// = 5 bytes, instruction-aligned, no relative branches — safe to relocate.
+// The function is compiled WITHOUT a frame pointer (optimized frameless).
 //
 // VehicleInfo is pack(1).  Layout:
 //   offset 0: m_nId   (uint16_t) — SA-MP vehicle pool slot
@@ -82,6 +89,10 @@ VehiclesClientState g_state;
 // intercepts m_nType BEFORE the function body runs.
 constexpr DWORD kRVA_VehiclePoolCreate = 0x1F080;
 
+// PE fingerprint for samp.dll R5 — verified before hooking.
+constexpr DWORD kSampR5_TimeDateStamp = 0x6372C39E;
+constexpr DWORD kSampR5_SizeOfImage   = 0x27E000;
+
 // pack(1) offsets within VehicleInfo — derived from samp-api CVehiclePool.h
 constexpr int kVI_Id   = 0;  // uint16_t m_nId
 constexpr int kVI_Type = 2;  // int32_t  m_nType (model ID)
@@ -89,6 +100,7 @@ constexpr int kVI_Type = 2;  // int32_t  m_nType (model ID)
 using CreateOrigFn = int(__thiscall*)(void* thisPtr, void* pInfo);
 
 static uint8_t* g_trampoline = nullptr;
+static uint8_t  g_savedProlog[5] = {};
 
 // GTA SA CStreaming::HasModelLoaded (0x4044C0) — quick check without OP215 dependency.
 constexpr uintptr_t kHasModelLoaded = 0x4044C0;
@@ -107,30 +119,31 @@ int __fastcall HookedCreate(void* thisPtr, void* /*edx*/, void* pInfo) {
     if (pInfo) {
         auto* info = static_cast<uint8_t*>(pInfo);
 
-        // Read VehicleInfo fields (pack(1) layout).
         uint16_t poolId = *reinterpret_cast<uint16_t*>(info + kVI_Id);
         int32_t  modelId = *reinterpret_cast<int32_t*>(info + kVI_Type);
 
+        Log("HOOK enter pool=%d model=%d tid=%lu tick=%lu",
+            poolId, modelId, GetCurrentThreadId(), GetTickCount());
+
         uint16_t customModel = GetAssignedModel(poolId);
         if (customModel && modelId != static_cast<int32_t>(customModel)) {
-            // Check OP215 model readiness before swapping.
-            // If the custom model isn't streamed in, the CAutomobile ctor will
-            // crash (null RwObject).  In that case, keep the proxy model —
-            // the vehicle appears as the proxy until the model loads, and the
-            // server's next stream-in or respawn will re-trigger.
             bool modelReady = false;
 
 #ifdef SKR_OP215
-            modelReady = skr::vehicle::IsInitialized()
-                      && skr::vehicle::IsLoaded(static_cast<int>(customModel));
-            if (!modelReady && skr::vehicle::IsInitialized()) {
-                // Request asynchronous load for next attempt.
-                skr::vehicle::RequestLoad(static_cast<int>(customModel));
+            if (skr::vehicle::IsInitialized()) {
+                if (skr::vehicle::IsRegistered(static_cast<int>(customModel))) {
+                    modelReady = skr::vehicle::IsLoaded(static_cast<int>(customModel));
+                    if (!modelReady) {
+                        skr::vehicle::RequestLoad(static_cast<int>(customModel));
+                    }
+                } else {
+                    Log("HOOK reject pool=%d model=%d: not registered in OP215",
+                        poolId, customModel);
+                }
             }
 #endif
 
             if (modelReady) {
-                // NATIVE-FIRST swap: replace proxy with real model.
                 *reinterpret_cast<int32_t*>(info + kVI_Type) = static_cast<int32_t>(customModel);
                 ++g_state.swapCount;
                 Log("HOOK swap pool=%d proxy=%d -> model=%d swaps=%d",
@@ -141,29 +154,31 @@ int __fastcall HookedCreate(void* thisPtr, void* /*edx*/, void* pInfo) {
                     poolId, modelId, customModel, g_state.deferCount);
             }
         } else {
-            // Ordinary vehicle (no assignment, or already correct model).
             Log("HOOK pass pool=%d model=%d (no swap needed)", poolId, modelId);
         }
+
+        Log("HOOK exit pool=%d tick=%lu", poolId, GetTickCount());
     }
 
     return reinterpret_cast<CreateOrigFn>(g_trampoline)(thisPtr, pInfo);
 }
 
 // ── Trampoline construction ────────────────────────────────────────
-// CVehiclePool::Create R5 entry bytes (verified against pinned binary):
-//   55              push ebp
-//   8B EC           mov ebp, esp
-//   83 EC 08        sub esp, 8
-// = 6 bytes, no relative branches — safe to relocate.
-constexpr int kPrologSize = 6;
-static const uint8_t kExpectedProlog[] = {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08};
+// CVehiclePool::Create R5 actual entry bytes (verified against pinned
+// samp.dll R5 SHA-256 B72B5DBE…):
+//   56              push esi                     (1 byte)
+//   8B 74 24 08     mov esi, [esp+8]             (4 bytes)
+// = 5 bytes, instruction-aligned, no relative branches — safe to relocate.
+constexpr int kPrologSize = 5;
+static const uint8_t kExpectedProlog[] = {0x56, 0x8B, 0x74, 0x24, 0x08};
 
 bool BuildTrampoline(uintptr_t target) {
     auto* fn = reinterpret_cast<uint8_t*>(target);
 
     if (memcmp(fn, kExpectedProlog, kPrologSize) != 0) {
-        Log("HOOK prolog mismatch at 0x%p: %02X %02X %02X %02X %02X %02X",
-            fn, fn[0], fn[1], fn[2], fn[3], fn[4], fn[5]);
+        Log("HOOK prolog mismatch at 0x%p: %02X %02X %02X %02X %02X"
+            " (expected 56 8B 74 24 08)",
+            fn, fn[0], fn[1], fn[2], fn[3], fn[4]);
         return false;
     }
 
@@ -174,30 +189,32 @@ bool BuildTrampoline(uintptr_t target) {
         return false;
     }
 
-    // Copy original prolog bytes.
+    memcpy(g_savedProlog, fn, kPrologSize);
     memcpy(g_trampoline, fn, kPrologSize);
 
-    // JMP rel32 to original + kPrologSize.
+    // JMP rel32 back to original + kPrologSize.
     g_trampoline[kPrologSize] = 0xE9;
     int32_t jmpOffset = static_cast<int32_t>(
         (target + kPrologSize) - (reinterpret_cast<uintptr_t>(g_trampoline) + kPrologSize + 5));
     *reinterpret_cast<int32_t*>(g_trampoline + kPrologSize + 1) = jmpOffset;
 
-    Log("HOOK trampoline at 0x%p -> original+%d (0x%p)",
-        g_trampoline, kPrologSize, reinterpret_cast<void*>(target + kPrologSize));
+    Log("HOOK trampoline at 0x%p: %02X %02X %02X %02X %02X E9 -> 0x%p",
+        g_trampoline,
+        g_trampoline[0], g_trampoline[1], g_trampoline[2],
+        g_trampoline[3], g_trampoline[4],
+        reinterpret_cast<void*>(target + kPrologSize));
     return true;
 }
 
 bool WriteDetour(uintptr_t target) {
     auto* fn = reinterpret_cast<uint8_t*>(target);
 
-    // Build the 6-byte patch: E9 rel32 + 90 (NOP).
-    uint8_t patch[6];
+    // 5-byte patch: E9 rel32 — exactly matches kPrologSize, no NOP needed.
+    uint8_t patch[kPrologSize];
     patch[0] = 0xE9;
     int32_t detourOffset = static_cast<int32_t>(
         reinterpret_cast<uintptr_t>(&HookedCreate) - (target + 5));
     *reinterpret_cast<int32_t*>(patch + 1) = detourOffset;
-    patch[5] = 0x90;
 
     DWORD old = 0;
     if (!VirtualProtect(fn, kPrologSize, PAGE_EXECUTE_READWRITE, &old)) {
@@ -459,8 +476,32 @@ void OnVehiclesMessage(const GatewayHeader& hdr,
     }
 }
 
+static bool VerifySampPE(uintptr_t sampBase) {
+    auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(sampBase);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        Log("HOOK PE check: bad DOS signature at 0x%p", reinterpret_cast<void*>(sampBase));
+        return false;
+    }
+    auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(sampBase + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) {
+        Log("HOOK PE check: bad NT signature");
+        return false;
+    }
+    DWORD ts = nt->FileHeader.TimeDateStamp;
+    DWORD sz = nt->OptionalHeader.SizeOfImage;
+    Log("HOOK PE check: TimeDateStamp=0x%08X SizeOfImage=0x%X", ts, sz);
+    if (ts != kSampR5_TimeDateStamp || sz != kSampR5_SizeOfImage) {
+        Log("HOOK PE check FAILED: expected TS=0x%08X Sz=0x%X — unsupported samp.dll",
+            kSampR5_TimeDateStamp, kSampR5_SizeOfImage);
+        return false;
+    }
+    return true;
+}
+
 bool InstallVehiclePoolHook(uintptr_t sampBase) {
     if (g_state.hookInstalled) return true;
+
+    if (!VerifySampPE(sampBase)) return false;
 
     uintptr_t target = sampBase + kRVA_VehiclePoolCreate;
 
@@ -479,10 +520,10 @@ bool InstallVehiclePoolHook(uintptr_t sampBase) {
     }
 
     g_state.hookInstalled = true;
-    Log("HOOK installed: trampoline=0x%p prolog=%02X%02X%02X%02X%02X%02X",
+    Log("HOOK installed: trampoline=0x%p prolog=%02X%02X%02X%02X%02X",
         g_trampoline,
         g_trampoline[0], g_trampoline[1], g_trampoline[2],
-        g_trampoline[3], g_trampoline[4], g_trampoline[5]);
+        g_trampoline[3], g_trampoline[4]);
     return true;
 }
 
